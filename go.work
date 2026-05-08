@@ -1,0 +1,19 @@
+go 1.26.1
+
+use (
+	.
+	./cmd/neo
+	./cmd/neo-mcp
+	./cmd/neo-tui
+	./pkg/astx
+	./pkg/config
+	./pkg/mctx
+	./pkg/memx
+	./pkg/mesh
+	./pkg/observability
+	./pkg/rag
+	./pkg/swarm
+	./pkg/telemetry
+	./pkg/tensorx
+	./pkg/wasmx
+)

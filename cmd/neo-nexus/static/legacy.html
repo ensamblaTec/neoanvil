@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEO-GO Operator HUD</title>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #c9d1d9;
+    --muted:    #8b949e;
+    --accent:   #58a6ff;
+    --green:    #3fb950;
+    --red:      #f85149;
+    --orange:   #d29922;
+    --purple:   #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 15px; letter-spacing: 0.05em; color: var(--accent); }
+  #conn-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: var(--red); color: #fff; transition: background .3s; }
+  #conn-badge.live { background: var(--green); }
+  /* [SRE-56.2] Epic closure banner */
+  #wisdom-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: linear-gradient(135deg, #2d1b69, #4a1a8c); border-bottom: 2px solid var(--purple); padding: 12px 24px; color: #fff; font-size: 13px; font-weight: 600; align-items: center; gap: 16px; animation: slideDown .4s ease; }
+  #wisdom-banner.show { display: flex; }
+  #wisdom-banner .banner-icon { font-size: 22px; }
+  #wisdom-banner .banner-msg { flex: 1; }
+  #wisdom-banner .banner-cmds { font-size: 11px; opacity: .8; font-family: monospace; background: rgba(0,0,0,.3); padding: 3px 8px; border-radius: 4px; }
+  #wisdom-banner button { background: rgba(255,255,255,.15); color: #fff; padding: 4px 14px; font-size: 11px; border: 1px solid rgba(255,255,255,.3); border-radius: 4px; }
+  /* [SRE-61.3] Oracle alert banner — amber/orange, distinct from wisdom-banner purple */
+  #oracle-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 999; background: linear-gradient(135deg, #7c3a00, #c45e00); border-bottom: 2px solid #ff8c00; padding: 12px 24px; color: #fff; font-size: 13px; font-weight: 600; align-items: center; gap: 16px; animation: slideDown .4s ease; }
+  #oracle-banner.show { display: flex; }
+  #oracle-banner .banner-icon { font-size: 22px; }
+  #oracle-banner .banner-msg { flex: 1; }
+  #oracle-banner .banner-prob { font-size: 11px; font-family: monospace; background: rgba(0,0,0,.3); padding: 3px 8px; border-radius: 4px; }
+  #oracle-banner button { background: rgba(255,255,255,.15); color: #fff; padding: 4px 14px; font-size: 11px; border: 1px solid rgba(255,255,255,.3); border-radius: 4px; }
+  /* [SRE-63.2] Suggest-compress banner — bright amber, distinct from oracle dark-orange */
+  #compress-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 998; background: linear-gradient(135deg, #7a5c00, #c49a00); border-bottom: 2px solid #f0c040; padding: 12px 24px; color: #fff; font-size: 13px; font-weight: 600; align-items: center; gap: 16px; animation: slideDown .4s ease; }
+  #compress-banner.show { display: flex; }
+  #compress-banner .banner-icon { font-size: 22px; }
+  #compress-banner .banner-msg { flex: 1; }
+  #compress-banner .banner-pct { font-size: 11px; font-family: monospace; background: rgba(0,0,0,.3); padding: 3px 8px; border-radius: 4px; }
+  #compress-banner button { background: rgba(255,255,255,.15); color: #fff; padding: 4px 14px; font-size: 11px; border: 1px solid rgba(255,255,255,.3); border-radius: 4px; }
+  /* [SRE-57.2] Thermal rollback banner — deep crimson, highest operational severity */
+  #thermal-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 997; background: linear-gradient(135deg, #5c0011, #a80020); border-bottom: 2px solid #ff4060; padding: 12px 24px; color: #fff; font-size: 13px; font-weight: 600; align-items: center; gap: 16px; animation: slideDown .4s ease; }
+  #thermal-banner.show { display: flex; }
+  /* [SRE-57.3] OOM guard banner — deep orange-red */
+  #oom-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 996; background: linear-gradient(135deg, #5c2a00, #b05000); border-bottom: 2px solid #ff6020; padding: 12px 24px; color: #fff; font-size: 13px; font-weight: 600; align-items: center; gap: 16px; animation: slideDown .4s ease; }
+  #oom-banner.show { display: flex; }
+  /* [SRE-40] Policy veto banner — red */
+  #veto-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 995; background: linear-gradient(135deg, #3d0000, #8b0000); border-bottom: 2px solid var(--red); padding: 12px 24px; color: #fff; font-size: 13px; font-weight: 600; align-items: center; gap: 16px; animation: slideDown .4s ease; }
+  #veto-banner.show { display: flex; }
+  #thermal-banner .banner-icon, #oom-banner .banner-icon, #veto-banner .banner-icon { font-size: 22px; }
+  #thermal-banner .banner-msg, #oom-banner .banner-msg, #veto-banner .banner-msg { flex: 1; }
+  #thermal-banner .banner-detail, #oom-banner .banner-detail, #veto-banner .banner-detail { font-size: 11px; font-family: monospace; background: rgba(0,0,0,.3); padding: 3px 8px; border-radius: 4px; }
+  #thermal-banner button, #oom-banner button, #veto-banner button { background: rgba(255,255,255,.15); color: #fff; padding: 4px 14px; font-size: 11px; border: 1px solid rgba(255,255,255,.3); border-radius: 4px; }
+  /* Ops Log panel */
+  .syslog-section { padding: 0 20px 16px; }
+  .tag.warn  { background: #3d2e00; color: var(--orange); }
+  .tag.info  { background: #0d1e33; color: var(--accent); }
+  .tag.veto  { background: #3d0000; color: var(--red); }
+  .tag.ghost { background: #1a1a3d; color: var(--purple); }
+  @keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; }
+  .card-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+  .card-value { font-size: 26px; font-weight: 700; color: var(--accent); }
+  .card-value.warn { color: var(--orange); }
+  .card-value.alert { color: var(--red); }
+  .card-value.ok   { color: var(--green); }
+  .feeds { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 20px 16px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel-header { padding: 10px 16px; background: var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .feed-list { list-style: none; max-height: 220px; overflow-y: auto; }
+  .feed-list li { padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: baseline; }
+  .feed-list li:last-child { border-bottom: none; }
+  .tag { padding: 1px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+  .tag.pass  { background: #1a3d2a; color: var(--green); }
+  .tag.fail  { background: #3d1a1a; color: var(--red); }
+  .tag.flash { background: #2a1a3d; color: var(--purple); }
+  .feed-text { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .feed-time { color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .mcts-section { padding: 0 20px 16px; }
+  #mcts-svg { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: block; min-height: 200px; }
+  .controls { display: flex; align-items: center; gap: 12px; padding: 0 20px 20px; }
+  button { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; transition: opacity .15s; }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  #btn-chaos  { background: var(--red);    color: #fff; }
+  #btn-snap   { background: var(--accent); color: #000; }
+  #chaos-out  { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); max-height: 90px; overflow-y: auto; font-size: 11px; white-space: pre-wrap; }
+  .snapshot-section { padding: 0 20px 20px; }
+  #snap-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #snap-table th, #snap-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  #snap-table th { color: var(--muted); font-weight: 400; font-size: 10px; text-transform: uppercase; background: var(--surface); }
+  #snap-table td { color: var(--text); }
+  .empty { color: var(--muted); font-style: italic; padding: 16px; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- [SRE-57.2] Thermal rollback banner — critical: git stash was triggered by sustained RAPL>80W -->
+<div id="thermal-banner">
+  <span class="banner-icon">🌡️</span>
+  <span class="banner-msg" id="thermal-banner-msg">THERMAL ROLLBACK — git stash triggered por RAPL sostenido.</span>
+  <span class="banner-detail" id="thermal-banner-detail"></span>
+  <button onclick="dismissThermal()">Dismiss</button>
+</div>
+
+<!-- [SRE-57.3] OOM guard banner — heap exceeded threshold, forced GC + FreeOSMemory -->
+<div id="oom-banner">
+  <span class="banner-icon">💥</span>
+  <span class="banner-msg" id="oom-banner-msg">OOM GUARD — heap excedido, GC forzado.</span>
+  <span class="banner-detail" id="oom-banner-detail"></span>
+  <button onclick="dismissOOM()">Dismiss</button>
+</div>
+
+<!-- [SRE-40] Policy veto banner — constitutional rule blocked an agent action -->
+<div id="veto-banner">
+  <span class="banner-icon">🚫</span>
+  <span class="banner-msg" id="veto-banner-msg">POLICY VETO — acción bloqueada por constitución.</span>
+  <span class="banner-detail" id="veto-banner-detail"></span>
+  <button onclick="dismissVeto()">Dismiss</button>
+</div>
+
+<!-- [SRE-63.2] Suggest-compress banner — shown in bright amber when context IO exceeds threshold -->
+<div id="compress-banner">
+  <span class="banner-icon">📦</span>
+  <span class="banner-msg" id="compress-banner-msg">Contexto al límite — ejecutar neo_compress_context.</span>
+  <span class="banner-pct" id="compress-banner-pct"></span>
+  <button onclick="dismissCompress()">Dismiss</button>
+</div>
+
+<!-- [SRE-61.3] Oracle alert banner — shown in amber when failure probability > 75% -->
+<div id="oracle-banner">
+  <span class="banner-icon">⚠️</span>
+  <span class="banner-msg" id="oracle-banner-msg">Riesgo de saturación detectado.</span>
+  <span class="banner-prob" id="oracle-banner-prob"></span>
+  <button onclick="dismissOracle()">Dismiss</button>
+</div>
+
+<!-- [SRE-56.2] Epic closure banner — shown in purple when EventSuggestCommit fires -->
+<div id="wisdom-banner">
+  <span class="banner-icon">🔮</span>
+  <span class="banner-msg">Epic complete — save your wisdom before it fades.</span>
+  <span class="banner-cmds">neo_memory_commit → git commit</span>
+  <button onclick="dismissWisdom()">Dismiss</button>
+</div>
+
+<header>
+  <h1>🧠 NEO-GO OPERATOR HUD</h1>
+  <span id="conn-badge">OFFLINE</span>
+</header>
+
+<div class="metrics">
+  <div class="card">
+    <div class="card-label">RAPL Watts</div>
+    <div class="card-value" id="m-watts">—</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Goroutines</div>
+    <div class="card-value" id="m-goroutines">—</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Mode</div>
+    <div class="card-value ok" id="m-mode">—</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Thermal State</div>
+    <div class="card-value ok" id="m-state">NORMAL</div>
+  </div>
+</div>
+
+<div class="feeds">
+  <div class="panel">
+    <div class="panel-header">⛓ Bouncer Log</div>
+    <ul class="feed-list" id="bouncer-list"><li class="empty">Esperando certificaciones…</li></ul>
+  </div>
+  <div class="panel">
+    <div class="panel-header">🧠 Flashback Timeline</div>
+    <ul class="feed-list" id="flash-list"><li class="empty">Esperando flashbacks…</li></ul>
+  </div>
+</div>
+
+<div class="syslog-section">
+  <div class="panel">
+    <div class="panel-header">⚙️ Ops Log — eventos del sistema</div>
+    <ul class="feed-list" id="ops-list"><li class="empty">Sin eventos operacionales…</li></ul>
+  </div>
+</div>
+
+<div class="mcts-section">
+  <div class="panel">
+    <div class="panel-header">🌳 MCTS Live Tree</div>
+    <svg id="mcts-svg" height="260"></svg>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="btn-chaos" onclick="triggerChaos()">⚡ Chaos Drill</button>
+  <button id="btn-snap"  onclick="loadSnapshots()">📸 State Snapshots</button>
+  <div id="chaos-out" style="display:none"></div>
+</div>
+
+<div class="snapshot-section" id="snap-section" style="display:none">
+  <div class="panel">
+    <div class="panel-header">📸 State Snapshots (últimos 50)</div>
+    <table id="snap-table">
+      <thead><tr><th>Timestamp</th><th>Watts</th><th>Goroutines</th><th>Mode</th><th>State</th></tr></thead>
+      <tbody id="snap-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const MAX_FEED = 50;
+
+// ── SSE Connection ────────────────────────────────────────────────────────────
+const badge = document.getElementById('conn-badge');
+let es;
+
+function connect() {
+  es = new EventSource('/events');
+  es.onopen = () => { badge.textContent = 'LIVE'; badge.className = 'live'; };
+  es.onerror = () => { badge.textContent = 'OFFLINE'; badge.className = ''; };
+  es.onmessage = (e) => {
+    try { dispatch(JSON.parse(e.data)); } catch(_) {}
+  };
+}
+
+function dispatch(ev) {
+  switch(ev.type) {
+    case 'heartbeat':      onHeartbeat(ev.payload);     break;
+    case 'bouncer':        onBouncer(ev.payload);        break;
+    case 'flashback':      onFlashback(ev.payload);      break;
+    case 'mcts':           onMCTS(ev.payload);           break;
+    case 'chaos':          onChaos(ev.payload);          break;
+    case 'suggest_commit':    onSuggestCommit(ev.payload);   break; // [SRE-56.2]
+    case 'oracle_alert':      onOracleAlert(ev.payload);     break; // [SRE-61.3]
+    case 'suggest_compress':  onSuggestCompress(ev.payload); break; // [SRE-63.1]
+    // Critical ops banners
+    case 'thermal_rollback':  onThermalRollback(ev.payload); break; // [SRE-57.2]
+    case 'oom_guard':         onOOMGuard(ev.payload);        break; // [SRE-57.3]
+    case 'policy_veto':       onPolicyVeto(ev.payload);      break; // [SRE-40]
+    // Ops log feed
+    case 'cognitive_drift':   opsLog('⚡', 'warn',  'cognitive_drift',  ev.payload); break;
+    case 'memory_capacity':   opsLog('🗄️', 'warn',  'memory_capacity',  ev.payload); break;
+    case 'kinetic_anomaly':   opsLog('🔬', 'warn',  'kinetic_anomaly',  ev.payload); break;
+    case 'arena_thresh':      opsLog('🏎️', 'warn',  'arena_thresh',     ev.payload); break;
+    case 'gc_pressure':       opsLog('♻️', 'warn',  'gc_pressure',      ev.payload); break;
+    case 'auto_approve':      opsLog('✅', 'ghost', 'auto_approve',     ev.payload); break;
+    case 'ghost_cycle':       opsLog('👻', 'ghost', 'ghost_cycle',      ev.payload); break;
+    case 'inference':         opsLog('🤖', 'info',  'inference',        ev.payload); break;
+    case 'config_reloaded':   opsLog('🔄', 'info',  'config_reloaded',  ev.payload); break;
+    case 'dream_result':      opsLog('💭', 'info',  'dream_result',     ev.payload); break;
+    case 'cross_workspace_impact': opsLog('🌐', 'warn', 'cross_ws_impact', ev.payload); break; // [SRE-87.B.3]
+  }
+}
+
+// ── Thermal Rollback Banner [SRE-57.2] ────────────────────────────────────────
+function onThermalRollback(p) {
+  const banner = document.getElementById('thermal-banner');
+  if (p && p.watts) document.getElementById('thermal-banner-detail').textContent = p.watts + 'W';
+  if (p && p.message) document.getElementById('thermal-banner-msg').textContent = p.message;
+  banner.classList.add('show');
+  setTimeout(() => banner.classList.remove('show'), 60000);
+}
+function dismissThermal() { document.getElementById('thermal-banner').classList.remove('show'); }
+
+// ── OOM Guard Banner [SRE-57.3] ───────────────────────────────────────────────
+function onOOMGuard(p) {
+  const banner = document.getElementById('oom-banner');
+  if (p && p.heap_mb) document.getElementById('oom-banner-detail').textContent = p.heap_mb + ' MB heap';
+  if (p && p.message) document.getElementById('oom-banner-msg').textContent = p.message;
+  banner.classList.add('show');
+  setTimeout(() => banner.classList.remove('show'), 60000);
+}
+function dismissOOM() { document.getElementById('oom-banner').classList.remove('show'); }
+
+// ── Policy Veto Banner [SRE-40] ───────────────────────────────────────────────
+function onPolicyVeto(p) {
+  const banner = document.getElementById('veto-banner');
+  if (p && p.reason) document.getElementById('veto-banner-msg').textContent = '🚫 VETO: ' + p.reason;
+  if (p && p.tool)   document.getElementById('veto-banner-detail').textContent = p.tool;
+  banner.classList.add('show');
+  setTimeout(() => banner.classList.remove('show'), 30000);
+}
+function dismissVeto() { document.getElementById('veto-banner').classList.remove('show'); }
+
+// ── Ops Log Feed (catch-all for informational events) ─────────────────────────
+function opsLog(icon, tagClass, label, p) {
+  const list = document.getElementById('ops-list');
+  const empty = list.querySelector('.empty');
+  if (empty) empty.remove();
+  const detail = p ? (p.message || p.reason || p.detail || JSON.stringify(p).slice(0, 80)) : '';
+  const li = document.createElement('li');
+  li.innerHTML = `<span class="tag ${tagClass}">${label}</span><span class="feed-text">${icon} ${detail}</span><span class="feed-time">${new Date().toLocaleTimeString()}</span>`;
+  list.insertBefore(li, list.firstChild);
+  if (list.children.length > 50) list.removeChild(list.lastChild);
+}
+
+// ── Suggest-Compress Banner [SRE-63] ──────────────────────────────────────────
+function onSuggestCompress(p) {
+  const banner = document.getElementById('compress-banner');
+  if (p && p.message) {
+    document.getElementById('compress-banner-msg').textContent = p.message;
+  }
+  if (p && p.kb_total !== undefined) {
+    const pct = p.threshold_kb ? Math.round((p.kb_total / p.threshold_kb) * 100) : '';
+    document.getElementById('compress-banner-pct').textContent =
+      pct ? 'IO: ' + p.kb_total + ' KB (' + pct + '%)' : 'IO: ' + p.kb_total + ' KB';
+  }
+  banner.classList.add('show');
+  setTimeout(() => banner.classList.remove('show'), 30000);
+}
+function dismissCompress() {
+  document.getElementById('compress-banner').classList.remove('show');
+}
+
+// ── Oracle Alert Banner [SRE-61.3] ────────────────────────────────────────────
+function onOracleAlert(p) {
+  const banner = document.getElementById('oracle-banner');
+  if (p && p.message) {
+    document.getElementById('oracle-banner-msg').textContent = p.message;
+  }
+  if (p && p.fail_prob_24h !== undefined) {
+    document.getElementById('oracle-banner-prob').textContent =
+      'P(fallo 24h): ' + Math.round(p.fail_prob_24h * 100) + '%';
+  }
+  banner.classList.add('show');
+  // Auto-dismiss after 30 seconds — shorter than wisdom-banner (more urgent)
+  setTimeout(() => banner.classList.remove('show'), 30000);
+}
+function dismissOracle() {
+  document.getElementById('oracle-banner').classList.remove('show');
+}
+
+// ── Epic Closure Banner [SRE-56.2] ────────────────────────────────────────────
+function onSuggestCommit(p) {
+  const banner = document.getElementById('wisdom-banner');
+  if (p && p.message) {
+    banner.querySelector('.banner-msg').textContent = p.message;
+  }
+  banner.classList.add('show');
+  // Auto-dismiss after 60 seconds
+  setTimeout(() => banner.classList.remove('show'), 60000);
+}
+function dismissWisdom() {
+  document.getElementById('wisdom-banner').classList.remove('show');
+}
+
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
+function onHeartbeat(p) {
+  const watts = typeof p.watts === 'number' ? p.watts.toFixed(1) : '—';
+  setCard('m-watts', watts + ' W', p.watts > 60 ? 'alert' : p.watts > 40 ? 'warn' : '');
+  setCard('m-goroutines', p.goroutines || '—', '');
+  setCard('m-mode', p.mode || '—', 'ok');
+  const stab = p.stabilizing;
+  setCard('m-state', stab ? 'STABILIZING' : 'NORMAL', stab ? 'alert' : 'ok');
+}
+
+// ── Bouncer ────────────────────────────────────────────────────────────────────
+function onBouncer(p) {
+  const list = document.getElementById('bouncer-list');
+  clearEmpty(list);
+  const li = document.createElement('li');
+  const pass = p.status === 'pass';
+  li.innerHTML = `<span class="tag ${pass ? 'pass' : 'fail'}">${pass ? '✓ PASS' : '✗ FAIL'}</span>
+    <span class="feed-text" title="${p.file||''}">${shortPath(p.file||'')}</span>
+    <span class="feed-time">${timeStr()}</span>`;
+  list.prepend(li);
+  trim(list, MAX_FEED);
+}
+
+// ── Flashback ─────────────────────────────────────────────────────────────────
+function onFlashback(p) {
+  const list = document.getElementById('flash-list');
+  clearEmpty(list);
+  const li = document.createElement('li');
+  const dist = typeof p.distance === 'number' ? p.distance.toFixed(3) : '?';
+  li.innerHTML = `<span class="tag flash">dist=${dist}</span>
+    <span class="feed-text" title="${p.content||''}">${p.file_path ? shortPath(p.file_path) : ''}: ${(p.content||'').slice(0,60)}</span>
+    <span class="feed-time">${timeStr()}</span>`;
+  list.prepend(li);
+  trim(list, MAX_FEED);
+}
+
+// ── MCTS Tree SVG ─────────────────────────────────────────────────────────────
+function onMCTS(p) {
+  renderMCTS(p.nodes || [], p.edges || []);
+}
+
+function renderMCTS(nodes, edges) {
+  const svg = document.getElementById('mcts-svg');
+  const W = svg.clientWidth || 800;
+  const H = 260;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = '';
+
+  if (!nodes.length) {
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', W/2); t.setAttribute('y', H/2);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('fill', '#8b949e'); t.setAttribute('font-size', '12');
+    t.textContent = 'Sin nodos MCTS activos'; svg.appendChild(t); return;
+  }
+
+  // BFS layout
+  const posMap = {};
+  const adj = {};
+  const rootId = 'mcts_root';
+  nodes.forEach(n => { adj[n.id] = []; });
+  edges.forEach(e => { if (adj[e.source]) adj[e.source].push(e.target); });
+
+  // BFS to assign levels
+  const levels = {}; const queue = [rootId]; levels[rootId] = 0;
+  while (queue.length) {
+    const cur = queue.shift();
+    (adj[cur]||[]).forEach(ch => { if (levels[ch] === undefined) { levels[ch] = levels[cur]+1; queue.push(ch); } });
+  }
+
+  // Group by level
+  const byLevel = {};
+  nodes.forEach(n => { const l = levels[n.id] ?? 0; (byLevel[l] = byLevel[l]||[]).push(n.id); });
+  const maxLevel = Math.max(...Object.keys(byLevel).map(Number));
+  const rowH = maxLevel > 0 ? Math.min(60, (H - 60) / maxLevel) : H/2;
+
+  Object.entries(byLevel).forEach(([lvl, ids]) => {
+    ids.forEach((id, i) => {
+      const x = W * (i + 1) / (ids.length + 1);
+      const y = 30 + Number(lvl) * rowH;
+      posMap[id] = {x, y};
+    });
+  });
+
+  // Draw edges
+  edges.forEach(e => {
+    const s = posMap[e.source], t = posMap[e.target];
+    if (!s || !t) return;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+    line.setAttribute('x2', t.x); line.setAttribute('y2', t.y);
+    line.setAttribute('stroke', '#30363d'); line.setAttribute('stroke-width', '1.5');
+    svg.appendChild(line);
+  });
+
+  // Draw nodes
+  nodes.forEach(n => {
+    const pos = posMap[n.id]; if (!pos) return;
+    const r = Math.min(18, Math.max(8, (n.val||1) * 4));
+    const isRoot = n.id === rootId;
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', pos.x); circle.setAttribute('cy', pos.y); circle.setAttribute('r', r);
+    circle.setAttribute('fill', isRoot ? '#1f6feb' : '#21262d');
+    circle.setAttribute('stroke', isRoot ? '#58a6ff' : '#58a6ff44');
+    circle.setAttribute('stroke-width', isRoot ? '2' : '1');
+    svg.appendChild(circle);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', pos.x); label.setAttribute('y', pos.y + r + 11);
+    label.setAttribute('text-anchor', 'middle'); label.setAttribute('fill', '#8b949e');
+    label.setAttribute('font-size', '9'); label.setAttribute('font-family', 'monospace');
+    label.textContent = n.name.slice(0, 16);
+    svg.appendChild(label);
+  });
+}
+
+// ── Chaos ─────────────────────────────────────────────────────────────────────
+function onChaos(p) {
+  const out = document.getElementById('chaos-out');
+  out.style.display = 'block';
+  out.textContent = typeof p === 'string' ? p : JSON.stringify(p, null, 2);
+  document.getElementById('btn-chaos').disabled = false;
+}
+
+async function triggerChaos() {
+  const btn = document.getElementById('btn-chaos');
+  const out = document.getElementById('chaos-out');
+  btn.disabled = true;
+  out.style.display = 'block';
+  out.textContent = '⏳ Ejecutando Chaos Drill…';
+  try {
+    const res = await fetch('/chaos', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    const data = await res.json();
+    out.textContent = data.report || JSON.stringify(data, null, 2);
+  } catch(e) {
+    out.textContent = '❌ Error: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// ── Snapshots ─────────────────────────────────────────────────────────────────
+async function loadSnapshots() {
+  const sec = document.getElementById('snap-section');
+  const tbody = document.getElementById('snap-tbody');
+  sec.style.display = 'block';
+  try {
+    const res = await fetch('/snapshot');
+    const rows = await res.json();
+    tbody.innerHTML = '';
+    if (!rows || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">Sin snapshots aún</td></tr>';
+      return;
+    }
+    rows.slice().reverse().forEach(s => {
+      const tr = document.createElement('tr');
+      const ts = new Date(s.at).toLocaleTimeString();
+      const stab = s.stabilizing ? '<span style="color:var(--red)">STABILIZING</span>' : '<span style="color:var(--green)">NORMAL</span>';
+      tr.innerHTML = `<td>${ts}</td><td>${(s.watts||0).toFixed(1)} W</td><td>${s.goroutines||0}</td><td>${s.mode||'—'}</td><td>${stab}</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty">Error: ${e.message}</td></tr>`;
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function setCard(id, val, cls) {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  el.className = 'card-value' + (cls ? ' ' + cls : '');
+}
+function shortPath(p) {
+  const parts = p.replace(/\\/g, '/').split('/');
+  return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : p;
+}
+function timeStr() {
+  return new Date().toLocaleTimeString();
+}
+function clearEmpty(list) {
+  const empty = list.querySelector('.empty');
+  if (empty) empty.remove();
+}
+function trim(list, max) {
+  while (list.children.length > max) list.removeChild(list.lastChild);
+}
+
+// ── MCTS poll (every 10s) ─────────────────────────────────────────────────────
+async function pollMCTS() {
+  try {
+    const res = await fetch('/mcts');
+    const data = await res.json();
+    renderMCTS(data.nodes || [], data.edges || []);
+  } catch(_) {}
+}
+
+// ── Federation Overview poll (every 15s) [341] ────────────────────────────────
+async function pollFederation() {
+  try {
+    const res = await fetch('/api/v1/federation/overview');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderFederation(data);
+  } catch(_) {}
+}
+
+function renderFederation(data) {
+  const panel = document.getElementById('federation-panel');
+  if (!panel) return;
+
+  // Workspace table.
+  const tbody = document.getElementById('fed-ws-tbody');
+  if (tbody && data.workspaces) {
+    tbody.innerHTML = '';
+    (data.workspaces || []).forEach(ws => {
+      const tr = document.createElement('tr');
+      const statusColor = ws.status === 'running' ? 'var(--green)' : ws.status === 'error' ? 'var(--red)' : 'var(--muted)';
+      const agoStr = ws.last_activity_ago_s ? `${ws.last_activity_ago_s}s ago` : '—';
+      const tools = (ws.active_tools || []).join(', ') || '—';
+      tr.innerHTML = `<td>${ws.name || ws.id}</td><td style="color:${statusColor}">${ws.status}</td><td>${agoStr}</td><td style="font-size:11px;color:var(--muted)">${tools}</td>`;
+      tbody.appendChild(tr);
+    });
+    panel.style.display = 'block';
+  }
+
+  // Activity log.
+  const logEl = document.getElementById('fed-activity-log');
+  if (logEl && data.activity_log) {
+    logEl.innerHTML = '';
+    (data.activity_log || []).slice(0, 50).forEach(ev => {
+      const li = document.createElement('li');
+      const ts = new Date(ev.unix_ts * 1000).toLocaleTimeString();
+      li.style.cssText = 'padding:2px 0;border-bottom:1px solid var(--border);font-size:11px';
+      li.textContent = `[${ts}] ${ev.workspace} — ${ev.event_type}${ev.detail ? ': ' + ev.detail.slice(0,60) : ''}`;
+      logEl.appendChild(li);
+    });
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+connect();
+pollMCTS();
+setInterval(pollMCTS, 10000);
+pollFederation();
+setInterval(pollFederation, 15000);
+</script>
+
+<!-- [341] Federation Panel — workspace overview + activity log -->
+<div id="federation-panel" style="display:none;margin:12px 20px">
+  <div class="panel">
+    <div class="panel-header">🌐 Federation — Project Overview</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="color:var(--muted);text-align:left">
+          <th style="padding:4px 8px">Workspace</th>
+          <th style="padding:4px 8px">Status</th>
+          <th style="padding:4px 8px">Last Active</th>
+          <th style="padding:4px 8px">Active Tools</th>
+        </tr>
+      </thead>
+      <tbody id="fed-ws-tbody"></tbody>
+    </table>
+  </div>
+  <div class="panel" style="margin-top:8px">
+    <div class="panel-header">📋 Activity Log (cross-workspace)</div>
+    <ul id="fed-activity-log" style="list-style:none;padding:6px 10px;max-height:160px;overflow-y:auto"></ul>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,559 @@
+# ==============================================================================
+# NEO-GO ORCHESTRATOR - CONFIGURACION MAESTRA (V6.3 OUROBOROS — AUTONOMY V2)
+# ==============================================================================
+# Copia este archivo como `neo.yaml` en la RAÍZ de cada proyecto que gestiones.
+# Si neo.yaml no existe al arrancar el orquestador, se generara automaticamente
+# con valores por defecto.
+#
+# MULTI-WORKSPACE:
+#   Cada proyecto necesita su propio neo.yaml. Nexus (neo-nexus) gestiona
+#   múltiples proyectos simultáneamente desde ~/.neo/nexus.yaml.
+#   Ver: README.md § Multi-Workspace Setup
+#
+# SSRF macOS:
+#   Usa 127.0.0.1 SIEMPRE — localhost resuelve a ::1 (IPv6) en macOS
+#   y dispara el SSRF guard aunque el puerto esté en trusted_local_ports.
+#   Todos los puertos de servicios internos deben estar en sre.trusted_local_ports.
+# ==============================================================================
+
+server:
+  # Nivel de verbosidad (debug, info, warn, fatal)
+  log_level: "info"
+  # Tipo de puente MCP ("stdio" clasico o "sse" para conexiones HTTP persistentes)
+  transport: "stdio"
+  # Interfaz de red (0.0.0.0 para exponer a LAN, 127.0.0.1 para local estricto)
+  host: "127.0.0.1"
+  # Puerto del HUD / TUI Holografico 3D
+  port: 8080
+  # Puerto del Servidor de Ingesta SRE (Comunicaciones industriales / mTLS)
+  sandbox_port: 8081
+  # Puerto del transporte SSE MCP
+  sse_port: 8085
+  # Ruta GET del endpoint SSE
+  sse_path: "/mcp/sse"
+  # Ruta POST del endpoint de mensajes MCP
+  sse_message_path: "/mcp/message"
+  # Modo de Operacion:
+  #  - "idle"   : Mantenimiento pasivo. Sin validaciones activas.
+  #  - "fast"   : Iteracion a velocidad luz (Valida AST + Indexa, omite tests termodinamicos).
+  #  - "pair"   : Programacion Humano-IA (Validacion ACID completa, neo_daemon deshabilitado).
+  #  - "daemon" : Autonomo estricto (Requiere cola de tareas y fases cognitivas via neo_daemon).
+  #  - "gameday": Simulador Industrial (Chaos Engineering habilitado).
+  mode: "pair"
+  # Activar tuneles WireGuard P2P usando Tailscale (Requiere variable de entorno TS_AUTHKEY)
+  tailscale: false
+  # [SRE-27.1.1] Pool de IPs/hostnames Tailscale para Gossip P2P Cross-Pollination.
+  # Cada IP es otro orquestador NeoAnvil en la misma red Tailscale. Vacio = Gossip desactivado.
+  # Ejemplo: ["100.64.0.2", "100.64.0.3"]
+  gossip_peers: []
+  # Puerto TCP del listener Gossip en cada nodo (debe ser identico en todos los peers)
+  gossip_port: 8086
+  # [SRE-32.1.2] Puerto del Operator HUD Dashboard (SPA embebida, solo localhost)
+  dashboard_port: 8087
+  # [PILAR-XXIII] Timeout en segundos para cualquier tools/call.
+  # 0 = sin timeout. Default 120s (cubre certify + chaos_drill).
+  tool_timeout_seconds: 120
+
+workspace:
+  # Directorios ignorados por el Watcher y el RAG.
+  # IMPORTANTE: Añadir siempre entornos virtuales Python y cachés de paquetes —
+  # de lo contrario miles de archivos de pip/vendor saturarán Ollama durante ingesta.
+  ignore_dirs:
+    - "node_modules"
+    - "vendor"
+    - ".git"
+    - "dist"
+    - ".neo"
+    # Python venvs y cachés de paquetes (nunca indexar)
+    - "lib"
+    - "site-packages"
+    - "__pycache__"
+    - "venv"
+    - ".venv"
+    - "env"
+  # Extensiones permitidas para inyeccion en memoria vectorial
+  allowed_extensions:
+    - ".go"
+    - ".ts"
+    - ".js"
+    - ".py"
+    - ".md"
+    - ".rs"
+    - ".html"
+    - ".css"
+    - ".yaml"
+  # Bloqueo SRE contra OOM Panics al leer archivos masivos (en MB)
+  max_file_size_mb: 5
+  # [SRE-26.1.1] Mapa de modulos del monorepo: subdirectorio -> comando de build.
+  # El Bouncer Agnostico usa este mapa para certificar archivos de CUALQUIER lenguaje.
+  # Clave = subdirectorio raiz del archivo modificado. Valor = comando ejecutado con sh -c.
+  # Si un archivo no tiene entrada aqui, se usa el fallback por extension:
+  #   .go  -> go test -short ./...   (pipeline AST + TDD nativo)
+  #   .rs  -> cargo build            (desde el directorio del archivo, Cargo.toml autodescubierto)
+  #   .py  -> python3 -m py_compile  (validacion sintactica sin ejecucion)
+  #   .ts/.js/.css -> AST-only + log de aviso
+  # Ejemplos de uso:
+  #   web: "npm run build"           # React/Vite en /web
+  #   mobile: "expo build"           # React Native en /mobile
+  #   firmware: "cargo build --release"  # Rust embebido en /firmware
+  #   ml: "python -m pytest tests/" # Python ML en /ml
+  #   docs: "mkdocs build"           # Documentacion en /docs
+  modules:
+    web: "npm run build"
+
+ai:
+  # Motor de Inferencia ("ollama", "openai", "anthropic", o "wasm" para local CPU)
+  provider: "ollama"
+  # Endpoint del motor LLM (inferencia, chat, generate)
+  base_url: "http://127.0.0.1:11434"
+  # Endpoint Ollama DEDICADO para embeddings. Vacío = usa base_url.
+  # OLLAMA_HOST=127.0.0.1:11435 OLLAMA_KEEP_ALIVE=-1 OLLAMA_MAX_LOADED_MODELS=1 ollama serve
+  # NOTA: Usar 127.0.0.1 explícito — localhost resuelve a ::1 (IPv6) en macOS y dispara el SSRF guard.
+  embed_base_url: "http://127.0.0.1:11435"
+  # Modelo utilizado para Semantic Search (Debe coincidir con la dimension en codigo: 768)
+  embedding_model: "nomic-embed-text"
+  # Ventana de contexto maxima esperada
+  context_window: 8192
+
+rag:
+  # Ruta del archivo fisico para el Grafo Vectorial HNSW
+  db_path: ".neo/db/hnsw.db"
+  # Tamano del fragmento de texto (en bytes/caracteres)
+  chunk_size: 3000
+  # Superposicion de fragmentos para no perder contexto semantico
+  overlap: 500
+  # Limite termico de inyeccion simultanea a la base de datos
+  batch_size: 100
+  # Cantidad de Goroutines asignadas al indexado masivo inicial (I/O: lectura + chunking)
+  ingestion_workers: 4
+  # Slots simultaneos de llamada a Ollama embed durante indexacion masiva
+  # (ingestion_workers). Mantener en 3-4 para evitar HTTP 500 por OOM del
+  # runner de embeddings de Ollama.
+  ollama_concurrency: 3
+  # [SRE-97.D] Slots simultaneos de Embed() durante busqueda (BLAST_RADIUS,
+  # SEMANTIC_CODE) — separado de ollama_concurrency (indexacion). La busqueda
+  # es low-burst (1 call por query); indexation es high-burst (N workers).
+  embed_concurrency: 2
+  # [SRE-35] Limite de vectores por workspace antes de alerta de capacidad.
+  max_nodes_per_workspace: 50000
+  # [SRE-35] Fraccion [0.0-1.0] que activa EventMemoryCapacity (default 0.80 = 80%).
+  workspace_capacity_warn_pct: 0.80
+  # [SRE-35] Umbral DriftMonitor: EventCognitiveDrift si media movil de distancia coseno > threshold.
+  drift_threshold: 0.45
+  # [SRE-36] Umbral de presion GC: EventGCPressure si NumGC/archivo > threshold durante ingesta.
+  gc_pressure_threshold: 5.0
+  # [SRE-36] Tasa de miss del Arena Pool: EventArenaThresh si missRate > threshold (0.20 = 20%).
+  arena_miss_rate_threshold: 0.20
+  # [PILAR-XXV/170.A] Quantización de vectores HNSW en RAM:
+  #   "float32" (default): full precision, 3 KB por vector de 768 dim.
+  #   "int8": 4× menos RAM con <1% recall loss, pero ~2.5× más lento en
+  #     Go puro sin VPMADDUBSW (RAM-only optimization).
+  vector_quant: "float32"
+  # [PILAR-XXV/175] Capacidad LRU del cache de queries semánticas.
+  # 0 desactiva el cache. Default 256 cubre típicas sesiones SRE.
+  # Hit path: 54 ns vs ~6 µs para búsqueda HNSW fresca.
+  query_cache_capacity: 256
+  # [PILAR-XXV/199] Capacidad LRU del cache de vectores embebidos.
+  # Skip del roundtrip ~30 ms a Ollama cuando el mismo target fue
+  # embebido recientemente. 0 desactiva. Default 128 (~384 KB RAM).
+  embedding_cache_capacity: 128
+
+cognitive:
+  # Nivel de severidad matematica del Bouncer (0.0 a 1.0)
+  strictness: 0.75
+  # Nodos maximos en RAM para el Arbol MCTS (Control de OOM)
+  arena_size: 100000
+  # Explainable AI (Explicaciones detalladas en rechazos del Bouncer)
+  xai_enabled: true
+  # Si es 'true', omite los R.E.D. Tickets humanos al usar neo_run_command
+  auto_approve: false
+
+pki:
+  # Infraestructura de Llaves Publicas (Zero-Trust mTLS)
+  ca_cert_path: ".neo/pki/ca.crt"
+  server_cert_path: ".neo/pki/server.crt"
+  server_key_path: ".neo/pki/server.key"
+
+sre:
+  # Bloquear o permitir ciertas fallas degradadas
+  strict_mode: true
+  # Nivel ideal de entropia del sistema (CUSUM target)
+  cusum_target: 0.70
+  # Umbral de colapso termodinamico para ejecutar apagado
+  cusum_threshold: 0.15
+  # Tamano del buffer circular de telemetria y logs de Triage
+  ring_buffer_size: 150
+  # Activar la validacion npm/tsc en background (Shadow Compiler)
+  shadow_compiler: true
+  # Frecuencia del cronjob de defragmentacion WAL (Go duration: "5m", "30s", "1h")
+  auto_vacuum_interval: "5m"
+  # Carga concurrente base para el Chaos Drill (Goroutines = aggression_level * baseline)
+  gameday_baseline_rps: 5000
+  # Puertos localhost confiables que bypasean el SSRF guard.
+  # Agrega aqui cualquier servicio interno (Ollama, SSE, HUD, etc).
+  # Puertos NO listados en localhost seran bloqueados por el escudo anti-SSRF.
+  trusted_local_ports:
+    - 11434  # Ollama LLM server
+    - 11435  # Ollama Embed server (instancia dedicada, puerto separado)
+    - 9342   # Ouroboros control socket
+    - 9242   # Diagnostics pprof
+    - 9142   # neo-mcp RPC worker (headless)
+    - 8087   # NeoAnvil HUD dashboard (Nexus)
+    - 8085   # NeoAnvil SSE transport
+    - 8080   # NeoAnvil HUD
+    - 8081   # NeoAnvil sandbox
+    - 6060   # Go pprof diagnostics
+  # [SRE-34.3.1] Prefijos de comandos auto-aprobables en modo UNSUPERVISED
+  safe_commands:
+    - "go test"
+    - "go build"
+    - "go vet"
+    - "go fmt"
+    - "git status"
+    - "git log"
+    - "git diff"
+    - "npm test"
+    - "npm run build"
+    - "cargo test"
+    - "cargo build"
+    - "python3 -m pytest"
+    - "make test"
+  # [SRE-34.3.2] Ciclos máximos en modo UNSUPERVISED antes de volver a supervisado
+  unsupervised_max_cycles: 10
+  # [SRE-44] Activar monitoreo de bio-feedback de hardware (KineticSensor DFT)
+  kinetic_monitoring: true
+  # [SRE-44] Fracción máxima de desviación de potencia antes de alerta (0.15 = 15%)
+  kinetic_threshold: 0.15
+  # [SRE-49] Activar espejo de carga 10× en chaos drill (Digital Twin Shadowing)
+  digital_twin_testing: false
+  # [SRE-48] Activar votación multi-agente antes de certificar mutaciones críticas
+  consensus_enabled: false
+  # [SRE-48] Fracción mínima de acuerdo para aprobar (0.66 = 66% quorum)
+  consensus_quorum: 0.66
+
+optimization:
+  # Activar Profile-Guided Optimization (Go PGO)
+  pgo_enabled: false
+  # Requerir el uso de sync.Pool en las rutas criticas (flag informativo)
+  zero_allocation_slabs: true
+
+# [PILAR-XXVIII/248.A] storage: removed — struct was unused since the
+# bbolt migration; fields never had runtime consumers.
+
+# [SRE-40/41] Motor de politicas Sentinel y Active Dreaming
+sentinel:
+  # Heap maximo (MB) antes de denegar acciones intensivas (auto_approve, chaos_drill)
+  heap_threshold_mb: 500
+  # Goroutines maximas antes de activar goroutine explosion guard
+  goroutine_explosion_limit: 10000
+  # Segundos de gracia post-boot sin auto-approve (cold start protection)
+  cold_start_grace_sec: 30
+  # Entradas maximas en el audit log de politicas
+  audit_log_max_size: 1000
+  # Suenos adversariales por ciclo REM (Active Dreaming)
+  dream_cycle_count: 3
+  # Confianza inicial de una nueva entrada de inmunidad (0.0-1.0)
+  immunity_confidence_init: 0.6
+  # Confianza minima para activar una inmunidad aprendida (0.0-1.0)
+  immunity_activation_min: 0.5
+
+# [SRE-44] Bio-feedback de hardware (Kinetic SRE)
+kinetic:
+  # Bins de frecuencia para DFT espectral (mas bins = mas resolucion, mas CPU)
+  spectral_bins: 8
+  # Umbral sigma para deteccion de anomalias (2.0 = 2 desviaciones estandar)
+  anomaly_threshold_sigma: 2.0
+  # Pausa GC maxima antes de alerta (microsegundos)
+  gc_pause_threshold_us: 10000
+  # Sigma para accion critica de heap (force GC + shed load)
+  heap_critical_sigma: 5.0
+  # Sigma para warning de heap (trigger GC + reduce batch)
+  heap_warning_sigma: 3.0
+
+# [SRE-38] Cold storage OLAP para analiticas de largo plazo
+coldstore:
+  # Conexiones SQLite maximas abiertas
+  max_open_conns: 3
+  # Conexiones idle maximas
+  max_idle_conns: 2
+  # Limite por defecto para queries analiticas
+  default_query_limit: 50
+
+# [SRE-42] Hypergraph Brain — relaciones multidimensionales
+hypergraph:
+  # Profundidad maxima BFS para analisis de efecto mariposa
+  max_impact_depth: 5
+  # Factor de decaimiento de riesgo por hop (0.0-1.0)
+  risk_decay_factor: 0.7
+  # Umbral minimo de riesgo propagado (debajo se corta la propagacion)
+  min_risk_threshold: 0.01
+
+# [PILAR-XXVIII/248.C] causal: removed — cfg.Causal was never read by
+# runtime code; pkg/state/causal.go uses its own per-entry type.
+
+# [SRE-68] Nexus — Multi-Workspace Dispatcher
+# El nexus es un proxy que mantiene un pool de procesos neo-mcp hijo,
+# uno por workspace. Expone un unico endpoint MCP que enruta al hijo correcto.
+# Binario: cmd/neo-nexus. Opcional — neo-mcp funciona standalone sin nexus.
+nexus:
+  # Puerto del dispatcher HTTP
+  port: 9000
+  # Inicio del rango de puertos para procesos hijo
+  base_port: 9100
+  # Cantidad de puertos en el rango (max workspaces simultaneos)
+  port_range: 200
+  # Intervalo del watchdog (segundos) — detecta y reinicia procesos muertos
+  watchdog_interval: 10
+  # Timeout para shutdown graceful de procesos hijo (segundos)
+  shutdown_timeout: 10
+  # Reinicios maximos antes de abandonar un workspace
+  max_restarts: 10
+
+# ==============================================================================
+# [SRE-34.2.1] INFERENCE GATEWAY — Motor de Inferencia de 4 Niveles
+# ==============================================================================
+# LOCAL  → AST Audit puro (zero tokens, sin red)
+# OLLAMA → Modelo local via Ollama (zero costo externo)
+# HYBRID → Ollama + Flashbacks RAG (contexto arquitectónico)
+# CLOUD  → Escalada a API externa — limitada por cloud_token_budget_daily
+# ==============================================================================
+inference:
+  # Modelo local para capas OLLAMA/HYBRID (debe estar descargado en Ollama)
+  ollama_model: "qwen2:0.5b"
+  # URL del servidor Ollama para inferencia (vacío = usa ai.base_url)
+  ollama_base_url: ""
+  # Modelo externo para la capa CLOUD (requiere ANTHROPIC_API_KEY o equiv.)
+  cloud_model: "claude-sonnet-4-6"
+  # Límite diario HARD de tokens para la capa CLOUD (reset UTC medianoche)
+  cloud_token_budget_daily: 50000
+  # Umbral mínimo de confianza para no escalar al nivel siguiente (0.0-1.0)
+  confidence_threshold: 0.70
+  # Reintentos en LOCAL/OLLAMA antes de escalar al siguiente nivel
+  max_local_attempts: 3
+  # Si true, nunca escala al tier CLOUD (modo offline total)
+  offline_mode: false
+  # Preferencia de enrutamiento: "local", "hybrid", "cloud"
+  mode: "hybrid"
+  # [SRE-51] Fallos OLLAMA antes de rendir la mutación al fichero de deuda
+  surrender_after: 3
+  # [SRE-51] Fichero de backlog de deuda técnica (Graceful Surrender)
+  debt_file: ".neo/technical_debt_backlog.md"
+
+# ==============================================================================
+# [SRE-50] GOVERNANCE — Modo Fantasma y Políticas de Autonomía
+# ==============================================================================
+governance:
+  # [SRE-50] Activar modo fantasma: ejecución autónoma de safe_commands sin confirmación
+  ghost_mode: false
+  # [SRE-50] Ciclos autónomos máximos antes de checkpoint humano obligatorio
+  ghost_mode_max_cycles: 50
+  # Auto-aprobar comandos que coincidan con safe_commands sin confirmación interactiva
+  auto_yes_safe_commands: false
+  # Forzar cuarentena IP via eBPF en señales QUARANTINE_IP
+  quarantine_enforced: true
+  # [SRE-40] Ruta al fichero de políticas Rego/Sentinel
+  constitution_path: ".neo/constitution.rego"
+
+# ==============================================================================
+# ARCHIVOS Y DIRECTORIOS AUTO-GENERADOS
+# ==============================================================================
+# Al arrancar, NeoAnvil crea automaticamente (si no existen):
+#   .neo/                          Directorio raiz del orquestador
+#   .neo/db/                       BoltDB: planner.db, hnsw.db, certified_state.lock
+#   .neo/logs/                     Logs del orquestador (mcp.log)
+#   .neo/models/                   Modelos WASM locales (hypervisor.wasm)
+#   .neo/pki/                      Certificados mTLS (ca.crt, server.crt, server.key)
+#   .neo/master_plan.md            Plan estrategico — edita para definir tus epicas
+#   .neo/technical_debt.md         Archivo Kanban — epicas completadas archivadas aqui
+#
+# CICLO KANBAN AUTOMATICO (Epic 30):
+#   Cuando el desarrollador lleva >5 min inactivo (REM sleep), NeoAnvil detecta las
+#   epicas de master_plan.md donde TODAS las tareas son [x], las mueve a
+#   technical_debt.md y las elimina del plan activo. Sin gasto de tokens LLM.
+#
+# MEMORIA EPISODICA (Epic 28 — Motor Memex):
+#   neo_memory_commit guarda lecciones en BoltDB (memex_buffer).
+#   Durante el ciclo REM, se vectorizan e insertan en hnsw.db (memoria a largo plazo).
+#   BRIEFING con target= busca contexto arquitectonico relevante del RAG.
+#
+# AUDITOR ESTATICO (Epic 29 — AST_AUDIT):
+#   neo_radar(intent: "AST_AUDIT", target: "file.go") detecta:
+#   - Complejidad ciclomatica > 15 por funcion
+#   - Bucles infinitos for{} sin break/return
+#   - Variables shadowed en scope interno
+# ==============================================================================
+
+# ==============================================================================
+# BASES DE DATOS EXTERNAS (Opcional)
+# ==============================================================================
+# NeoAnvil puede inspeccionar schemas de BD externas via neo_radar(intent: DB_SCHEMA)
+# Descomenta y configura las conexiones necesarias:
+#
+# databases:
+#   - name: "erp_replica"
+#     driver: "postgres"
+#     dsn: "postgres://user:pass@localhost:5432/erp?sslmode=disable"
+#   - name: "analytics"
+#     driver: "mysql"
+#     dsn: "user:pass@tcp(localhost:3306)/analytics"
+#   - name: "local_sqlite"
+#     driver: "sqlite3"
+#     dsn: "./data/local.db"
+cpg:
+  page_rank_iters: 50
+  page_rank_damping: 0.85
+  activation_alpha: 0.5
+  max_heap_mb: 512
+  persist_path: .neo/db/cpg.bin          # [PILAR-XXXII] Snapshot fast-boot; empty = default
+  persist_interval_minutes: 15           # 0 = disable periodic snapshots
+
+# workspace:
+#   dominant_lang: ""                    # [PILAR-XXXI] go|python|typescript|rust — auto-detected if empty
+
+# ============================================================================
+# [PILAR-XXXI/XXXVII] Project Federation — .neo-project/neo.yaml
+# ============================================================================
+# Este neo.yaml es POR WORKSPACE. La config de proyecto vive en un fichero
+# SEPARADO: .neo-project/neo.yaml (en el directorio raíz del proyecto, que
+# puede ser el padre de los workspaces miembro).
+#
+# Plantilla para .neo-project/neo.yaml:
+# ----------------------------------------------------------------------------
+# project_name: "mi-plataforma"
+# member_workspaces:
+#   - /ruta/absoluta/workspace-backend
+#   - /ruta/absoluta/workspace-frontend
+# dominant_lang: go                 # go | python | rust | typescript (opcional)
+# ignore_dirs_add:                  # se suman a los ignore_dirs de cada workspace
+#   - generated
+#   - proto-gen
+# knowledge_path: ""                # override del dir sync (default .neo-project/knowledge/)
+# shared_memory_path: ""            # override del BoltDB shared HNSW tier (default .neo-project/db/shared.db)
+#
+# [354.Z-redesign] Dueño determinístico del flock de knowledge.db + shared.db.
+# Match por path absoluto o basename contra cada workspace member.
+#   - Coordinator opens RW; los demás miembros boot con ks=nil y proxean
+#     tier:"project" vía Nexus MCP routing al coordinator.
+#   - Vacío → legacy first-to-boot (nondeterminista; NO recomendado en prod).
+#   - BRIEFING compact muestra tier:project=leader|proxy:X|legacy.
+# coordinator_workspace: workspace-backend
+# ----------------------------------------------------------------------------
+#
+# El SharedGraph (.neo-project/db/shared.db) se alimenta automáticamente durante
+# el ciclo REM sleep de cada workspace y aumenta BLAST_RADIUS cuando el coverage
+# local es bajo. Ver docs/pilar-xxx-xxxiii-guide.md §5 para detalles.
+#
+# La deuda técnica compartida vive en .neo-project/SHARED_DEBT.md y se puede
+# gestionar con: neo_memory(action:"store", tier:"project", namespace:"debt", ...)
+#
+# [354.Z-redesign] Hay un TERCER tier por encima de project: tier:"nexus"
+# (~/.neo/shared/db/global.db). No se configura aquí — Nexus dispatcher lo
+# abre singleton y lo expone vía REST /api/v1/shared/nexus/*. Cualquier
+# workspace puede store/fetch/list/drop/search con tier:"nexus" sin config
+# adicional. Usar para lessons y patterns cross-project, no vinculados a un
+# proyecto específico. Ver docs/tier-ownership.md para el modelo completo.
+#
+# [PILAR LXVII] Hay un CUARTO tier: tier:"org" — el nivel intermedio entre
+# project y nexus. Se configura en .neo-org/neo.yaml (walk-up hasta 10 niveles
+# arriba desde el workspace, independientemente de si el workspace está en un
+# project o no). Un org agrupa MÚLTIPLES projects bajo convenciones comunes.
+#
+# Plantilla para .neo-org/neo.yaml:
+# ----------------------------------------------------------------------------
+# org_name: "my-org"
+# projects:
+#   - /path/to/project            # strategos-project root
+#   - /path/to/neoanvil
+# coordinator_project: "other"            # qué project posee .neo-org/db/org.db en RW
+# coordinator_takeover_seconds: 120       # failover timeout (357+ pendiente)
+# knowledge_path: ".neo-org/knowledge"    # source del auto-sync 355.B
+# shared_memory_path: ".neo-org/db/org.db"
+# debt_path: ".neo-org/DEBT.md"
+# directives_path: ".neo-org/DIRECTIVES.md"
+# llm_overrides:                          # reverse precedence: workspace > project > org
+#   embedding_model: nomic-embed-text     # org rellena gaps, no override
+#   inference_mode: hybrid
+# ----------------------------------------------------------------------------
+#
+# Artefactos org-level:
+#   .neo-org/DEBT.md                     (neo_debt scope:"org")
+#   .neo-org/DIRECTIVES.md               (neo_memory learn scope:"org")
+#   .neo-org/knowledge/directives/*.md   (source de 355.B auto-sync a workspaces)
+#
+# Al boot: cada workspace miembro copia `.neo-org/knowledge/directives/*.md`
+# a su `<ws>/.claude/rules/org-<name>.md` (idempotente, source wins conflicts).
+# Ver docs/pilar-lxvii-org-tier.md para el detalle completo.
+# ============================================================================
+
+databases: []
+
+# ============================================================================
+# [SRE-114.B] Advanced fields — defaults applied by pkg/config/config.go.
+# Override only if you know what you're doing. Run `make yaml-audit` to
+# regenerate this list from the NeoConfig struct.
+# ============================================================================
+
+# integrations:
+#   plc_endpoint:        "http://localhost:9091/plc/stop"      # PLC e-stop endpoint
+#   erp_endpoint:        "http://localhost:9090/erp/ingest"    # ERP sync endpoint
+#   chaos_drill_target:  "http://127.0.0.1:8084/health"        # default chaos target
+#   hud_base_url:        "http://localhost:8080"               # neo-hud frontend base
+#   sandbox_base_url:    "http://127.0.0.1:8084"               # tactical aux server
+
+# ai:
+#   embed_timeout_seconds: 30                                  # embedder request timeout
+
+# sre:
+#   certify_ttl_minutes:           0                           # 0 = mode default (pair:15, fast:5)
+#   context_compress_threshold_kb: 600                         # warn-and-suggest threshold
+#   oracle_alert_threshold:        0.75                        # FailProb24h alert level
+#   oracle_heap_limit_mb:          512                         # heap saturation ceiling
+#   oracle_power_limit_w:          80                          # thermal saturation ceiling
+#   session_state_ttl_hours:       24                          # Vacuum_Memory purge cutoff
+#   max_directive_chars:           500                         # [374.A] Max chars per directive (learn action)
+#   max_directives:                60                          # [374.B] Max total active directives
+
+# inference:
+#   max_tokens:              4096
+#   max_auto_fix_attempts:   3                                 # SRE-93 auto-remediation retries
+
+# darwin:                                                      # genetic mutation engine [SRE-93.B]
+#   ollama_url:        "http://127.0.0.1:11434"
+#   benchmark_iters:   100
+#   generations:       5
+
+# llm:                                                         # local LLM backend
+#   gguf_path:        ""                                       # llama.cpp model file
+#   llamacpp_path:    ""                                       # llama.cpp binary path
+
+# federation:                                                  # cross-workspace memex sync [SRE-94]
+#   harvest_timeout_sec: 30
+#   dedup_threshold:     0.85
+#   manifest_bucket:     "memex_manifests"
+#   dream_schedule:      "0 3 * * *"
+
+# shadow:                                                      # traffic mirroring [SRE-92]
+#   diff_threshold_ms: 100
+
+# rag:
+#   max_vectors_per_node: 32
+
+# server:
+#   diagnostics_port: 6060
+
+# aliases:                                                     # natural-language CLI shortcuts
+#   status: '{"tool_name":"neo_radar","arguments":{"intent":"BRIEFING","mode":"compact"}}'
+
+# server:
+#   tactical_port:    8083                                     # sandbox tactical aux server
+#   sre_listener_port: 8082                                    # external incident listener
+
+# shadow:
+#   target_url:       ""                                       # shadow proxy upstream
+#   sample_rate:      0.0                                      # 0..1 fraction to mirror
+#   timeout_ms:       2000                                     # per-shadow-request timeout
+#   unsafe_methods:   false                                    # mirror POST/PUT/DELETE
+
+# darwin:
+#   population_size: 8                                         # genetic mutation pool
+#   temperature:     0.3                                       # LLM sampling temp

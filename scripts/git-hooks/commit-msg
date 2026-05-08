@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# scripts/git-hooks/commit-msg — soft-warn when [EPIC-FINAL MCPI-N]
+# references a Jira ticket that does not exist.
+#
+# Resolves Épica 134.B.3. The hook receives the prepared commit message
+# file as $1 (git's standard contract for commit-msg hooks). It scans
+# for "[EPIC-FINAL <KEY>]" tags and verifies <KEY> exists in Jira via
+# the Nexus dispatcher. The warning is a courtesy — git proceeds with
+# the commit regardless. Real-world bug it catches: commit 30220ae
+# wrote [EPIC-FINAL MCPI-130] when the actual ticket was MCPI-52,
+# producing a phantom-attachment failure post-commit.
+#
+# Activation: `make install-git-hooks` (creates symlink in .git/hooks/).
+# Deactivation: `rm .git/hooks/commit-msg` or set NEO_HOOK_DISABLE=1.
+#
+# Environment overrides:
+#   NEO_NEXUS_URL      base URL (default http://127.0.0.1:9000)
+#   NEO_HOOK_DISABLE   set to 1 to short-circuit
+#   NEO_WORKSPACE_ID   workspace ID override (auto-derived if unset)
+#
+# This hook NEVER aborts the commit. It only writes to stderr.
+
+set -u
+
+MSG_FILE="${1:-}"
+if [[ -z "$MSG_FILE" || ! -f "$MSG_FILE" ]]; then
+    exit 0
+fi
+if [[ "${NEO_HOOK_DISABLE:-0}" == "1" ]]; then
+    exit 0
+fi
+
+EPIC_FINAL=$(grep -oE '\[EPIC-FINAL [A-Z][A-Z0-9]+-[0-9]+\]' "$MSG_FILE" | head -n 1 || true)
+if [[ -z "$EPIC_FINAL" ]]; then
+    exit 0
+fi
+
+TICKET=$(printf '%s' "$EPIC_FINAL" | grep -oE '[A-Z][A-Z0-9]+-[0-9]+')
+NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
+REPO_ROOT="${NEO_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+
+# [139.3] Source shared lib. Falls back to inline validation if lib missing.
+LIB_PATH="$REPO_ROOT/scripts/git-hooks/lib-jira-tickets.sh"
+if [[ -f "$LIB_PATH" ]]; then
+    # shellcheck source=lib-jira-tickets.sh
+    source "$LIB_PATH"
+fi
+
+if declare -F validate_jira_ticket >/dev/null 2>&1; then
+    WORKSPACE_ID=$(resolve_workspace_id "$REPO_ROOT")
+    # Capture exit code BEFORE any other command — `$?` after `if; fi` is always
+    # 0 in bash regardless of the condition's exit, so we have to call it
+    # inline and inspect immediately.
+    validate_jira_ticket "$TICKET" "$NEXUS_URL" "$WORKSPACE_ID"
+    rc=$?
+    case $rc in
+        0) exit 0 ;;  # ticket exists — nothing to warn
+        1)  # phantom — emit warning to stderr
+            echo "[neo-hook] WARN: $TICKET (in $EPIC_FINAL) does not exist in Jira" >&2
+            echo "[neo-hook]       If you meant a master_plan ID, run /jira-id <epic_id> or pkg/jira.ResolveMasterPlanID" >&2
+            exit 0
+            ;;
+        *) exit 0 ;;  # rc=2 (network glitch) → silent fail-open
+    esac
+fi
+
+# Fallback inline (lib not present — pre-139 behavior preserved):
+if ! curl -sf --max-time 2 "$NEXUS_URL/health" >/dev/null 2>&1; then
+    exit 0
+fi
+WORKSPACE_ID="${NEO_WORKSPACE_ID:-}"
+if [[ -z "$WORKSPACE_ID" ]] && command -v python3 >/dev/null 2>&1; then
+    WORKSPACE_ID=$(python3 -c "
+import json
+try:
+    with open('$HOME/.neo/workspaces.json') as f:
+        data = json.load(f)
+    for w in data.get('workspaces', []):
+        if w.get('path', '') == '$REPO_ROOT':
+            print(w.get('id', ''))
+            break
+except Exception:
+    pass
+" 2>/dev/null || true)
+fi
+
+PAYLOAD=$(cat <<EOF
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jira/jira","arguments":{"action":"get_context","ticket_id":"$TICKET"}}}
+EOF
+)
+CURL_ARGS=(-s --max-time 5 -X POST "$NEXUS_URL/mcp/message" -H "Content-Type: application/json")
+[[ -n "$WORKSPACE_ID" ]] && CURL_ARGS+=(-H "X-Neo-Workspace: $WORKSPACE_ID")
+CURL_ARGS+=(-d "$PAYLOAD")
+RESPONSE=$(curl "${CURL_ARGS[@]}" 2>/dev/null || echo "{}")
+
+if printf '%s' "$RESPONSE" | grep -qiE '"error".*(not found|does not exist|404)'; then
+    echo "[neo-hook] WARN: $TICKET (in $EPIC_FINAL) does not exist in Jira" >&2
+    echo "[neo-hook]       If you meant a master_plan ID, run /jira-id <epic_id> or pkg/jira.ResolveMasterPlanID" >&2
+fi
+
+exit 0

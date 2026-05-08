@@ -1,0 +1,134 @@
+# NeoAnvil Synced Directives (consolidated)
+
+Core SRE operational rules for neoanvil workspace. Thematic rules live in split files:
+- `neo-synced-directives-deepseek.md` — DeepSeek plugin: models, caching, audit discipline
+- `neo-synced-directives-jira.md` — Jira plugin: issue lifecycle, naming, evidence
+- `neo-synced-directives-cross-project.md` — Cross-project: strategosia, frontend patterns
+- `neo-synced-directives-pilar.md` — PILAR implementation: federation, CPG, auth, tiers, debt
+- `neo-synced-directives-history.md` — Archived deprecated entries (read-only)
+
+---
+
+## A. Core Session Protocol
+
+1. [SRE-BRIEFING] BRIEFING es OBLIGATORIO al inicio de sesión, al reanudar desde contexto comprimido, y al cambiar de tarea. Lee master_plan.md real para contar `- [ ]` vs `- [x]` — BoltDB queue es señal secundaria. Modos: `full` (default, auto-compacta a 8KB), `compact` (una línea — usar cuando Open:0), `delta` (solo campos que cambiaron vs snapshot previo, ahorra ~185K tokens en sesiones largas). Al reanudar desde "This session is being continued...", el primer tool call DEBE ser BRIEFING sin excepciones — el resumen NO reemplaza la sincronización con el orquestador.
+
+2. [SRE-CERTIFY] neo_sre_certify_mutation lee archivos del disco ya editados, NO inyecta código. Schema: `mutated_files` (paths absolutos) + `complexity_intent` (O(1)_OPTIMIZATION, O(LogN)_SEARCH, FEATURE_ADD, BUG_FIX) + `rollback_mode` (atomic/granular/none, default atomic) + `dry_run` (bool). Flujo Pair: AST → Bouncer → go test -short → Index. Flujo Fast: AST → Index. Escribe cada path certificado en `session_state` BoltDB — BRIEFING muestra `session_mutations`. Output incluye `checks` y `certified_by` cuando consensus_enabled. **TRAMPA:** `O(1)_OPTIMIZATION` falla con nested loops — usar `FEATURE_ADD` para features con control flow. **BATCH:** certificar TODOS los archivos en UNA llamada, INMEDIATAMENTE antes del git commit (TTL 15min pair, 5min fast). Si pre-commit hook rechaza por TTL: re-certificar y commit sin pausa.
+
+3. [SRE-CERTIFY-BYPASS] Cuando certify rechaza archivos válidos por bugs upstream (tree-sitter Tailwind 4, pre-commit hook con brackets, MCP session 404 transient): `NEO_CERTIFY_BYPASS=1 git commit` + documentar en .neo/technical_debt.md. No usar bypass para evadir AST errors reales.
+
+4. [SRE-CERTIFY-CROSS-WORKSPACE] neo_sre_certify_mutation rechaza paths cuando MCP routing va al workspace incorrecto. Workaround: pasar `target_workspace: "<workspace-id>"` explícito en el call.
+
+5. [SRE-DAEMON] neo_daemon usa campo `action` (NO `intent`). Acciones: PullTasks, PushTasks, Vacuum_Memory, SetStage, FLUSH_PMEM, QUARANTINE_IP. PROHIBIDO en Pair/Fast-Mode. Suspendido cuando RAPL > 60W (STABILIZING).
+
+6. [SRE-CHAOS] neo_chaos_drill opera síncronamente 10s. Schema: target (URL), aggression_level (1-10, goroutines = nivel × 1000), inject_faults (bool). Disponible también desde HUD en 127.0.0.1:8087.
+
+7. [LEY-PAIR-MODE] En Pair-Mode: edición nativa (Edit/Write). Toda mutación DEBE certificarse con neo_sre_certify_mutation. neo_daemon PROHIBIDO. Build frontend bypass.
+
+8. [CICLO-OUROBOROS] Flujo obligatorio: BRIEFING → BLAST_RADIUS → Edit/Write → neo_sre_certify_mutation. No editar sin investigar; no commit sin certificar.
+
+---
+
+## B. Code Quality Laws
+
+9. [LEY-SEGURIDAD] HTTP clients: `sre.SafeHTTPClient()` para URLs externas (anti-SSRF); `sre.SafeInternalHTTPClient(timeoutSec)` para Nexus→hijos (solo loopback). PROHIBIDO http.Client crudo. Sockets Unix con os.Chmod(0600). Sanitizar inputs shell: strip `"`, `&`, `;`, `$`, backticks. Dashboard HUD solo 127.0.0.1.
+
+10. [LEY-DB-ZERO-ALLOC] PROHIBIDO SELECT * en tablas >1M filas. PROHIBIDO mutaciones sin WHERE determinístico. PROHIBIDO joins cuádruples en tiempo real. FORZADO: dba.Analyzer con buffers pre-alocados, ACID transaccional, EXPLAIN QUERY PLAN. Serialización via pkg/sre/allocs.go (ZeroAllocJSONMarshal), NO pkg/utils/.
+
+11. [ZERO-ALLOCATION] Prohibido make()/new() en Hot-Paths (RAG, MCTS). Usar sync.Pool y memoria plana. Slices reciclados con [:0].
+
+12. [AISLAMIENTO-MCP] NUNCA usar fmt.Print u os.Stdout en código MCP — destruye la conexión JSON-RPC. Usar exclusivamente log.Printf.
+
+13. [ZERO-HARDCODING] Todo enlace a BD, puertos y endpoints viene de neo.yaml o variables de entorno. Resolución por búsqueda recursiva. Patrón para nuevos umbrales: (1) campo yaml tag en config.go, (2) default en defaultNeoConfig(), (3) backfill en LoadConfig(), (4) actualizar neo.yaml + neo.yaml.example + docs/neo-yaml-guide.md. PROHIBIDO hardcodear numéricos en pkg/rag/, pkg/memx/, cmd/.
+
+14. [VECTORIZACION] Usar operaciones vectorizadas (numpy/pandas) sobre bucles for nativos donde sea posible. [SCOPE: PYTHON]
+
+15. [GO-ARM64-ASM] Go ARM64 assembler quirks para kernels SIMD: (1) FMLA → VFMLA, FADDP no existe para float → usar VEXT rotation; VADDP es INTEGER pairwise-add. (2) VFMLA Vm.T, Vn.T, Vd.T → Vd[i] += Vn[i]*Vm[i] (AT&T dest-last). (3) Fn y Vn.S[0] son el mismo registro físico. (4) Reducción horizontal float32x4: VEXT $4/$8/$12 rota lanes, luego FADDS. (5) VLD1.P 16(R0), [V3.S4] carga 4xf32 con post-increment. Verificar con testdata en $GOROOT/src/cmd/asm/internal/asm/testdata/arm64.s.
+
+---
+
+## C. Tool Selection & Usage
+
+16. [COMPILE_AUDIT_FIRST] Para paquetes desconocidos o archivos grandes: COMPILE_AUDIT primero (retorna symbol_map JSON `{"Type.Method": lineNo}` con línea exacta). Luego READ_SLICE o FILE_EXTRACT con offset quirúrgico. PROHIBIDO READ_SLICE desde línea 1 a ciegas. buildSymbolMap() usa go/ast, excluye _test.go. Opcional `filter_symbol` para subset.
+
+17. [BLAST_RADIUS_FALLBACK] Cuando BLAST_RADIUS retorna `graph_status: not_indexed` o falla por SSRF: (1) NO bloquear edición — continuar con confidence:low, (2) Grep para callers, (3) certificar para re-indexar. Campos respuesta: `fallback_used` (none/grep/ast), `confidence`, `index_coverage`. SSRF fix: `make rebuild-restart`.
+
+18. [SEMANTIC_CODE_FALLBACK] Si SEMANTIC_CODE retorna 0: cambiar INMEDIATAMENTE a Grep. PROHIBIDO reintentar — el problema es cobertura del índice. SEMANTIC_CODE solo para queries abstractas/conceptuales. Para nombres de función/símbolo/string: Grep directo.
+
+19. [WIRING_AUDIT_POST_IMPORT] Después de Edit que agregue import a main.go o cree nuevo pkg/: WIRING_AUDIT inmediato. Detecta paquetes importados no instanciados. Aplica también tras nuevo entrypoint (cmd/).
+
+20. [AST_AUDIT] Soporta: archivo individual, directorio (WalkDir recursivo), glob (`pkg/**/*.go`). Multi-lenguaje via astx.DefaultRouter: .go (GoAnalyzer + SSA-exact CC cuando CPG disponible), .py (regex CC+shadow), .ts/.tsx/.js/.jsx (TSAnalyzer), .rs (RustAnalyzer + SHADOW_INFO). Cada finding COMPLEXITY incluye [cc_method:ssa_exact|ast_regex].
+
+21. [AST_AUDIT_BOLTDB] Antes de editar pkg/state/, pkg/dba/, o cualquier código BoltDB/SQLite: AST_AUDIT obligatorio. Verifica cursor iteration correcta, transaction leaks, CC>15 en callbacks.
+
+22. [GRAPH_WALK] BFS desde un símbolo en el CPG. Schema: target (nombre exacto), max_depth (default 2), edge_kind (call/cfg/contain/all). Usar después de BLAST_RADIUS para explorar subgrafo de calls. LIMITACIONES: target debe ser nombre simple; receiver methods pueden retornar "No reachable nodes" — usar BLAST_RADIUS como alternativa. Requiere CPG activo.
+
+23. [FILE_EXTRACT] Extracción quirúrgica por symbol name o substring. `context_lines:0` retorna cuerpo completo del símbolo. Hasta 3 hits en substring scan, windows merged. Preferir sobre READ_SLICE cuando se conoce el nombre del símbolo.
+
+24. [CONTEXT-EFFICIENCY] Para archivos >200 líneas: COMPILE_AUDIT → FILE_EXTRACT(query:símbolo, context_lines:0). READ_SLICE solo para bloques sin símbolo nombrado (imports, init). Prohibido Read nativo en archivos ≥100 líneas — Read con offset/limit NO es sustituto de READ_SLICE (bypasea métricas IO). Prohibido 3+ ediciones sin neo_compress_context. Top offenders: Read en archivo >200L = ~42K tokens vs FILE_EXTRACT = ~375 tokens.
+
+25. [TOOL_COST_AUDIT] PROHIBIDO Agent(subagent_type="Explore") para auditar neoanvil — cuesta 31.5k tokens vs ~2k con neo_radar. Flujo: AST_AUDIT batch → COMPILE_AUDIT → TECH_DEBT_MAP → WIRING_AUDIT → neo_log_analyzer.
+
+26. [BLAST_RADIUS_BATCH] BLAST_RADIUS acepta `targets []string` para análisis paralelo. Semaphore de 4 goroutinas. Recomendado en refactors >3 archivos.
+
+27. [PRE-AUDIT] Ante reportes de bug o código complejo: AST_AUDIT primero para descartar CC>15, bucles infinitos, shadows. Solo si limpio, proceder con Read/Edit.
+
+---
+
+## D. Infrastructure
+
+28. [SRE-SSE-TRANSPORT] NeoAnvil expone stdio (primario) + SSE via Nexus (:9000/mcp/sse → hijo dinámico). OAuth proxy: Nexus reenvía /.well-known/ y /oauth/ al hijo activo. Contadores IO en BRIEFING con warning a >500KB.
+
+29. [SRE-HUD-SSE-COVERAGE] HUD en 127.0.0.1:8087 (configurable). 21 EventTypes SSE: 8 handlers dedicados (heartbeat, bouncer, flashback, mcts, chaos, suggest_commit, oracle_alert, suggest_compress) + 3 banners críticos (thermal_rollback 60s, oom_guard 60s, policy_veto 30s) + 10 Ops Log (cognitive_drift, memory_capacity, kinetic_anomaly, arena_thresh, gc_pressure, auto_approve, ghost_cycle, inference, config_reloaded, dream_result).
+
+30. [SRE-NEXUS-MANAGED-WORKSPACES] `managed_workspaces` en ~/.neo/nexus.yaml lista IDs/nombres SSE activos (vacío = todos). neo-mcp DEBE exponer GET /health — sin esto verifyBoot falla → status=error, Nexus devuelve 502.
+
+31. [SRE-NEXUS-OLLAMA-SM] Nexus gestiona Ollama via service_manager.go. EnsureAll() inicia antes de children. OLLAMA_EMBED_HOST se inyecta en child.extra_env sin persistir en neo.yaml. ensureModels() en goroutine background. Instancia :11435 dedicada embeddings. Alternativa: bin/start-ollama.sh start.
+
+32. [BOOT-DIAGNOSIS] Workspace falla con "hnsw.db: timeout" o "EWOULDBLOCK": (1) `lsof +D .neo/db/`, (2) kill PID zombie, (3) `curl -X POST http://127.0.0.1:9000/api/v1/workspaces/start/<id>`. Doble Nexus: matar PID más bajo.
+
+33. [SRE-PKI-SCOPE] PKI en .neo/pki/ es EXCLUSIVAMENTE para cmd/sandbox (mTLS SCADA/PLC). NO usada por MCP, Nexus, ni neo-mcp. Gitignoreado.
+
+---
+
+## E. Memory, State & Config
+
+34. [SRE-MEMEX] neo_memory(action:"commit") guarda lecciones en memex_buffer (BoltDB). REM sleep (5 min idle) consolida al HNSW. Usar después de bugs no obvios o patrones arquitectónicos. Schema: topic, scope, content.
+
+35. [SRE-STABILIZING] Cuando RAPL > 60W: ThermicStabilizing=1, neo_daemon rechaza acciones. Override: NEO_RAPL_OVERRIDE_WATTS.
+
+36. [SRE-WAL-SANITIZER] SanitizeWAL() al arrancar, antes de cargar HNSW. Purga JSON inválido/vacío. Idempotente.
+
+37. [SRE-ENV-SECRETS] Secretos en .neo/.env (gitignoreado) + ${VAR_NAME} en neo.yaml. Shell env > .neo/.env. Write-back preserva template. Plantilla: .neo/.env.example.
+
+38. [SRE-DB-MULTI-DRIVER] DB_SCHEMA soporta PostgreSQL (lib/pq, pgx), SQLite. Guard read-only rechaza DML/DDL. Requiere blank import en main.go.
+
+39. [MEMORY-SYSTEM] Memorias Claude Code en ~/.claude/projects/.../memory/. Al resolver bug difícil, persistir en HNSW vía neo_memory(action:"commit") además.
+
+40. [SRE-WORKSPACE-AUTOBOOT] LoadRegistry() auto-crea ~/.neo/workspaces.json. Migración: copiar workspaces.json + .neo/db/*.db + cpg.bin. Sin ellos arranca limpio.
+
+---
+
+## F. Process & Workflow
+
+41. [SELF-AUDIT] Al finalizar épica: (1) tabla tools usadas 1-10, (2) tool peor rendimiento, (3) propuesta mutación. Va ANTES del cierre, DESPUÉS de neo_memory(action:commit).
+
+42. [EPICA-AUDIT-PROTOCOL] Al finalizar épica: AST_AUDIT sobre archivos modificados → corregir CC>15/shadows → certify + commit → continuar sin esperar confirmación.
+
+43. [AUDIT-FIRST-BEFORE-EPIC] Antes de épica nueva: grep+verify para detectar zombie-closed (feature implementada, master_plan sin marcar). 5min audit vs 4h re-implementar.
+
+44. [SRE-DIRECTIVE-SUPERSEDES-AUDIT] Antes de neo_learn_directive(action:"add"): Grep en directives por keyword. Si existe: action:"update" + directive_id.
+
+45. [SRE-DUAL-LAYER-SYNC] neo_learn_directive sincroniza a .claude/rules/neo-synced-directives.md. Response incluye `(sync ok)` o `SYNC FAILED: <reason>`. Failure es non-fatal pero visible.
+
+46. [SRE-BUGFIX-EXCEPTION] Shadow-var-rename o CC-only-extraction: OMITIR BLAST_RADIUS. NO aplica cuando: (1) flujo compartido, (2) nuevos parámetros, (3) >5 callers. Test: ¿ejecuta código nuevo para todos? → BLAST_RADIUS obligatorio.
+
+47. [SRE-BUGFIX-SWEEP] BUG_FIX sweeps: batch único certify, dry_run:true si hay duda, `go build ./...` antes en sweeps >5 archivos.
+
+48. [SRE-FAST-MODE] NEO_SERVER_MODE=fast: certify omite bouncer + tests, solo AST + indexado RAG. Para POC, no producción.
+
+49. [SRE-PRE-COMMIT-HOOK] Pre-commit hook rechaza .go/.ts/.tsx/.js/.css sin sello certify. TTL configurable: sre.certify_ttl_minutes. Certificar justo antes del commit.
+
+50. [SRE-NEO-PROJECT-WALKUP] NUNCA filepath.Join(workspace, ".neo-project") — usar findNeoProjectDir(startDir) que hace walk-up hasta 5 niveles. Los workspaces son subdirectorios; .neo-project/ vive en el padre.
+
+51. [SRE-DOCTRINE-CURRENT] Inventario: 16 tools MCP / 60+ operations / 23 intents neo_radar. 4 Macro-Tools: neo_radar, neo_daemon, neo_sre_certify_mutation, neo_chaos_drill. 7 Specialist: neo_compress_context, neo_apply_migration, neo_forge_tool, neo_download_model, neo_log_analyzer, neo_tool_stats, neo_debt. 2 Plugins: Jira (7 actions), DeepSeek (4 actions). 406+ épicas cerradas. Estado GREEN.

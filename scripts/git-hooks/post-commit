@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Git post-commit hook — auto-document Jira tickets referenced in commit messages.
+#
+# When a commit message contains a Jira ticket key (e.g. MCPI-42, ENG-7),
+# fire `jira/prepare_doc_pack` against the local Nexus dispatcher to
+# generate a doc-pack folder + zip + upload — all in one shot, zero
+# Claude tokens consumed.
+#
+# Activation: `make install-git-hooks` (creates symlink in .git/hooks/).
+# Deactivation: `rm .git/hooks/post-commit`.
+#
+# Behavior:
+#   - Extracts every <PROJECT>-<NUMBER> token from the latest commit msg
+#   - Filters duplicates
+#   - For each ticket: POST to Nexus :9000/mcp/message with
+#     prepare_doc_pack action + auto_attach:true + commit_hash:HEAD
+#   - Defaults from the plugin apply (exclude_paths drops master_plan
+#     etc.; smart zip filter strips redundant code-snaps)
+#   - Silently skips when Nexus isn't running locally (no harm done)
+#
+# Environment overrides:
+#   NEO_NEXUS_URL      base URL (default http://127.0.0.1:9000)
+#   NEO_REPO_ROOT      repo path passed to plugin (default `git rev-parse --show-toplevel`)
+#   NEO_HOOK_QUIET     set to 1 to suppress success messages
+#   NEO_HOOK_DISABLE   set to 1 to short-circuit (e.g. for rebase loops)
+#   NEO_WORKSPACE_ID   workspace ID override (auto-derived from ~/.neo/workspaces.json if unset)
+#
+# This hook NEVER blocks the commit. Failures are logged to stderr but
+# the commit proceeds either way — git already accepted the work.
+
+set -euo pipefail
+
+if [[ "${NEO_HOOK_DISABLE:-0}" == "1" ]]; then
+    exit 0
+fi
+
+NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
+REPO_ROOT="${NEO_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+
+if [[ -z "$REPO_ROOT" ]]; then
+    echo "[neo-hook] not in a git repo, skipping" >&2
+    exit 0
+fi
+
+# [139.3] Source shared lib for ticket extraction + validation.
+# Falls back to inline parsing if lib missing (defensive — hook still works
+# in repos that haven't pulled 139.x yet).
+LIB_PATH="$REPO_ROOT/scripts/git-hooks/lib-jira-tickets.sh"
+if [[ -f "$LIB_PATH" ]]; then
+    # shellcheck source=lib-jira-tickets.sh
+    source "$LIB_PATH"
+fi
+
+# Resolve workspace ID for X-Neo-Workspace header (Nexus routing). [130.3]
+if declare -F resolve_workspace_id >/dev/null 2>&1; then
+    WORKSPACE_ID=$(resolve_workspace_id "$REPO_ROOT")
+else
+    WORKSPACE_ID="${NEO_WORKSPACE_ID:-}"
+fi
+
+# Latest commit hash + full message (for sync-master-plan, which has its own
+# subject-only parsing internally).
+COMMIT_HASH=$(git rev-parse --short HEAD)
+COMMIT_MSG=$(git log -1 --format=%B)
+
+# [134.A] Auto-mark master_plan.md tasks referenced in the commit subject.
+# Runs before Jira logic so a failure here doesn't block doc-pack uploads.
+SYNC_PLAN_SCRIPT="$REPO_ROOT/scripts/git-hooks/sync-master-plan.sh"
+if [[ -x "$SYNC_PLAN_SCRIPT" ]]; then
+    "$SYNC_PLAN_SCRIPT" "$COMMIT_MSG" "$REPO_ROOT" || true
+fi
+
+# [139.1] Subject-only ticket extraction. Body refs (e.g. "ADR-009" in docs,
+# "Z0-9" in regex examples, "MCPI-130" phantom) NO disparan prepare_doc_pack.
+# Mismo precedente que sync-master-plan.sh:39.
+if declare -F extract_subject_tickets >/dev/null 2>&1; then
+    TICKETS=$(extract_subject_tickets "$COMMIT_MSG")
+else
+    # Fallback if lib not present.
+    TICKETS=$(printf '%s' "$COMMIT_MSG" | head -n 1 | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)
+fi
+
+if [[ -z "$TICKETS" ]]; then
+    [[ "${NEO_HOOK_QUIET:-0}" == "1" ]] || echo "[neo-hook] no Jira ticket keys in commit $COMMIT_HASH"
+    exit 0
+fi
+
+# Health check: Nexus reachable?
+if ! curl -sf --max-time 2 "$NEXUS_URL/health" >/dev/null 2>&1; then
+    echo "[neo-hook] Nexus unreachable at $NEXUS_URL — skipping doc-pack upload" >&2
+    echo "[neo-hook] tickets that would have been documented: $TICKETS" >&2
+    exit 0
+fi
+
+# Health check: jira plugin alive?
+PLUGIN_STATUS=$(curl -s --max-time 3 "$NEXUS_URL/api/v1/plugins" 2>/dev/null || echo "{}")
+if ! echo "$PLUGIN_STATUS" | grep -qE '"name"[[:space:]]*:[[:space:]]*"jira"'; then
+    echo "[neo-hook] jira plugin not running — skipping doc-pack upload" >&2
+    exit 0
+fi
+
+# [139.2] Pre-flight validation per ticket. Phantom refs that the regex still
+# matches in the subject (e.g. operator typo MCPI-9999) are silently skipped
+# instead of triggering prepare_doc_pack against a non-existent ticket.
+if declare -F validate_jira_ticket >/dev/null 2>&1; then
+    VALID_TICKETS=""
+    for ticket in $TICKETS; do
+        if validate_jira_ticket "$ticket" "$NEXUS_URL" "$WORKSPACE_ID"; then
+            VALID_TICKETS="${VALID_TICKETS}${ticket} "
+        else
+            rc=$?
+            if [[ $rc -eq 1 ]]; then
+                echo "[neo-hook] skip $ticket: not in Jira" >&2
+            fi
+            # rc=2 (network glitch) → silent skip; we already announced unreachable above.
+        fi
+    done
+    TICKETS=$(printf '%s' "$VALID_TICKETS" | xargs -n1 2>/dev/null || true)
+    if [[ -z "$TICKETS" ]]; then
+        exit 0
+    fi
+fi
+
+trigger_pack() {
+    local ticket="$1"
+    local hash_or_range="$2"
+    local payload
+    payload=$(cat <<EOF
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "jira/jira",
+    "arguments": {
+      "action": "prepare_doc_pack",
+      "ticket_id": "$ticket",
+      "repo_root": "$REPO_ROOT",
+      "commit_hash": "$hash_or_range",
+      "auto_attach": true
+    }
+  }
+}
+EOF
+    )
+    local curl_args=(-s --max-time 60 -X POST "$NEXUS_URL/mcp/message"
+        -H "Content-Type: application/json")
+    [[ -n "${WORKSPACE_ID:-}" ]] && curl_args+=(-H "X-Neo-Workspace: $WORKSPACE_ID")
+    curl_args+=(-d "$payload")
+    local response
+    response=$(curl "${curl_args[@]}" 2>/dev/null || echo "{}")
+
+    if echo "$response" | grep -q '"error"'; then
+        local err
+        err=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('message','?'))" 2>/dev/null || echo "?")
+        echo "[neo-hook] $ticket: ERROR — $err" >&2
+    elif echo "$response" | grep -q "Attached as"; then
+        [[ "${NEO_HOOK_QUIET:-0}" == "1" ]] || echo "[neo-hook] $ticket: documented from $hash_or_range ✓"
+    else
+        echo "[neo-hook] $ticket: unexpected response" >&2
+    fi
+}
+
+# [129.4] EPIC-FINAL marker: use full PR range (merge-base..HEAD) instead of single commit.
+# Commit message format: "feat(...): ... [EPIC-FINAL MCPI-N]"
+if echo "$COMMIT_MSG" | grep -qE '\[EPIC-FINAL [A-Z][A-Z0-9]+-[0-9]+\]'; then
+    MERGE_BASE=$(git merge-base origin/main HEAD 2>/dev/null || true)
+    if [[ -n "$MERGE_BASE" ]]; then
+        EPIC_RANGE="${MERGE_BASE}..HEAD"
+        [[ "${NEO_HOOK_QUIET:-0}" == "1" ]] || echo "[neo-hook] EPIC-FINAL detected — range $EPIC_RANGE"
+        for ticket in $TICKETS; do
+            trigger_pack "$ticket" "$EPIC_RANGE"
+        done
+        exit 0
+    else
+        echo "[neo-hook] EPIC-FINAL: could not determine merge-base from origin/main, falling back to single commit" >&2
+    fi
+fi
+
+for ticket in $TICKETS; do
+    trigger_pack "$ticket" "$COMMIT_HASH"
+done
+
+exit 0

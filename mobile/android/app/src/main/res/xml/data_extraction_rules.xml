@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PILAR XXVI 137.B.1 — opt OUT of cloud backup + device-transfer copy of
+  app data. Brain credentials live in EncryptedSharedPreferences (AES-GCM
+  keyed by Android Keystore) but Google Drive Auto-Backup would still
+  upload the encrypted blob to the user's cloud account by default. We
+  opt out everything and let the operator restore via `brain pull` from
+  the federation, which is the audited recovery path.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

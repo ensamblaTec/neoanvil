@@ -1,0 +1,269 @@
+# NeoAnvil Master Plan
+
+**Module:** github.com/ensamblatec/neoanvil
+**Status:** GREEN — 0 linter findings, 86+ tests, full build clean
+
+---
+
+## Completed
+
+### PILAR XXVIII — Multi-Tenant Jira Plugin (99 SP) ✅
+Épicas 1-5 closed (33/34 tasks). Remaining: 5.D integration tests (deferred to Area 1.3).
+See audit trail in git history.
+
+---
+
+## Area 1: Docker + Onboarding (42 SP)
+
+**Goal:** Any developer runs NeoAnvil in under 5 minutes.
+**Audited:** DeepSeek + internal review (2026-05-07). 8 findings incorporated.
+
+### Épica 1.1: Docker Infrastructure (19 SP)
+
+- [ ] 1.1.A Multi-stage Dockerfile: Stage 1 copies go.work + all 15 go.mod for cache-friendly deps layer. Stage 2 builds SPA (Node) into cmd/neo-nexus/static/. Stage 3 builds Go binaries with GOWORK=/app/go.work. Stage 4 runtime alpine with ca-certificates — 5 SP
+- [ ] 1.1.B docker-compose.yaml: SINGLE neoanvil container (Nexus spawns workers internally — fd inheritance requires same process tree). Separate ollama + ollama-embed services. Named volumes for .neo/db/ (NOT bind mounts — BoltDB flock breaks on overlayfs). Health checks on all 3 services — 5 SP
+- [ ] 1.1.C Docker networking: override bind_addr to 0.0.0.0 via NEO_BIND_ADDR env var. Ollama URLs use service names (http://ollama:11434). Disable Nexus ServiceManager Ollama lifecycle in Docker mode (compose manages Ollama separately) — 5 SP
+- [ ] 1.1.D .dockerignore + Makefile targets (docker-build, docker-up, docker-down, docker-logs) — 2 SP
+- [ ] 1.1.E Documentation: docs/onboarding/docker.md with gotchas (no host+container simultaneous, named volumes only, port conflicts) — 2 SP
+
+### Épica 1.2: `neo setup` CLI Command (12 SP)
+
+**Note:** `neo init` already exists for project federation. New workspace scaffolding uses `neo setup`.
+
+- [ ] 1.2.A Cobra command `neo setup [workspace-name]` with flags --bare, --with-ollama, --docker — 2 SP
+- [ ] 1.2.B neo.yaml scaffolding: generate config with sensible defaults (mode=pair, ollama URLs, cache sizes). Uses text/template, not hardcoded strings — 3 SP
+- [ ] 1.2.C .mcp.json generation with --url flag for custom endpoint. Template variable ${NEO_MCP_URL} for Docker. Workspace ID override via --workspace-id flag to handle path-dependent hashes inside containers — 4 SP
+- [ ] 1.2.D Validation: check port conflicts, existing workspace, Go version, Ollama reachability (if --with-ollama). Non-interactive mode for CI with --yes flag — 2 SP
+- [ ] 1.2.E Unit tests for scaffolding (YAML validity, directory creation, .mcp.json format) — 1 SP
+
+### Épica 1.3: Integration & Testing (11 SP)
+
+**Dependency:** 1.3.B depends on Area 3.1.A (Jira mock infrastructure). Build Area 3.1 first or in parallel.
+
+- [ ] 1.3.A Docker Compose smoke test: compose up → wait health → curl /status → verify 3 services → compose down. Runs in CI with docker-compose installed — 3 SP
+- [ ] 1.3.B Jira plugin integration tests: reuse `internal/testmock/jira.go` mock from Area 3.1.A (do NOT create separate mock). 7 MCP actions, multi-tenant routing, rate limiting, workflow validation — 5 SP
+- [ ] 1.3.C README update: Quick Start with Docker path + native path side by side — 1 SP
+- [ ] 1.3.D Makefile target `make test-integration` that runs Docker smoke + Jira mock tests — 2 SP
+
+---
+
+## Area 2: GitHub Plugin (25 SP)
+
+**Goal:** MCP plugin for GitHub — PRs, issues, CI checks, code review, cross-reference with Jira.
+**Audited:** DeepSeek + internal review (2026-05-07). 6 findings incorporated.
+**Pattern:** Copy-adapt from Jira plugin (cmd/plugin-jira/). NO shared pkg/pluginkit/ in v1.
+
+### Config: `~/.neo/plugins/github.json`
+
+```json
+{
+  "version": 2,
+  "active_project": "neoanvil",
+  "api_keys": {
+    "gh-org": {
+      "base_url": "https://api.github.com",
+      "auth": { "type": "PAT", "token_ref": "env:GITHUB_TOKEN" },
+      "rate_limit": { "max_requests_per_hour": 5000, "concurrency": 10, "retry_on_429": true }
+    }
+  },
+  "workspace_mapping": { "default": "neoanvil" },
+  "projects": {
+    "neoanvil": {
+      "api_key": "gh-org",
+      "owner": "ensamblatec",
+      "repo": "neoanvil",
+      "default_branch": "main",
+      "jira_ticket_regex": "STRATIA-\\d+"
+    }
+  }
+}
+```
+
+### Actions: Single `github` macro-tool with 13 actions
+
+**PR:** list_prs, create_pr, merge_pr, close_pr, pr_comments, create_review
+**Issues:** list_issues, create_issue, update_issue
+**CI:** get_checks, get_workflow_runs
+**Repo:** list_branches, compare_commits
+**Cross-ref:** passive regex scan of PR body for jira_ticket_regex (AI agent orchestrates cross-calls)
+
+### Épica 2.1: Core Scaffold + Config (8 SP)
+
+- [ ] 2.1.A Config schema + loader: github.json structs, loadPluginConfig, resolveToken (copy-adapt from Jira config.go) — 2 SP
+- [ ] 2.1.B Main loop + JSON-RPC dispatch: stdin/stdout, handle(), handleToolsCall, extractCallCtx, __health__ action (copy-adapt from Jira main.go) — 2 SP
+- [ ] 2.1.C Client pool + rate limiter: per api_key (NOT per project — GitHub 5000/hr is global per PAT). Adapt x/time/rate to 83 req/min — 2 SP
+- [ ] 2.1.D pkg/github/client.go: REST v3 client with Bearer token auth, configurable base_url (GitHub Enterprise support), retry on 429/5xx, pagination helpers (page + per_page params, has_more response field) — 2 SP
+
+### Épica 2.2: Actions (12 SP)
+
+- [ ] 2.2.A PR actions: list_prs + create_pr + merge_pr (3 endpoints, input validation, Markdown response formatting) — 2 SP
+- [ ] 2.2.B PR review actions: close_pr + pr_comments + create_review (approve/request-changes via event field) — 2 SP
+- [ ] 2.2.C Issue actions: list_issues + create_issue + update_issue (close = update with state:"closed") — 2 SP
+- [ ] 2.2.D CI + repo actions: get_checks + get_workflow_runs + list_branches + compare_commits — 2 SP
+- [ ] 2.2.E Cross-reference: scan PR body/title for jira_ticket_regex, return matched keys as structured data. Passive only — no inter-plugin calls — 2 SP
+- [ ] 2.2.F Audit log: per-action events via pkg/auth.AuditLog to ~/.neo/audit-github.log. Boot-time GET /user connectivity check (log warning if fails, don't block boot) — 2 SP
+
+### Épica 2.3: Deployment + Tests (5 SP)
+
+- [ ] 2.3.A plugins.yaml entry + Makefile target `build-plugins` includes neo-plugin-github. `neo login --provider github` wiring in vault — 1 SP
+- [ ] 2.3.B Unit tests: config validation, token resolution, rate limiter per-key, response formatting, cross-ref regex extraction — 2 SP
+- [ ] 2.3.C Integration test: spawn plugin process, JSON-RPC handshake, tools/list shape validation, mock GitHub API with httptest.Server for 3 key actions (create_pr, list_issues, get_checks) — 2 SP
+
+---
+
+## Area 3: Integration Test Suite (28 SP)
+
+**Goal:** CI-friendly test suite — no real API keys, all external services mocked via httptest.Server.
+**Audited:** DeepSeek + internal review (2026-05-07). 4 findings incorporated.
+**Architecture:** Option A — one mock server per API + shared harness factory in `internal/testmock/`.
+**Guard:** `testing.Short()` skip (matches existing convention). CI runs full suite in separate job.
+
+### Épica 3.1: Mock Infrastructure (`internal/testmock/`) (11 SP)
+
+- [ ] 3.1.A `internal/testmock/jira.go` — Jira Cloud REST v3 mock. Endpoints: GET /issue/{key}, GET /issue/{key}/transitions, POST /issue/{key}/transitions, POST /issue. Configurable fixtures, Basic Auth validation, 429 simulation, call history — 3 SP
+- [ ] 3.1.B `internal/testmock/deepseek.go` — DeepSeek Chat API mock. Endpoint: POST /chat/completions. Bearer auth, configurable reply, atomic call counter, token usage block — 2 SP
+- [ ] 3.1.C `internal/testmock/ollama.go` — Ollama mock. Endpoints: GET /api/tags, POST /api/embed, POST /api/generate. Deterministic embedding vectors — 2 SP
+- [ ] 3.1.D `internal/testmock/github.go` — GitHub REST v3 mock (stub for future plugin). Endpoints: GET /repos/{owner}/{repo}/pulls, POST /repos/{owner}/{repo}/issues — 1 SP
+- [ ] 3.1.E `internal/testmock/harness.go` — Composes all mocks + returns Env map for plugin subprocess injection. `Harness.VaultLookup()` compatible with pkg/nexus/plugin_pool.go. All servers auto-closed via t.Cleanup — 3 SP
+
+### Épica 3.2: Plugin Subprocess Integration Tests (12 SP)
+
+**Prerequisite:** 2 production code changes: (a) `DEEPSEEK_BASE_URL` env var in cmd/plugin-deepseek/main.go buildState(), (b) `JIRA_BASE_URL` env var override in cmd/plugin-jira to bypass domain-based URL.
+
+- [ ] 3.2.A Production fix: DEEPSEEK_BASE_URL + JIRA_BASE_URL env var overrides (enables mock injection into subprocesses) — 1 SP
+- [ ] 3.2.B `cmd/plugin-jira/integ_test.go` — Build binary, spawn, handshake, test get_context + transition against mock. Error propagation test (404 ticket, auth failure) — 3 SP
+- [ ] 3.2.C `cmd/plugin-deepseek/integ_test.go` — Build binary, spawn, test distill_payload + map_reduce (verify parallel call count via atomic counter). Timeout test — 3 SP
+- [ ] 3.2.D `cmd/neo-nexus/integ_e2e_test.go` — Full stack: Nexus + 1 workspace + both plugins. Verify tool routing chain end-to-end, idempotency cache, plugin health polling. Run with -race — 5 SP
+
+### Épica 3.3: CI Pipeline (5 SP)
+
+- [ ] 3.3.A Add `testing.Short()` guard to all new integration tests — 1 SP
+- [ ] 3.3.B New CI job `integration-tests`: build plugin binaries, run `-run 'TestInteg|TestE2E'`, timeout 5min, after unit tests pass — 2 SP
+- [ ] 3.3.C `t.Parallel()` where safe + TestMain timing assertion (no single test >30s) — 2 SP
+
+---
+
+## Area 4: OpenAPI Auto-Generated Spec (16 SP)
+
+**Goal:** Auto-generate OpenAPI 3.0 spec from Go source. Serve at GET /openapi.json. Optional Swagger UI.
+**Audited:** DeepSeek + internal review (2026-05-07). 4 findings incorporated.
+**Architecture:** Runtime generation at boot (AST scan + tool registry), cached in memory, invalidated via existing `/internal/openapi/refresh`.
+
+### Épica 4.1: Spec Generation (`pkg/openapi/`) (10 SP)
+
+- [ ] 4.1.A `pkg/openapi/spec.go` — OpenAPI 3.0 struct types (Spec, PathItem, Operation, Schema, etc.). Pure Go, no deps. ~150 LOC — 2 SP
+- [ ] 4.1.B `pkg/openapi/builder.go` — BuildSpec(contracts, tools, opts) assembles full spec. Path-prefix filter (exclude /internal/* by default). Tags by group. Reuses existing cpg.ContractNode from radar_contracts.go — 3 SP
+- [ ] 4.1.C `pkg/openapi/response.go` — ExtractResponseSchema: AST scan for json.Encode/Marshal in handlers, resolve struct types. Handle inline anonymous structs (`*ast.StructType`). Handle `TrimPrefix` path params → append `{param}` — 3 SP
+- [ ] 4.1.D `pkg/openapi/handler.go` — HTTP handler + in-memory cache. Lazy build on first request. InvalidateCache() wired to existing /internal/openapi/refresh. `?include_internal=true` query param — 2 SP
+
+### Épica 4.2: Serve + UI (6 SP)
+
+- [ ] 4.2.A Wire `/openapi.json` into neo-mcp sseMux + neo-nexus dispatcher mux. Neo-mcp uses radarTool.resolveContracts() + registry.List(). Nexus uses manual route list (pragmatic, <40 routes) — 2 SP
+- [ ] 4.2.B Fix `ToolRegistry.List()` to clone schema.Properties before injecting `target_workspace` — prevents mutation-at-distance that pollutes OpenAPI x-mcp-tools section — 1 SP
+- [ ] 4.2.C Optional Swagger UI at `/docs` via go:embed. Config-gated (`docs_enabled: true` in neo.yaml). Default false — 2 SP
+- [ ] 4.2.D Unit tests: spec generation, path param detection, schema extraction, cache invalidation — 1 SP
+
+---
+
+## Area 5: Slack/Discord Notifications (14 SP)
+
+**Goal:** Push notifications to Slack/Discord channels on critical events (OOM, thermal, certify fail, chaos results).
+**Audited:** DeepSeek + internal review (2026-05-07). 5 findings incorporated.
+**Architecture:** Embedded in Nexus as event subscriber (NOT subprocess plugin). One-way webhooks only.
+**Config:** `nexus.yaml` `notifications:` section. Webhook URLs via `$ENV_VAR` interpolation (never plaintext in logs).
+
+### Config Schema (nexus.yaml)
+
+```yaml
+notifications:
+  enabled: false
+  webhooks:
+    - name: "ops-slack"
+      type: "slack"
+      url: "$SLACK_WEBHOOK_OPS"     # env var interpolation
+    - name: "ops-discord"
+      type: "discord"
+      url: "$DISCORD_WEBHOOK_OPS"
+  routes:
+    thermal_rollback: ["ops-slack", "ops-discord"]
+    oom_guard: ["ops-slack"]
+    policy_veto: ["ops-slack"]
+    oracle_alert: ["ops-slack"]
+    chaos: ["ops-discord"]
+    default: []
+  rate_limit:
+    slack_per_second: 1
+    discord_per_2sec: 5
+  dedup_window_seconds: 60
+```
+
+### Épica 5.1: Core Notification Library (8 SP)
+
+- [ ] 5.1.A Config types in pkg/nexus/config.go: NotificationsConfig, WebhookConfig, RateLimitConfig. Defaults + YAML example. Webhook URL resolved via os.ExpandEnv() — 1 SP
+- [ ] 5.1.B `pkg/notify/notify.go`: Notifier struct, Dispatch(), dedup cache (sync.Map + expiry sweep), route lookup, per-webhook TokenBucket. Uses sre.SafeHTTPClient() for external POSTs. Reject non-HTTPS in prod unless NEO_NOTIFY_ALLOW_HTTP=1 — 3 SP
+- [ ] 5.1.C `pkg/notify/slack.go` + `discord.go`: Format payloads per provider. Slack blocks with color-coded severity. Discord embeds with RGB color. MessageFormatter per event type — 2 SP
+- [ ] 5.1.D `pkg/notify/notify_test.go`: Unit tests with httptest mock webhook. Rate limit, dedup, routing, format, env var interpolation — 2 SP
+
+### Épica 5.2: Nexus Integration (6 SP)
+
+- [ ] 5.2.A ProcessPool lifecycle callbacks: OnChildStarted/OnChildStopped hooks in process_pool.go — 1 SP
+- [ ] 5.2.B `cmd/neo-nexus/notify_subscriber.go`: SSE reader per child (GET /events with X-Neo-Internal-Token auth). Parse SSE frames → Notifier.Dispatch(). Lifecycle hooks for connect/disconnect. SIGHUP reload — 3 SP
+- [ ] 5.2.C Wiring in main.go: boot after pool.StartAll(), shutdown drain, SIGHUP path. nexus.yaml.example update — 1 SP
+- [ ] 5.2.D Integration test: mock child with /events SSE → verify webhook received notification via httptest — 1 SP
+
+---
+
+## Area 6: OpenTelemetry Integration (14 SP)
+
+**Goal:** Trace MCP tool calls end-to-end (Nexus → child → plugin). Export to any OTLP backend.
+**Audited:** DeepSeek + internal review (2026-05-08). 5 findings incorporated.
+**Architecture:** OTel SDK in Nexus + neo-mcp children. Bridge spans for plugins (can't import SDK). Feature-gated, zero overhead when disabled via `nontrace` provider.
+
+### Config (neo.yaml)
+
+```yaml
+otel:
+  enabled: false
+  endpoint: "localhost:4317"
+  protocol: "grpc"
+  service_name: "neoanvil"
+  sample_rate: 1.0
+  insecure: true
+```
+
+### Spans
+
+| Span Name | Emitter | When |
+|-----------|---------|------|
+| `mcp.dispatch` | Nexus | Every POST /mcp/message |
+| `mcp.tool_call` | neo-mcp | tools/call dispatch (attributes: tool, action) |
+| `mcp.plugin_call` | Nexus | Plugin subprocess call (bridge span) |
+| `mcp.scatter` | Nexus | Scatter-gather operations |
+
+### Épica 6.1: SDK Foundation + Nexus Spans (8 SP)
+
+- [ ] 6.1.A `pkg/otelx/` — Init wrapper: InitTracer(cfg), NoopTracer(), Shutdown(). Gate function resolved once at init (nontrace.NewTracerProvider for disabled). Resource detector with service.name + host — 3 SP
+- [ ] 6.1.B Config: OTelConfig struct in pkg/config/config.go. Defaults (disabled). OTLP exporter gRPC+HTTP. neo.yaml.example update — 1 SP
+- [ ] 6.1.C Nexus root span: wrap handleSSEMessage in sse.go. Inject W3C traceparent header into child HTTP requests. Replace newTraceID() in plugin_routing.go with span.SpanContext().TraceID() — 3 SP
+- [ ] 6.1.D neo-mcp child span: extract traceparent from incoming HTTP headers. Create child span in tool dispatch. Record error status on failure. Init TracerProvider at boot — 1 SP
+
+### Épica 6.2: Plugin Bridge + Metrics (6 SP)
+
+- [ ] 6.2.A Bridge span for plugin subprocess calls: Nexus creates span before CallToolWithMeta, injects trace ID in _meta, ends span after response. Plugins log trace_id for correlation without importing SDK — 2 SP
+- [ ] 6.2.B Span attributes bridge: after existing toolLatency.RecordCall, set span attributes (latency_us, status, args_bytes, result_bytes). Store last-N trace IDs per tool in observability.Store for neo_tool_stats — 2 SP
+- [ ] 6.2.C Unit tests: noop tracer zero-alloc verification, span creation/propagation, config parsing, shutdown flush — 1 SP
+- [ ] 6.2.D Documentation: docs/guide/opentelemetry.md — setup with Jaeger/Tempo, config reference, span naming convention — 1 SP
+
+---
+
+## Known Debt
+
+- **ops.go unwired functions:** `auditMultiTenant`, `checkConnectivity`, `checkLegacyDeprecation`, `installShutdownHandler`, `buildStateSafe` are implemented but not called from main.go. Wire during Area 3.2.B (Jira integration tests will exercise them).
+- **Template render order:** `renderTemplate` iterates map non-deterministically. Low risk (placeholder values rarely contain `{other_placeholder}`) but could cause edge case. Fix: sort keys before render.
+- **Audit log blocking:** `auditMultiTenant` calls `audit.Append()` synchronously. If disk is slow, MCP response delays. Future: async buffered channel writer.
+
+## Backlog (ideas, not committed)
+
+- OAuth2 3LO for Jira (stubbed, not urgent — PAT works)
+- Dashboard HUD modernization (React refresh)
+- `neoanvil` CLI rename from `neo` (cosmetic, low priority)

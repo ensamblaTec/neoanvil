@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PILAR XXVI — Neo-Mesh Android manifest.
+  Updated through 137.C.4 (BootReceiver) + 137.D.1 (SyncJobService).
+
+  Permissions:
+    INTERNET                       : R2 / S3 brain push + tsnet overlay
+    ACCESS_NETWORK_STATE           : Wi-Fi vs cellular for power policy (137.B.4)
+    FOREGROUND_SERVICE             : NeoMeshService persistent notification (137.C.1)
+    FOREGROUND_SERVICE_DATA_SYNC   : Android 14 sub-type
+    POST_NOTIFICATIONS             : Android 13+ runtime permission
+    WAKE_LOCK                      : CPU during sync window (137.C.3)
+    RECEIVE_BOOT_COMPLETED         : restart service after boot (137.C.4)
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:label="Neo-Mesh"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="Neo-Mesh">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- NeoMeshService — persistent foreground sync service [137.C.1/C.2] -->
+        <service
+            android:name=".service.NeoMeshService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- SyncJobService — JobScheduler periodic sync [137.D.1] -->
+        <service
+            android:name=".service.SyncJobService"
+            android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- BootReceiver — restart NeoMeshService after device reboot [137.C.4] -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

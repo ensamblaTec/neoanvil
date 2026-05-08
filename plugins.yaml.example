@@ -1,0 +1,171 @@
+# ============================================================================
+# plugins.yaml — Subprocess MCP plugin manifest (global, ~/.neo/plugins.yaml)
+# ============================================================================
+#
+# Declarative registry of Subprocess MCP plugins managed by Nexus.
+# See ADR-005 (docs/adr/ADR-005-plugin-architecture.md) for the architecture
+# decision: plugins are separate MCP servers spawned as subprocesses, isolated
+# from neo-mcp at the OS level.
+#
+# Loader: pkg/plugin/manifest.go::LoadManifest()
+# Resolution order:
+#   1. $NEO_PLUGINS_CONFIG env var (absolute path)
+#   2. ~/.neo/plugins.yaml
+#   3. empty manifest (no plugins)
+#
+# Schema invariants:
+#   - manifest_version must be <= CurrentManifestVersion (this build supports 1)
+#   - each plugin has a unique name
+#   - tier ∈ {workspace, project, nexus}
+#   - name and binary are required
+# ============================================================================
+
+manifest_version: 1
+
+plugins:
+  # --------------------------------------------------------------------------
+  # Example: Atlassian Jira plugin (PILAR XXIII, Épica 125).
+  # Disabled by default — enable explicitly after credentials are provisioned
+  # via `neo login --provider jira ...`.
+  # --------------------------------------------------------------------------
+  - name: jira
+    description: "Atlassian Jira Cloud integration — read tickets via get_context."
+    # Repo path: cmd/plugin-jira/. Build with: go build -o bin/neo-plugin-jira ./cmd/plugin-jira
+    binary: /usr/local/bin/neo-plugin-jira
+
+    # CLI args appended to the binary at spawn time.
+    args: []
+
+    # Names of vault entries to inject as environment variables when the
+    # subprocess starts. The plugin reads them via os.Getenv. Vault resolution
+    # combines pkg/auth/keystore.go (credentials) + pkg/auth/context.go
+    # (active space/board) — see vault.NewLookupWithContext.
+    #
+    # Required (credentials — from `neo login --provider jira ...`):
+    #   JIRA_TOKEN, JIRA_EMAIL, JIRA_DOMAIN
+    # Optional (active context — from `neo space use --provider jira ...`):
+    #   JIRA_ACTIVE_SPACE, JIRA_ACTIVE_SPACE_NAME, JIRA_ACTIVE_BOARD, JIRA_ACTIVE_BOARD_NAME
+    env_from_vault:
+      - JIRA_TOKEN
+      - JIRA_EMAIL
+      - JIRA_DOMAIN
+      - JIRA_ACTIVE_SPACE
+      - JIRA_ACTIVE_SPACE_NAME
+      - JIRA_ACTIVE_BOARD
+      - JIRA_ACTIVE_BOARD_NAME
+
+    # Required Jira permissions (per tool, for the API token account — see ADR-006):
+    #
+    #   jira/get_context  (read issue + last 3 comments):
+    #     Project permission: Browse Projects
+    #     Project permission: View Development Tools  (optional — branch/PR links)
+    #
+    #   jira/transition   (move issue to target_status + optional comment):
+    #     Project permission: Browse Projects
+    #     Project permission: Transition Issues
+    #     Project permission: Add Comments  (only when resolution_comment is provided)
+    #
+    # API Token auth (current, type=api_token): the token inherits the full
+    # permission set of the Atlassian account that issued it. No scope list is
+    # negotiated. Ensure the account holds the project roles above in every
+    # Jira space it needs to act on. Token max lifetime: 1 year (Atlassian
+    # policy since 2024-12-15); rotated via `neo login --provider jira`.
+    #
+    # OAuth 2.0 3LO (future migration path — see ADR-006 §"Cuándo migrar a 3LO"):
+    #   required_scopes:
+    #     - read:jira-work    # jira/get_context  (issues + comments)
+    #     - write:jira-work   # jira/transition   (status update + comment)
+    #   optional_scopes:
+    #     - read:jira-user    # resolve display names in comment attribution
+
+    # Scope of this plugin. Aligns with the 4-tier ownership model
+    # (docs/tier-ownership.md):
+    #   - workspace : spawned per-workspace (rare for external integrations)
+    #   - project   : spawned by the project coordinator workspace only
+    #   - nexus     : singleton at the dispatcher level (typical for SaaS APIs)
+    tier: nexus
+
+    # Tools exported by this plugin are registered as
+    # "<namespace_prefix>/<tool_name>" to prevent collisions with core tools.
+    # If empty, defaults to the plugin name. plugin-jira exposes:
+    #   jira/get_context (Épica 125.4) — read ticket (summary, status, last 3 comments)
+    #   jira/transition  (Épica 125.5) — move ticket to target_status with comment;
+    #                                     mandatory audit log entry to ~/.neo/audit-jira.log
+    namespace_prefix: jira
+
+    # Feature flag. Plugins are opt-in: set to true once:
+    #  1. The binary is built and at the path above
+    #  2. Credentials are stored: `neo login --provider jira --token X --email Y --domain Z`
+    #  3. Active space is set: `neo space use --provider jira --id <PROJECT> ...`
+    #  4. ~/.neo/nexus.yaml has `nexus.plugins.enabled: true`
+    enabled: false
+
+    # Workspace allowlist (P-WSACL — Épica 125.9):
+    #   allowed_workspaces: list of workspace IDs permitted to call this plugin's tools.
+    #   IDs must match [a-z0-9][a-z0-9_-]* (same alphabet as plugin names).
+    #   Empty / omitted = all workspaces in this Nexus instance can call the plugin.
+    #   Workspace IDs come from ~/.neo/workspaces.json (the "id" field per entry).
+    #   Example: restrict Jira plugin to only the team workspace:
+    # allowed_workspaces:
+    #   - neoanvil-95248
+    #   - strategosia-28463
+
+    # Resource quotas (P-QUOTA — Épica 125.8):
+    #   max_memory_mb: RSS cap in megabytes. 0 = unlimited. Enforced via
+    #     cgroups v2 on Linux (requires CAP_SYS_ADMIN or a pre-delegated
+    #     subtree); falls back to a 2-second RSS watchdog on macOS/other.
+    #   max_cpu_percent: CPU throttle 1-100. 0 = unlimited. Enforced via
+    #     cgroups v2 cpu.max on Linux; best-effort renice on macOS/other.
+    # max_memory_mb: 256
+    # max_cpu_percent: 50
+
+  # --------------------------------------------------------------------------
+  # DeepSeek plugin (PILAR XXIV / Épicas 131.A-K · bootstrap por Épica 143).
+  # Disabled por default — habilitar tras `neo login --provider deepseek`.
+  # --------------------------------------------------------------------------
+  # Tools (todas con namespace prefix `deepseek/`):
+  #   deepseek/distill_payload     — comprime logs/contexto grande a líneas relevantes
+  #   deepseek/map_reduce_refactor — aplica un patrón a N archivos en paralelo
+  #   deepseek/red_team_audit      — auditoría adversarial multi-turno (threaded)
+  #   deepseek/generate_boilerplate — genera código repetitivo en paralelo + HNSW dedup
+  #
+  # Storage del thread store: BoltDB en ~/.neo/db/deepseek.db (persistent default
+  # desde Épica 143). Override via `DEEPSEEK_DB_PATH` env var si necesitas mover
+  # la DB. bbolt crea el archivo en first-Open — no necesitas pre-crearla.
+  #
+  # Cache: Block 1 (system+directives+files) cacheado por DeepSeek API entre
+  # calls del mismo prefix. Estructura del fingerprint: SHA-256 per-file en
+  # CacheKeyTracker (pkg/deepseek/cache/tracker.go). Auto-invalidation cuando
+  # un archivo en FileDeps cambia — ver pkg/deepseek/session/store.go.
+  #
+  # Config defaults (todos en neo.yaml::deepseek con valores 0 = use default):
+  #   cache_ttl_seconds: 3600
+  #   max_block1_chars: 80000
+  #   rate_limit_tokens_per_minute: 60000
+  #   burst: 10000
+  #   context_pressure_tokens: 30000     (auto-distill threshold)
+  #   session_ttl_minutes: 15            (thread idle expiry)
+  #   max_tokens_per_session: 500000     (billing circuit breaker)
+  # - name: deepseek
+  #   description: "DeepSeek API plugin — distill, map_reduce, red_team, boilerplate."
+  #   binary: /usr/local/bin/neo-plugin-deepseek
+  #   args: []
+  #   env_from_vault:
+  #     - DEEPSEEK_API_KEY     # alias de TOKEN en pkg/auth/vault.go (Épica 143)
+  #   tier: nexus
+  #   namespace_prefix: deepseek
+  #   enabled: false
+  #   allowed_workspaces:
+  #     - neoanvil-XXXXX         # restringe a workspaces específicos (recomendado)
+
+  # --------------------------------------------------------------------------
+  # Stub for future plugins. Remove or replace when adding real entries.
+  # --------------------------------------------------------------------------
+  # - name: github
+  #   description: "GitHub Issues / Pull Requests integration."
+  #   binary: /usr/local/bin/neo-plugin-github
+  #   env_from_vault: [GITHUB_TOKEN]
+  #   tier: nexus
+  #   enabled: false
+  #   # max_memory_mb: 128
+  #   # max_cpu_percent: 25

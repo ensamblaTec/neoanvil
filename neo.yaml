@@ -1,0 +1,296 @@
+sre:
+    strict_mode: true
+    cusum_target: 0.7
+    cusum_threshold: 0.15
+    ring_buffer_size: 150
+    auto_vacuum_interval: 5m
+    gameday_baseline_rps: 5000
+    trusted_local_ports:
+        - 11434
+        - 11435
+        - 8085
+        - 8080
+        - 8081
+        - 6060
+    safe_commands:
+        - go test
+        - go build
+        - go vet
+        - go fmt
+        - go generate
+        - ls
+        - cat
+        - grep
+        - find
+        - head
+        - tail
+        - wc
+        - npm test
+        - npm run build
+        - npm ci
+        - npm run lint
+        - git status
+        - git log
+        - git diff
+        - git show
+        - cargo test
+        - cargo build
+        - cargo check
+        - python3 -m pytest
+        - python3 -m py_compile
+        - make test
+        - make build
+    unsupervised_max_cycles: 10
+    kinetic_monitoring: true
+    kinetic_threshold: 0.15
+    digital_twin_testing: false
+    consensus_enabled: false
+    consensus_quorum: 0.66
+    context_compress_threshold_kb: 600
+    oracle_alert_threshold: 0.75
+    oracle_heap_limit_mb: 65536
+    oracle_power_limit_w: 80
+    certify_ttl_minutes: 0
+    session_state_ttl_hours: 24
+    token_budget_session_warn: 50000
+    token_budget_session_hard: 100000
+    inc_archive_days: 30
+    runtime_memory_limit_mb: 65536
+    inbox_quota_per_sender_per_hour: 30
+    peer_session_mirror_cap: 0
+    pgo_capture_interval_minutes: 0
+    debt_audit_log: false
+    cpu_affinity_enabled: false
+    cpu_affinity_cores: []
+    task_orphan_timeout_min: 60
+    briefing_http_timeout_ms: 500
+    daemon_max_retries: 3
+    daemon_checkpoint_ttl_hours: 24
+    daemon_token_budget_per_task: 20000
+    daemon_token_budget_session: 200000
+    daemon_auto_recertify_before_commit: true
+    thermal_pressure_check: true
+    daemon_backend_mode: auto
+    max_directive_chars: 500
+    max_directives: 60
+    deepseek_pre_certify: manual
+    deepseek_hot_paths:
+        - pkg/brain/crypto.go
+        - pkg/brain/storage/*.go
+        - pkg/auth/*.go
+        - pkg/nexus/process_pool.go
+        - cmd/neo-nexus/main.go
+        - cmd/neo-nexus/sse.go
+        - cmd/neo-nexus/plugin_routing.go
+    deepseek_block_severity: 9
+server:
+    log_level: info
+    host: 127.0.0.1
+    port: 8080
+    sandbox_port: 8081
+    tactical_port: 8084
+    diagnostics_port: 6060
+    sre_listener_port: 8082
+    sse_port: 8085
+    sse_path: /mcp/sse
+    sse_message_path: /mcp/message
+    mode: pair
+    tailscale: false
+    gossip_peers: []
+    gossip_port: 8086
+    dashboard_port: 8087
+    nexus_dispatcher_port: 9000
+    tool_timeout_seconds: 120
+workspace:
+    ignore_dirs:
+        - node_modules
+        - vendor
+        - .git
+        - dist
+        - .neo
+        - lib
+        - site-packages
+        - __pycache__
+        - venv
+        - .venv
+        - env
+        - doc-prev-note
+    allowed_extensions:
+        - .go
+        - .ts
+        - .js
+        - .py
+        - .md
+        - .rs
+        - .html
+        - .css
+        - .yaml
+    max_file_size_mb: 5
+    modules:
+        web: npm run build
+    dominant_lang: go
+ai:
+    provider: ollama
+    base_url: http://127.0.0.1:11434
+    embed_base_url: http://127.0.0.1:11435
+    embedding_urls: []
+    embedding_model: nomic-embed-text
+    context_window: 8192
+    embed_timeout_seconds: 15
+rag:
+    db_path: .neo/db/hnsw.db
+    chunk_size: 3000
+    overlap: 500
+    batch_size: 400
+    ingestion_workers: 8
+    ollama_concurrency: 16
+    embed_concurrency: 6
+    max_nodes_per_workspace: 1000000
+    workspace_capacity_warn_pct: 0.8
+    drift_threshold: 0.45
+    gc_pressure_threshold: 5
+    arena_miss_rate_threshold: 0.2
+    vector_quant: float32
+    query_cache_capacity: 512
+    embedding_cache_capacity: 2048
+    max_embed_chars: 24000
+    hnsw_batch_enabled: false
+    hnsw_batch_window_ms: 0
+    hnsw_batch_max_size: 0
+    hnsw_persist_path: .neo/db/hnsw.bin
+    hnsw_persist_interval_minutes: 30
+cognitive:
+    strictness: 0.75
+    arena_size: 500000
+    xai_enabled: true
+    auto_approve: false
+pki:
+    ca_cert_path: .neo/pki/ca.crt
+    server_cert_path: .neo/pki/server.crt
+    server_key_path: .neo/pki/server.key
+integrations:
+    plc_endpoint: http://localhost:9091/plc/stop
+    erp_endpoint: http://localhost:9090/erp/ingest
+    chaos_drill_target: http://127.0.0.1:8084/health
+    hud_base_url: http://localhost:8080
+    sandbox_base_url: http://127.0.0.1:8084
+inference:
+    cloud_token_budget_daily: 50000
+    cloud_model: claude-sonnet-4-6
+    ollama_model: qwen2.5-coder:7b
+    ollama_base_url: ""
+    confidence_threshold: 0.7
+    max_local_attempts: 3
+    offline_mode: false
+    debt_file: technical_debt_backlog.md
+    mode: hybrid
+    surrender_after: 3
+    max_auto_fix_attempts: 0
+    cost_table:
+        claude-haiku-4-5:
+            input_per_mtok: 0.8
+            output_per_mtok: 4
+        claude-opus-4-7:
+            input_per_mtok: 15
+            output_per_mtok: 75
+        claude-sonnet-4-6:
+            input_per_mtok: 3
+            output_per_mtok: 15
+        gemini-1.5-flash:
+            input_per_mtok: 0.075
+            output_per_mtok: 0.3
+        gemini-1.5-pro:
+            input_per_mtok: 1.25
+            output_per_mtok: 5
+        gpt-4o:
+            input_per_mtok: 2.5
+            output_per_mtok: 10
+        gpt-4o-mini:
+            input_per_mtok: 0.15
+            output_per_mtok: 0.6
+        llama3:8b:
+            input_per_mtok: 0
+            output_per_mtok: 0
+        qwen2.5-coder:7b:
+            input_per_mtok: 0
+            output_per_mtok: 0
+        qwen2:0.5b:
+            input_per_mtok: 0
+            output_per_mtok: 0
+    agent_model_map:
+        claude-code: claude-opus-4-7
+        claude-desktop: claude-sonnet-4-6
+        gemini-cli: gemini-1.5-pro
+        mcp-inspector: gemini-1.5-flash
+sentinel:
+    heap_threshold_mb: 65536
+    goroutine_explosion_limit: 10000
+    cold_start_grace_sec: 30
+    audit_log_max_size: 1000
+    dream_cycle_count: 3
+    immunity_confidence_init: 0.6
+    immunity_activation_min: 0.5
+kinetic:
+    spectral_bins: 8
+    anomaly_threshold_sigma: 2
+    gc_pause_threshold_us: 10000
+    heap_critical_sigma: 5
+    heap_warning_sigma: 3
+coldstore:
+    max_open_conns: 5
+    max_idle_conns: 3
+    default_query_limit: 50
+hypergraph:
+    max_impact_depth: 5
+    risk_decay_factor: 0.7
+    min_risk_threshold: 0.01
+governance:
+    auto_yes_safe_commands: false
+    quarantine_enforced: true
+    ghost_mode_max_cycles: 50
+    ghost_mode: false
+    constitution_path: .neo/constitution.rego
+federation:
+    dream_schedule: 0 3 * * *
+    dedup_threshold: 0.92
+    manifest_bucket: dream_manifests
+    max_vectors_per_node: 500
+    harvest_timeout_sec: 300
+llm:
+    ollama_url: http://127.0.0.1:11434
+    model: qwen2.5-coder:7b
+    max_tokens: 8192
+    temperature: 0.3
+    llamacpp_path: ""
+    gguf_path: ""
+    aliases:
+        chaos: 'neo_chaos_drill(target: "$1", aggression_level: 5)'
+        status: 'neo_radar(intent: "BRIEFING", mode: "compact")'
+cpg:
+    page_rank_iters: 50
+    page_rank_damping: 0.85
+    activation_alpha: 0.5
+    max_heap_mb: 16384
+    persist_path: .neo/db/cpg.bin
+    persist_interval_minutes: 15
+    package_path: ./cmd/neo-mcp
+    package_dir: cmd/neo-mcp
+hardware:
+    gpu_available: "false"
+    gpu_ollama_model: qwen2.5-coder:32b
+    gpu_embed_concurrency: 8
+    gpu_batch_size: 400
+deepseek:
+    cache_ttl_seconds: 3600
+    max_block1_chars: 80000
+    rate_limit_tokens_per_minute: 60000
+    burst: 10000
+    context_pressure_tokens: 30000
+    session_ttl_minutes: 15
+    session_reaper_interval_minutes: 5
+    chunk_size_tokens: 2000
+    max_tokens_per_session: 500000
+    default_model: deepseek-v4-flash
+    default_thinking_type: ""
+    default_reasoning_effort: ""
+databases: []

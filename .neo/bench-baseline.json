@@ -1,0 +1,41 @@
+{
+  "benchmarks": {
+    "BenchmarkHammingDistance_768": {
+      "allocs_op": 0.0,
+      "bytes_op": 0.0,
+      "ns_op": 4.624
+    },
+    "BenchmarkHammingSimilarity_768": {
+      "allocs_op": 0.0,
+      "bytes_op": 0.0,
+      "ns_op": 5.094
+    },
+    "BenchmarkLexicalIndex_AddDocument": {
+      "allocs_op": 2.0,
+      "bytes_op": 980.0,
+      "ns_op": 1104.0
+    },
+    "BenchmarkLexicalIndex_Search": {
+      "allocs_op": 3.0,
+      "bytes_op": 64.0,
+      "ns_op": 153.4
+    },
+    "BenchmarkQuantizeBinary_768": {
+      "allocs_op": 1.0,
+      "bytes_op": 96.0,
+      "ns_op": 762.1
+    },
+    "BenchmarkQueryCache_Hit": {
+      "allocs_op": 1.0,
+      "bytes_op": 24.0,
+      "ns_op": 52.89
+    },
+    "BenchmarkQueryCache_Miss": {
+      "allocs_op": 0.0,
+      "bytes_op": 0.0,
+      "ns_op": 38.15
+    }
+  },
+  "captured_at": "2026-04-23T23:03:30.696403+00:00",
+  "commit": "646e094d80ff2e36ec0ed4cc47a737f161b31eb3"
+}

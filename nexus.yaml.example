@@ -1,0 +1,257 @@
+# ============================================================================
+# nexus.yaml — Neo-Nexus dispatcher configuration (global, ~/.neo/nexus.yaml)
+# ============================================================================
+#
+# Configuración del dispatcher multi-workspace Neo-Nexus.
+# Este archivo es GLOBAL (vive en ~/.neo/nexus.yaml) y es completamente
+# independiente del neo.yaml por-workspace que lee cada neo-mcp hijo.
+#
+# Separación de responsabilidades:
+#   - neo.yaml          → config por-proyecto del motor MCP (puertos server,
+#                         RAG, AI, storage, sre). Un archivo por repo.
+#   - nexus.yaml        → config del dispatcher (este archivo). Global.
+#
+# Loader: pkg/nexus/config.go::LoadNexusConfig()
+# Resolución: $NEO_NEXUS_CONFIG → ~/.neo/nexus.yaml → defaults
+# ============================================================================
+
+nexus:
+  # --- Dispatcher HTTP ------------------------------------------------------
+  # Puerto donde Nexus escucha. Todos los clientes MCP se conectan aquí;
+  # Nexus hace reverse-proxy al child correcto según workspace header.
+  dispatcher_port: 9000
+  bind_addr: "127.0.0.1"        # Siempre localhost por seguridad.
+
+  # --- Operator HUD Dashboard -------------------------------------------------
+  # [SRE-85.A] Puerto del HUD (antes en neo-mcp, ahora servido por Nexus).
+  # Nexus sirve la SPA y proxea las APIs de datos al child activo.
+  dashboard_port: 8087
+
+  # --- Binario neo-mcp ------------------------------------------------------
+  # Path absoluto al binario a spawnear. Vacío = auto-detect (misma carpeta
+  # que neo-nexus, fallback a $PATH).
+  bin_path: ""
+
+  # --- Rango de puertos para children ---------------------------------------
+  # Cada workspace ocupa un puerto en [port_range_base, port_range_base + size).
+  # Asignación determinística por hash(workspace.Path).
+  port_range_base: 9100
+  port_range_size: 200
+
+  # --- Archivos de estado ---------------------------------------------------
+  # Registry de workspaces (compartido con neo-mcp vía pkg/workspace).
+  registry_file: "~/.neo/workspaces.json"
+  # Persistencia workspace→puerto asignado (para reanudación tras restart).
+  ports_file: "~/.neo/nexus_ports.json"
+
+  # --- Filtro de children SSE -----------------------------------------------
+  # Allowlist explícita de workspace IDs o nombres que Nexus arranca como
+  # hijos SSE. Vacío (o sección omitida) = arranca todos los registrados en
+  # ~/.neo/workspaces.json. Usar para excluir proyectos stdio-only o para
+  # limitar qué hijos suben en una máquina con muchos workspaces.
+  #
+  # Hot-reload sin reiniciar el dispatcher:
+  #   kill -HUP $(pgrep neo-nexus)
+  # Nexus diffea la lista: arranca los nuevos, detiene los removidos.
+  managed_workspaces: []
+  #   - "neoanvil"
+  #   - "my-project"
+
+  # --- Logging de children --------------------------------------------------
+  # Evita ruido en el terminal del dispatcher redirigiendo stdout/stderr de
+  # cada hijo a un archivo propio. Un tail puede seguirlos en paralelo.
+  logs:
+    dir: "~/.neo/logs"
+    mode: "file"                # file | inherit (inherit = debug, stdout compartido)
+    rotate_mb: 50               # Rotación manual al superar N MB
+    keep_files: 5               # Conservar últimos N rotados
+
+  # --- Boot de children -----------------------------------------------------
+  child:
+    # Redirección de stdin del hijo. CRITICAL:
+    #   devnull (default) → hijo entra a modo SSE-only, no lee JSON-RPC
+    #   inherit           → hijo hereda stdin del Nexus (BUG, puede colgar)
+    # Ver pkg/nexus/process_pool.go::Start — sin devnull, si Nexus se lanza
+    # desde un cliente MCP con stdin-pipe, el hijo bloquea en json.Decode().
+    stdin_mode: "devnull"
+
+    # Timeout total para boot del hijo (desde exec.Start hasta primer health
+    # OK). Supera esto → marca StatusError y no hace proxy a ese hijo.
+    startup_timeout_seconds: 15
+
+    # Grace period antes del primer health check.
+    boot_grace_seconds: 3
+
+    # Variables de entorno extra inyectadas a cada child (además de
+    # NEO_PORT + NEO_WORKSPACE_ID que Nexus setea siempre).
+    #
+    # OLLAMA_EMBED_HOST: cuando services.ollama_embed.enabled=true, añadir
+    # esta línea para que todos los workspaces usen la instancia dedicada de
+    # embeddings sin tocar ningún neo.yaml individual. pkg/config/config.go
+    # lo aplica al parsear (post-write-back, nunca se persiste a disco).
+    extra_env:
+      NEO_SERVER_MODE: "pair"   # pair | fast | daemon
+      # OLLAMA_EMBED_HOST: "http://127.0.0.1:11435"   # descomentar con services.ollama_embed
+
+    # Timeout total para que EnsureRunning espere a que un lazy child alcance
+    # StatusRunning. Solo aplica a workspaces con lifecycle=lazy. [ÉPICA 150]
+    lazy_boot_timeout_seconds: 600
+
+    # Idle reaper: workspace lazy que no recibe tool calls por idle_seconds
+    # es detenido automáticamente. 0 = desactivado (default). [ÉPICA 150.C]
+    idle_seconds: 0
+    idle_reaper_tick_seconds: 60
+
+    # Pre-warm automático: N segundos después de RegisterCold, el workspace
+    # lazy arranca en background sin esperar el primer request. Útil cuando
+    # el workspace es de uso frecuente pero tiene boot lento (HNSW cold load).
+    # 0 = desactivado (default). [ÉPICA 150.M]
+    lazy_prewarm_seconds: 0
+
+  # --- Watchdog -------------------------------------------------------------
+  # Monitoreo activo de salud de children Y de los servicios Ollama gestionados.
+  watchdog:
+    enabled: true
+    health_endpoint: "/health"
+    check_interval_seconds: 10
+    # Si N chequeos consecutivos fallan, marca el child como unhealthy y
+    # lo reinicia (si auto_restart=true). Aplica también a servicios Ollama.
+    failure_threshold: 3
+    auto_restart: true
+    max_restarts_per_hour: 5    # Circuit breaker — evita restart loops
+
+  # --- REST API mgmt --------------------------------------------------------
+  api:
+    # Endpoints expuestos bajo /api/v1/workspaces/*
+    enabled: true
+    # Autenticación opcional (token compartido). Vacío = sin auth (solo
+    # aceptable en bind 127.0.0.1).
+    auth_token: ""
+
+  # --- Telemetría -----------------------------------------------------------
+  telemetry:
+    # Exponer /metrics en formato Prometheus en el puerto dispatcher.
+    prometheus_enabled: false
+    # Log estructurado JSON en lugar de texto plano.
+    json_logs: false
+
+  # --- Debt registry Nexus-level (PILAR LXVI / 351.A) -----------------------
+  # Persistente de deuda a nivel dispatcher. Cuando enabled:true, Nexus escribe
+  # automáticamente eventos a ~/.neo/nexus_debt.md desde:
+  #   - verify_boot timeouts (child zombie que retiene BoltDB lock)
+  #   - watchdog rate-limit trips
+  #   - service_manager Ollama unreachable
+  #   - port_allocator conflicts
+  # Hot-reload: NO. Cambios requieren `make rebuild-restart` (el registry se
+  # construye al boot en NewProcessPoolWithConfig).
+  debt:
+    enabled: true
+    file: "~/.neo/nexus_debt.md"
+    # Archivar eventos resolved con más de N días vs hoy. 0 = sin archiving.
+    max_resolved_days: 30
+    # Ventana de deduplicación. Si llega el MISMO (title+affected_workspaces)
+    # dentro de estos minutos de una entry open existente, incrementa contador
+    # en vez de duplicar. 0 = sin dedup.
+    dedup_window_minutes: 15
+    # Reservado para futuro (BoltDB mirror para queries rápidas). No funcional aún.
+    boltdb_mirror: false
+
+  # --- Subprocess MCP plugin pool [PILAR-XXIII / 123.6] ---------------------
+  # Plugins son MCP servers spawned como subprocesses, declarados en
+  # ~/.neo/plugins.yaml (esquema en plugins.yaml.example y pkg/plugin/manifest.go).
+  # ADR-005: docs/adr/ADR-005-plugin-architecture.md.
+  #
+  # Disabled por defecto (opt-in). Cuando enabled:true, Nexus al boot:
+  #   1. Carga el manifest desde $NEO_PLUGINS_CONFIG → ~/.neo/plugins.yaml.
+  #   2. Spawnea cada PluginSpec con Enabled:true vía PluginPool.
+  #   3. stdin/stdout = canal MCP JSON-RPC; stderr → ~/.neo/logs/plugin-<name>.log.
+  #   4. Tools de cada plugin se aggregan namespace-prefijadas (jira/get_context).
+  #
+  # Hot-reload: NO en esta versión — cambios requieren restart de Nexus.
+  plugins:
+    enabled: false
+
+  # --- Servicios del sistema (Ollama) ---------------------------------------
+  # Nexus puede gestionar instancias Ollama como dependencias del sistema,
+  # arrancándolas antes que cualquier child y monitoreándolas con el mismo
+  # watchdog. Todos deshabilitados por defecto (opt-in).
+  #
+  # Secuencia de boot cuando enabled=true:
+  #   1. Verifica si Ollama ya está en el puerto (externamente levantado)
+  #   2. Si no, ejecuta `ollama serve` con el env configurado
+  #   3. Espera hasta health_timeout_seconds a que /api/tags responda OK
+  #   4. Lanza ensure_models en background (no bloquea el boot)
+  #   5. Inicia children neo-mcp
+  #
+  # Si Nexus arrancó el proceso, también lo para en shutdown (SIGINT → 5s → SIGKILL).
+  # Si ya estaba corriendo al arrancar Nexus, lo deja intacto en shutdown.
+  #
+  # Logs: ~/.neo/logs/nexus-service-ollama_llm.log (misma rotación que children)
+  # Estado: GET http://127.0.0.1:9000/api/v1/services
+  services:
+
+    # Instancia LLM — inferencia local (modelos grandes)
+    # Parámetros optimizados para Apple Silicon con 96GB unified VRAM.
+    ollama_llm:
+      enabled: false              # cambiar a true para que Nexus gestione Ollama LLM
+      port: 11434
+      bind_addr: "127.0.0.1"
+      health_path: "/api/tags"
+      health_timeout_seconds: 30  # tiempo máximo para que `ollama serve` esté listo
+      pull_timeout_seconds: 600   # 10 min para modelos grandes (32B+)
+      ensure_models:              # modelos que deben estar presentes antes de abrir children
+        - "qwen2.5-coder:32b"
+        - "qwen2.5:32b"
+      env:
+        OLLAMA_MAX_LOADED_MODELS: "5"   # mantiene hasta 5 modelos en VRAM simultáneos
+        OLLAMA_NUM_PARALLEL: "4"        # 4 requests concurrentes por modelo
+        OLLAMA_KEEP_ALIVE: "-1"         # ningún modelo se descarga nunca
+        OLLAMA_FLASH_ATTENTION: "1"     # reduce VRAM ~30% por modelo en Apple Silicon
+
+    # Instancia embed — exclusiva para embeddings (nomic-embed-text, 274MB)
+    # Puerto separado (:11435) para evitar contención con bulk ingestion durante
+    # BLAST_RADIUS y SEMANTIC_CODE. Ver docs sobre la solución al círculo vicioso.
+    ollama_embed:
+      enabled: false              # cambiar a true para instancia embed dedicada
+      port: 11435
+      bind_addr: "127.0.0.1"
+      health_path: "/api/tags"
+      health_timeout_seconds: 30
+      pull_timeout_seconds: 120   # nomic-embed-text es 274MB — pull rápido
+      ensure_models:
+        - "nomic-embed-text"
+      env:
+        OLLAMA_MAX_LOADED_MODELS: "1"   # solo el modelo de embeddings
+        OLLAMA_NUM_PARALLEL: "16"       # 16 requests concurrentes — nomic es tiny (274MB)
+        OLLAMA_KEEP_ALIVE: "-1"         # siempre cargado
+
+# ============================================================================
+# ACTIVAR GESTIÓN DE OLLAMA (configuración recomendada)
+# ============================================================================
+#
+# 1. En ~/.neo/nexus.yaml, cambiar enabled: true en ambos servicios
+# 2. Añadir OLLAMA_EMBED_HOST en child.extra_env:
+#      extra_env:
+#        NEO_SERVER_MODE: "pair"
+#        OLLAMA_EMBED_HOST: "http://127.0.0.1:11435"
+# 3. En cada neo.yaml de workspace, configurar las URLs:
+#      ai:
+#        base_url: "http://localhost:11434"
+#        embed_base_url: "http://localhost:11435"   # opcional si usas OLLAMA_EMBED_HOST
+# 4. Relanzar Nexus: kill $(pgrep neo-nexus) && ./bin/neo-nexus
+# 5. Verificar: curl http://127.0.0.1:9000/api/v1/services
+#
+# Alternativamente, para dev sin Nexus: bin/start-ollama.sh start
+#
+# NOTAS DE MIGRACIÓN (sin servicios gestionados)
+# ============================================================================
+#
+#   1. cp nexus.yaml.example ~/.neo/nexus.yaml
+#   2. Editar dispatcher_port si colisiona con otro servicio
+#   3. Lanzar: ./bin/neo-nexus (sin flags — lee ~/.neo/nexus.yaml)
+#   4. Verificar: curl http://127.0.0.1:9000/health
+#   5. Logs de children: tail -F ~/.neo/logs/nexus-*.log
+#
+# Los flags --port y --bin siguen siendo soportados para override manual
+# (prevalecen sobre nexus.yaml).
+# ============================================================================

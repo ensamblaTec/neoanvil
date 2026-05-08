@@ -1,0 +1,284 @@
+/* [PILAR-XXVII/245.Q] Responsive HUD styles.
+ *
+ * Target breakpoints:
+ *   desktop  >= 1024 px  — sidebar always visible, 2-col grids
+ *   tablet    768-1023   — sidebar collapsible via toggle
+ *   mobile    < 768      — sidebar hidden by default, tabs wrap
+ *
+ * Inline styles on the components handle colors + small numeric values;
+ * this stylesheet owns anything that needs media queries or pseudo-classes. */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #050505;
+  color: #eee;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ───── App shell ───── */
+
+.app-shell {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ───── Sidebar ───── */
+
+.ws-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: #111;
+  color: #eee;
+  font-family: monospace;
+  border-right: 1px solid #222;
+  padding: 10px 0;
+  overflow-y: auto;
+  transition: transform 0.2s ease, width 0.2s ease;
+}
+
+.ws-main {
+  flex: 1;
+  min-width: 0;           /* Critical — lets flex children shrink below content size. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Mobile: sidebar slides off-canvas, revealed via toggle */
+@media (max-width: 767px) {
+  .ws-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 80vw;
+    max-width: 320px;
+    z-index: 100;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+  }
+  .ws-sidebar.open {
+    transform: translateX(0);
+  }
+  .ws-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+  }
+}
+
+/* Hide the toggle button on tablet+ */
+.ws-sidebar-toggle {
+  display: none;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 50;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #333;
+  background: #161616;
+  color: #22d3ee;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 18px;
+  font-family: monospace;
+}
+@media (max-width: 767px) {
+  .ws-sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* ───── Tab bar ───── */
+
+.ws-tabs-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px;
+  background: #0a0a0a;
+  border-bottom: 1px solid #222;
+  font-family: monospace;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.ws-tabs-bar::-webkit-scrollbar { height: 4px; }
+.ws-tabs-bar::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+@media (max-width: 767px) {
+  .ws-tabs-bar {
+    padding: 8px 10px 8px 56px;  /* leave room for the toggle button */
+  }
+}
+
+.ws-tab {
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #888;
+  white-space: nowrap;
+  user-select: none;
+  flex-shrink: 0;
+}
+.ws-tab:hover { background: #161616; color: #bbb; }
+.ws-tab.active { background: #1f3a4d; color: #22d3ee; }
+
+/* ───── Body ───── */
+
+.ws-body {
+  flex: 1;
+  overflow: auto;
+  padding: 18px;
+  color: #ddd;
+  font-family: monospace;
+}
+
+@media (max-width: 767px) {
+  .ws-body {
+    padding: 12px;
+  }
+}
+
+/* ───── Responsive grids used across tabs ───── */
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.grid-gauges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: flex-start;
+}
+
+/* ───── Card primitive (reused) ───── */
+
+.card {
+  background: #0d0d0d;
+  border: 1px solid #1f1f1f;
+  border-radius: 6px;
+  padding: 12px;
+  min-width: 0;            /* Allow shrinking inside flex/grid */
+}
+.card-title {
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 13px;
+  min-width: 0;
+}
+.kv-row .k { color: #aaa; flex-shrink: 0; }
+.kv-row .v { color: #eee; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ───── Tool table: horizontal scroll on narrow screens ───── */
+
+.tools-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -18px;
+  padding: 0 18px;
+}
+.tools-table {
+  width: 100%;
+  min-width: 640px;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+.tools-table th {
+  padding: 6px 10px;
+  border-bottom: 2px solid #222;
+  cursor: pointer;
+  color: #888;
+  user-select: none;
+  text-align: left;
+}
+.tools-table th.right { text-align: right; }
+.tools-table th.active { color: #22d3ee; }
+.tools-table td { padding: 4px 10px; border-bottom: 1px solid #1a1a1a; }
+.tools-table td.right { text-align: right; }
+.tools-table tr:hover td { background: #111; }
+
+/* ───── Header + footer ───── */
+
+.ws-header {
+  padding: 10px 14px;
+  background: #0a0a0a;
+  border-bottom: 1px solid #222;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+/* ───── Legacy app holder (keeps blue Panopticon background workable) ───── */
+
+.legacy-shell {
+  width: 100vw;
+  height: 100vh;
+  background: #000a1a;
+  position: relative;
+}
+
+/* ───── Inputs ───── */
+
+.ws-search {
+  padding: 6px 10px;
+  background: #111;
+  border: 1px solid #333;
+  color: #eee;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 13px;
+  max-width: 100%;
+}
+.ws-search:focus { outline: none; border-color: #22d3ee; }
+
+/* ───── Legacy CSS retained for backwards compat (counter / hero) ───── */
+
+.counter {
+  font-size: 16px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  color: var(--accent, #58a6ff);
+  background: var(--accent-bg, #1f2937);
+  border: 2px solid transparent;
+  transition: border-color 0.3s;
+  margin-bottom: 24px;
+}
+.counter:hover { border-color: var(--accent-border, #58a6ff); }
+.counter:focus-visible { outline: 2px solid var(--accent, #58a6ff); outline-offset: 2px; }
