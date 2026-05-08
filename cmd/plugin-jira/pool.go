@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"golang.org/x/time/rate"
@@ -54,9 +55,10 @@ func (p *clientPool) getOrCreate(keyName string, key *APIKey, token string) (*po
 	}
 
 	c, err := jira.NewClient(jira.Config{
-		Domain: key.Domain,
-		Email:  key.Email,
-		Token:  token,
+		Domain:  key.Domain,
+		Email:   key.Email,
+		Token:   token,
+		BaseURL: os.Getenv("JIRA_BASE_URL"), // Area 3.2.A: integration test override
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create client for %q: %w", keyName, err)

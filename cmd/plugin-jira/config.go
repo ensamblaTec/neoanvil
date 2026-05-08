@@ -324,9 +324,10 @@ func buildStateFromLegacy() (*state, error) {
 		return nil, errors.New("JIRA_TOKEN, JIRA_EMAIL and JIRA_DOMAIN are required (legacy mode)")
 	}
 	c, err := jira.NewClient(jira.Config{
-		Domain: domain,
-		Email:  email,
-		Token:  token,
+		Domain:  domain,
+		Email:   email,
+		Token:   token,
+		BaseURL: os.Getenv("JIRA_BASE_URL"), // Area 3.2.A: integration test override
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build legacy client: %w", err)
@@ -361,9 +362,10 @@ func buildStateFromConfig(cfg *PluginConfig) (*state, error) {
 		return nil, fmt.Errorf("resolve token for %q: %w", proj.APIKeyRef, err)
 	}
 	c, err := jira.NewClient(jira.Config{
-		Domain: key.Domain,
-		Email:  key.Email,
-		Token:  token,
+		Domain:  key.Domain,
+		Email:   key.Email,
+		Token:   token,
+		BaseURL: os.Getenv("JIRA_BASE_URL"), // Area 3.2.A: integration test override
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build client: %w", err)

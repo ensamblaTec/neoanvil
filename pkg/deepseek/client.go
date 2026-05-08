@@ -29,7 +29,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"sort"
+	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -160,9 +162,11 @@ func New(cfg Config) (*Client, error) {
 	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("deepseek: APIKey is required")
 	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = defaultBaseURL
+	resolvedBase, err := validateBaseURL(cfg.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("deepseek: %w", err)
 	}
+	cfg.BaseURL = resolvedBase
 	if cfg.Model == "" {
 		cfg.Model = defaultModel
 	}
@@ -204,6 +208,34 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	return c, nil
+}
+
+// validateBaseURL hardens the BaseURL Config field against accidental or
+// malicious env-var injection. Trims whitespace + trailing slash, ensures
+// the scheme is http or https, and ensures a host is present. Empty
+// override returns defaultBaseURL.
+//
+// Defense-in-depth — if an attacker can write the DEEPSEEK_BASE_URL env
+// var of a running plugin they likely already own the box, but failing
+// fast on a malformed URL is cheap and prevents accidental misconfig
+// from leaking the API key to a wrong host. [Area 3.2.A — DS-AUDIT Finding 1]
+func validateBaseURL(override string) (string, error) {
+	override = strings.TrimSpace(override)
+	override = strings.TrimRight(override, "/")
+	if override == "" {
+		return defaultBaseURL, nil
+	}
+	parsed, err := neturl.Parse(override)
+	if err != nil {
+		return "", fmt.Errorf("BaseURL %q is malformed: %w", override, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("BaseURL %q must use http or https scheme (got %q)", override, parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("BaseURL %q is missing a host", override)
+	}
+	return override, nil
 }
 
 // Close releases the BoltDB handle.

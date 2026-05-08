@@ -110,7 +110,12 @@ func buildState() (*state, error) {
 	// [ÉPICA 152.H] Capture boot timestamp for uptime reporting via __health__.
 	atomic.StoreInt64(&st.startedAtUnix, time.Now().Unix())
 	// Build the DeepSeek client. DBPath is optional; without it threads are in-memory only.
-	c, err := deepseek.New(deepseek.Config{APIKey: key, DBPath: os.Getenv("DEEPSEEK_DB_PATH")})
+	// BaseURL: Area 3.2.A integration-test override; empty falls back to defaultBaseURL.
+	c, err := deepseek.New(deepseek.Config{
+		APIKey:  key,
+		DBPath:  os.Getenv("DEEPSEEK_DB_PATH"),
+		BaseURL: os.Getenv("DEEPSEEK_BASE_URL"),
+	})
 	if err == nil {
 		st.client = c
 	}

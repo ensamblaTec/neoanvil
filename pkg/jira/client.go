@@ -71,15 +71,24 @@ type Config struct {
 	Token  string        // API token from id.atlassian.com
 	HTTP   *http.Client  // optional override (nil = default with 30s timeout)
 	MinGap time.Duration // optional throttle gap (0 = 100ms default)
+
+	// BaseURL overrides the default `https://{Domain}` prefix used to build
+	// REST URLs. Required for integration tests that need to point the
+	// client at an http://127.0.0.1:NNNN testmock instead of Atlassian's
+	// production HTTPS host. When empty, falls back to the legacy
+	// `https://{Domain}` shape so production callers see no behavior change.
+	// [Area 3.2.A]
+	BaseURL string
 }
 
 // Client is a Jira Cloud REST client. Safe for concurrent use — request
 // throttling is mutex-serialized; HTTP is delegated to the embedded client.
 type Client struct {
-	domain string
-	email  string
-	token  string
-	http   *http.Client
+	domain  string
+	email   string
+	token   string
+	http    *http.Client
+	baseURL string // resolved at New: BaseURL if set, else "https://"+Domain
 
 	mu      sync.Mutex
 	lastReq time.Time
@@ -106,13 +115,45 @@ func NewClient(cfg Config) (*Client, error) {
 	if gap == 0 {
 		gap = defaultMinGap
 	}
+	baseURL, err := resolveBaseURL(cfg.BaseURL, cfg.Domain)
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
-		domain: cfg.Domain,
-		email:  cfg.Email,
-		token:  cfg.Token,
-		http:   httpClient,
-		minGap: gap,
+		domain:  cfg.Domain,
+		email:   cfg.Email,
+		token:   cfg.Token,
+		http:    httpClient,
+		baseURL: baseURL,
+		minGap:  gap,
 	}, nil
+}
+
+// resolveBaseURL turns the operator-supplied BaseURL into the final prefix
+// used for REST URL construction. Validates the scheme is http/https,
+// trims whitespace and trailing slashes, and falls back to
+// `https://{domain}` when override is empty.
+//
+// Defense-in-depth: a malformed or non-http(s) URL fails fast at boot
+// rather than silently routing requests to an attacker-controlled host.
+// [Area 3.2.A — DS-AUDIT Finding 1]
+func resolveBaseURL(override, domain string) (string, error) {
+	override = strings.TrimSpace(override)
+	override = strings.TrimRight(override, "/")
+	if override == "" {
+		return "https://" + domain, nil
+	}
+	parsed, err := url.Parse(override)
+	if err != nil {
+		return "", fmt.Errorf("BaseURL %q is malformed: %w", override, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("BaseURL %q must use http or https scheme (got %q)", override, parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("BaseURL %q is missing a host", override)
+	}
+	return override, nil
 }
 
 // GetIssue fetches the issue identified by key (e.g. "ENG-123") with up to
@@ -124,8 +165,8 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*Issue, error) {
 	}
 	c.throttle()
 
-	u := fmt.Sprintf("https://%s/rest/api/3/issue/%s?fields=summary,status,description,comment",
-		c.domain, url.PathEscape(key))
+	u := fmt.Sprintf("%s/rest/api/3/issue/%s?fields=summary,status,description,comment",
+		c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -163,8 +204,8 @@ func (c *Client) SearchIssues(ctx context.Context, jql string, limit int) ([]Iss
 	}
 	c.throttle()
 
-	u := fmt.Sprintf("https://%s/rest/api/3/search?jql=%s&fields=summary,status&maxResults=%d",
-		c.domain, url.QueryEscape(jql), limit)
+	u := fmt.Sprintf("%s/rest/api/3/search?jql=%s&fields=summary,status&maxResults=%d",
+		c.baseURL, url.QueryEscape(jql), limit)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -226,7 +267,7 @@ func (c *Client) ListTransitions(ctx context.Context, key string) ([]Transition,
 	}
 	c.throttle()
 
-	u := fmt.Sprintf("https://%s/rest/api/3/issue/%s/transitions", c.domain, url.PathEscape(key))
+	u := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -293,7 +334,7 @@ func (c *Client) DoTransition(ctx context.Context, key, transitionID, comment st
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	u := fmt.Sprintf("https://%s/rest/api/3/issue/%s/transitions", c.domain, url.PathEscape(key))
+	u := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -492,7 +533,7 @@ func (c *Client) CreateIssue(ctx context.Context, in CreateIssueInput) (*CreateI
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
 
-	u := fmt.Sprintf("https://%s/rest/api/3/issue", c.domain)
+	u := fmt.Sprintf("%s/rest/api/3/issue", c.baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -636,7 +677,7 @@ func (c *Client) UpdateIssue(ctx context.Context, key string, in UpdateIssueInpu
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	u := fmt.Sprintf("https://%s/rest/api/3/issue/%s", c.domain, url.PathEscape(key))
+	u := fmt.Sprintf("%s/rest/api/3/issue/%s", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -712,7 +753,7 @@ func (c *Client) LinkIssue(ctx context.Context, fromKey, toKey, linkType string)
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	u := fmt.Sprintf("https://%s/rest/api/3/issueLink", c.domain)
+	u := fmt.Sprintf("%s/rest/api/3/issueLink", c.baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -750,7 +791,7 @@ func (c *Client) AttachFile(ctx context.Context, key, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("build multipart: %w", err)
 	}
-	u := fmt.Sprintf("https://%s/rest/api/3/issue/%s/attachments", c.domain, url.PathEscape(key))
+	u := fmt.Sprintf("%s/rest/api/3/issue/%s/attachments", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, body)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -778,7 +819,7 @@ func (c *Client) LookupAccountByEmail(ctx context.Context, email string) (string
 	}
 	c.throttle()
 
-	u := fmt.Sprintf("https://%s/rest/api/3/user/search?query=%s", c.domain, url.QueryEscape(email))
+	u := fmt.Sprintf("%s/rest/api/3/user/search?query=%s", c.baseURL, url.QueryEscape(email))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
