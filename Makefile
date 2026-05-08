@@ -194,7 +194,10 @@ build-mcp:
 	$(call banner_arch)
 	$(GOBUILD) -o $(MCP_BIN) ./cmd/neo-mcp
 
-build-nexus: build-hud
+# build-nexus: by default does NOT rebuild the HUD SPA (web/) — it relies on
+# the bundle already staged under cmd/neo-nexus/static/. Run `make build-hud`
+# manually when the React SPA changes (requires npm + tsc installed locally).
+build-nexus:
 	$(call banner_arch)
 	$(GOBUILD) -o $(NEXUS_BIN) ./cmd/neo-nexus
 
@@ -407,8 +410,12 @@ audit-bench: .neo/bench-baseline.json
 
 # build-hud: compile the React SPA and stage it under cmd/neo-nexus/static/
 # so the go:embed in dashboard.go picks up the freshest bundle.
+# Decoupled from build-nexus — the staged bundle is committed-equivalent and
+# only needs to be rebuilt when web/src/* changes. Requires npm + tsc.
 # [PILAR-XXVII/245.Q]
 build-hud:
+	@command -v npm >/dev/null 2>&1 || { printf "\033[31m[hud]\033[0m npm not found — skip HUD rebuild (existing bundle in cmd/neo-nexus/static/ is used)\n"; exit 1; }
+	@[ -d web/node_modules ] || { printf "\033[33m[hud]\033[0m web/node_modules missing — running 'npm install' in web/\n"; cd web && npm install; }
 	@printf "\033[36m[make]\033[0m building HUD SPA (web/ → cmd/neo-nexus/static/)\n"
 	@cd web && npm run build 2>&1 | tail -4
 	@mkdir -p cmd/neo-nexus/static/assets
