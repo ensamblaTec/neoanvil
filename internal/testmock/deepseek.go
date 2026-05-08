@@ -145,16 +145,16 @@ func (m *DeepSeekMock) handleChatCompletions(w http.ResponseWriter, r *http.Requ
 	}
 
 	if reply.Status != 0 && reply.Status != http.StatusOK {
-		body := reply.StatusBody
-		if body == "" {
+		errBody := reply.StatusBody
+		if errBody == "" {
 			// Real DeepSeek API always returns a JSON error envelope on
 			// non-2xx. Default to a minimal one so production clients
 			// exercise their decode path identically. [DS-AUDIT-3.1.B]
-			body = `{"error":{"message":"` + http.StatusText(reply.Status) + `"}}`
+			errBody = `{"error":{"message":"` + http.StatusText(reply.Status) + `"}}`
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(reply.Status)
-		_, _ = io.WriteString(w, body)
+		_, _ = io.WriteString(w, errBody)
 		return
 	}
 
