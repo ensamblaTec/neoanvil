@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/auth"
@@ -66,6 +67,13 @@ type state struct {
 	mu               sync.Mutex
 	cachedContexts   *auth.ContextStore
 	contextsLoadedAt time.Time
+
+	// [ÉPICA 152.H] Local-only health counters consumed by the __health__
+	// MCP action. Atomic so the Nexus health poll (every 30s) is lock-free
+	// at <10ms target latency and never touches the upstream Jira API.
+	startedAtUnix    int64
+	lastDispatchUnix int64
+	errorCount       int64
 }
 
 // callCtx carries per-request metadata extracted from _meta injected by Nexus.
@@ -132,6 +140,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "plugin-jira: init failed:", err)
 		os.Exit(1)
 	}
+	atomic.StoreInt64(&st.startedAtUnix, time.Now().Unix())
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 1<<16), 1<<20)
@@ -277,6 +286,25 @@ func (s *state) handleToolsCall(id any, req map[string]any) map[string]any {
 		return rpcErr(id, -32602, "unknown tool: "+name+" (this plugin exposes 'jira')")
 	}
 	action, _ := args["action"].(string)
+
+	// [ÉPICA 152.H] __health__ short-circuits before bookkeeping. Local
+	// liveness probe — never touches the Jira API, returns instantly.
+	if action == "__health__" {
+		return s.handleHealth(id)
+	}
+
+	atomic.StoreInt64(&s.lastDispatchUnix, time.Now().Unix())
+	resp := s.dispatchAction(id, action, args, cc)
+	if _, isErr := resp["error"]; isErr {
+		atomic.AddInt64(&s.errorCount, 1)
+	}
+	return resp
+}
+
+// dispatchAction routes a real action to its handler. Extracted from
+// handleToolsCall so __health__ can short-circuit before the bookkeeping
+// updates (last_dispatch_unix, error_count). [ÉPICA 152.H]
+func (s *state) dispatchAction(id any, action string, args map[string]any, cc callCtx) map[string]any {
 	switch action {
 	case "get_context":
 		return s.callGetContext(id, args, cc)
@@ -296,6 +324,38 @@ func (s *state) handleToolsCall(id any, req map[string]any) map[string]any {
 		return rpcErr(id, -32602, "action is required (get_context | transition | create_issue | update_issue | link_issue | attach_artifact | prepare_doc_pack)")
 	}
 	return rpcErr(id, -32602, "unknown action: "+action)
+}
+
+// handleHealth returns the plugin's self-reported liveness snapshot. Local
+// state only — never invokes the upstream Jira API. Schema (ÉPICA 152.H):
+//
+//	plugin_alive       — always true if this code runs
+//	tools_registered   — tool names this plugin handles
+//	uptime_seconds     — wall-clock since plugin started
+//	last_dispatch_unix — Unix ts of last real tools/call (0 = never)
+//	error_count        — cumulative error responses since boot
+//	api_key_present    — does the plugin have credentials loaded
+//	active_space       — current Jira project key (live, via contexts.json)
+//	active_board       — current Jira board id (live, via contexts.json)
+//
+// Polled every 30s by Nexus's plugin manager. Zombies (process alive but
+// tools_registered=[]) are detected by comparing against the initial set.
+func (s *state) handleHealth(id any) map[string]any {
+	started := atomic.LoadInt64(&s.startedAtUnix)
+	uptime := int64(0)
+	if started > 0 {
+		uptime = time.Now().Unix() - started
+	}
+	return ok(id, map[string]any{
+		"plugin_alive":       true,
+		"tools_registered":   []string{"jira"},
+		"uptime_seconds":     uptime,
+		"last_dispatch_unix": atomic.LoadInt64(&s.lastDispatchUnix),
+		"error_count":        atomic.LoadInt64(&s.errorCount),
+		"api_key_present":    s.client != nil,
+		"active_space":       s.currentSpace(),
+		"active_board":       s.currentBoard(),
+	})
 }
 
 func extractCallCtx(params map[string]any) callCtx {
