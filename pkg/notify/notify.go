@@ -276,8 +276,23 @@ func (n *Notifier) post(rawURL string, body []byte) error {
 // (Kind, Title) is missing.
 var errInvalidEvent = errors.New("event missing Kind or Title")
 
-// MarshalJSON exposes the notifier config in a form usable by tests
-// and operator tooling without leaking the dedup/buckets state.
+// MarshalJSON exposes the notifier config WITHOUT webhook URLs —
+// Slack/Discord both embed the auth token in the URL, so dumping
+// raw cfg via debug logs is a credential-leak vector. We surface
+// only counts + provider names. [DS-AUDIT manual notify Finding 1]
 func (n *Notifier) MarshalJSON() ([]byte, error) {
-	return json.Marshal(n.cfg)
+	type webhookSafe struct {
+		Name     string       `json:"name"`
+		Provider ProviderKind `json:"provider"`
+	}
+	safeWebhooks := make([]webhookSafe, 0, len(n.cfg.Webhooks))
+	for _, w := range n.cfg.Webhooks {
+		safeWebhooks = append(safeWebhooks, webhookSafe{Name: w.Name, Provider: w.Provider})
+	}
+	return json.Marshal(map[string]any{
+		"enabled":   n.cfg.Enabled,
+		"webhooks":  safeWebhooks,
+		"routes":    n.cfg.Routes,
+		"rateLimit": n.cfg.RateLimit,
+	})
 }

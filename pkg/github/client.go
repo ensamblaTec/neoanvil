@@ -195,39 +195,60 @@ type Issue struct {
 	} `json:"user"`
 }
 
+// listPagesCap bounds total pagination depth so a misconfigured
+// repo (or attacker forcing huge result sets) doesn't pin a worker
+// indefinitely. 10 pages × 100 items = 1000 results — generous for
+// real workflows, hard ceiling against DoS. [DS-AUDIT pagination Finding 1]
+const listPagesCap = 10
+
 // ListPRs returns PRs for owner/repo. state ∈ {"open", "closed", "all"}.
+// Paginates server-side up to listPagesCap pages. [DS-AUDIT Finding 1]
 func (c *Client) ListPRs(ctx context.Context, owner, repo, state string) ([]PullRequest, error) {
 	if state == "" {
 		state = "open"
 	}
 	var out []PullRequest
-	path := fmt.Sprintf("/repos/%s/%s/pulls?state=%s&per_page=50", url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(state))
-	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return nil, err
+	for page := 1; page <= listPagesCap; page++ {
+		var batch []PullRequest
+		path := fmt.Sprintf("/repos/%s/%s/pulls?state=%s&per_page=100&page=%d",
+			url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(state), page)
+		if err := c.Do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		if len(batch) < 100 {
+			break // last page
+		}
 	}
 	return out, nil
 }
 
 // ListIssues returns issues for owner/repo (excludes PRs — GitHub
-// returns both via /issues; we filter here).
+// returns both via /issues; we filter here). Paginates per Finding 1.
 func (c *Client) ListIssues(ctx context.Context, owner, repo, state string) ([]Issue, error) {
 	if state == "" {
 		state = "open"
 	}
-	var raw []map[string]any
-	path := fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=50", url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(state))
-	if err := c.Do(ctx, http.MethodGet, path, nil, &raw); err != nil {
-		return nil, err
-	}
-	out := make([]Issue, 0, len(raw))
-	for _, r := range raw {
-		if _, isPR := r["pull_request"]; isPR {
-			continue // skip PRs (also returned by /issues endpoint)
+	out := make([]Issue, 0, 100)
+	for page := 1; page <= listPagesCap; page++ {
+		var raw []map[string]any
+		path := fmt.Sprintf("/repos/%s/%s/issues?state=%s&per_page=100&page=%d",
+			url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(state), page)
+		if err := c.Do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+			return nil, err
 		}
-		var i Issue
-		b, _ := json.Marshal(r)
-		_ = json.Unmarshal(b, &i)
-		out = append(out, i)
+		for _, r := range raw {
+			if _, isPR := r["pull_request"]; isPR {
+				continue // skip PRs (also returned by /issues endpoint)
+			}
+			var i Issue
+			b, _ := json.Marshal(r)
+			_ = json.Unmarshal(b, &i)
+			out = append(out, i)
+		}
+		if len(raw) < 100 {
+			break
+		}
 	}
 	return out, nil
 }
@@ -301,12 +322,20 @@ type PRComment struct {
 }
 
 // PRComments returns the comments on a PR (or issue — same endpoint).
-// [Area 2.2.B]
+// Paginates per Finding 1. [Area 2.2.B + DS-AUDIT]
 func (c *Client) PRComments(ctx context.Context, owner, repo string, number int) ([]PRComment, error) {
 	var out []PRComment
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100", url.PathEscape(owner), url.PathEscape(repo), number)
-	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return nil, err
+	for page := 1; page <= listPagesCap; page++ {
+		var batch []PRComment
+		path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100&page=%d",
+			url.PathEscape(owner), url.PathEscape(repo), number, page)
+		if err := c.Do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		if len(batch) < 100 {
+			break
+		}
 	}
 	return out, nil
 }
@@ -385,12 +414,21 @@ type Branch struct {
 	} `json:"commit"`
 }
 
-// ListBranches enumerates branches for owner/repo. [Area 2.2.D]
+// ListBranches enumerates branches for owner/repo. Paginates per
+// Finding 1. [Area 2.2.D + DS-AUDIT]
 func (c *Client) ListBranches(ctx context.Context, owner, repo string) ([]Branch, error) {
 	var out []Branch
-	path := fmt.Sprintf("/repos/%s/%s/branches?per_page=100", url.PathEscape(owner), url.PathEscape(repo))
-	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return nil, err
+	for page := 1; page <= listPagesCap; page++ {
+		var batch []Branch
+		path := fmt.Sprintf("/repos/%s/%s/branches?per_page=100&page=%d",
+			url.PathEscape(owner), url.PathEscape(repo), page)
+		if err := c.Do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		if len(batch) < 100 {
+			break
+		}
 	}
 	return out, nil
 }

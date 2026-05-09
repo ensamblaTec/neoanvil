@@ -156,6 +156,12 @@ func (t *RecordingTracer) FinishedSpans() []FinishedSpan {
 	defer t.mu.Unlock()
 	out := make([]FinishedSpan, len(t.spans))
 	for i, s := range t.spans {
+		// Acquire the per-span lock too — `attrs` is a map written
+		// under s.mu by SetAttribute. Even though End is the terminal
+		// call in well-formed usage, defensive locking here prevents
+		// a race if a caller defers End AFTER SetAttribute (LIFO).
+		// [pen-and-paper otelx]
+		s.mu.Lock()
 		out[i] = FinishedSpan{
 			Name:     s.name,
 			TraceID:  s.traceID,
@@ -164,6 +170,7 @@ func (t *RecordingTracer) FinishedSpans() []FinishedSpan {
 			Duration: s.endedAt.Sub(s.startedAt),
 			Error:    s.errMsg,
 		}
+		s.mu.Unlock()
 	}
 	return out
 }

@@ -18,6 +18,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -112,10 +113,18 @@ func startSubscriber(parent context.Context, wsID string, port int, internalToke
 			if err != nil && ctx.Err() == nil {
 				log.Printf("[NEXUS-NOTIFY] subscriber %s disconnected: %v (reconnect in %s)", wsID, err, backoff)
 			}
+			// Auth failures get a much longer backoff — the operator's
+			// internal token is almost certainly the cause and won't
+			// auto-fix. Logs stop flooding and the reconciler picks up
+			// any token rotation on its 30s tick.
+			retryAfter := backoff
+			if errors.Is(err, errAuthRejected) {
+				retryAfter = 5 * time.Minute
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(backoff):
+			case <-time.After(retryAfter):
 			}
 			backoff *= 2
 			if backoff > 30*time.Second {
@@ -147,10 +156,24 @@ func streamFromChild(ctx context.Context, wsID string, port int, internalToken s
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// 401 / 403 are auth failures — reconnecting will not fix
+		// them, and rapid retries against a closed-cooperation child
+		// burn CPU + log noise. Return a sentinel that the outer
+		// loop translates into a long backoff (instead of the 1s→30s
+		// reconnect cadence). [pen-and-paper notify_subscriber]
+		if resp.StatusCode == http.StatusUnauthorized ||
+			resp.StatusCode == http.StatusForbidden {
+			return errAuthRejected
+		}
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
 	return parseSSEStream(ctx, wsID, resp.Body)
 }
+
+// errAuthRejected signals an authentication / authorisation failure
+// that won't be fixed by reconnecting. The streaming loop respects
+// this by extending the backoff to 5 minutes so flapping logs stop.
+var errAuthRejected = fmt.Errorf("subscriber auth rejected (401/403)")
 
 // parseSSEStream is a minimal SSE parser. We only care about the
 // `event:` and `data:` fields (no id retry); the spec permits
