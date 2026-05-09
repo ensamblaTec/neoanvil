@@ -62,3 +62,37 @@ issues with GPU sharing under sustained load that the pen-and-paper
 trace can't reach.
 
 ---
+
+### [ds-audit-pending] DS audit unreachable for two new security primitives (2026-05-09)
+
+**Files added in commit b56fb11 that need DS-audit re-run when API recovers:**
+
+- `pkg/sre/ssrf.go::SafeOperatorHTTPClient` — new HTTP client that
+  intentionally relaxes the SSRF guard to permit RFC 1918 private and
+  loopback IPs (Docker bridge use case). Multicast/unspecified/link-local
+  still blocked.
+- `cmd/neo-nexus/dashboard.go::isHUDAllowed` — new access-control
+  function that allows loopback + RFC 1918 to reach the HUD (Docker NAT
+  case where operator hits HUD via the published port → bridge IP).
+
+**Why pending:** DS pro+high audits queued (task_ids
+async_0f1a530a53e33930 and async_07dc2f8b6076d891) returned EOF after
+113s — the same DeepSeek API issue called out in directive #54.
+
+**Pen-and-paper coverage applied (compensating control):**
+- DNS-rebinding TOCTOU: pinned via `net.JoinHostPort(ips[0].String(), port)`.
+- IPv4-mapped IPv6 (::ffff:X): handled by `canonicalIP()` for SSRF and
+  by Go 1.17+ `ip.IsPrivate()` semantics for HUD.
+- Cloud metadata 169.254.169.254: link-local-unicast → rejected by both
+  primitives (SafeOperator blocks link-local; HUD: IsPrivate/IsLoopback
+  both false).
+- Header bypass on isHUDAllowed: impossible because Go's
+  `r.RemoteAddr` is the TCP socket peer, not headers.
+- Domain-shape RemoteAddr: cannot reach `HasPrefix("127.")` because
+  RemoteAddr is always IP:port from the socket (no DNS).
+
+**Triage rule:** rerun DS pro+high on these two files when the
+DeepSeek API returns 200s consistently. If DS finds nothing new,
+remove this entry. If DS surfaces a SEV ≥ 9, walk-through the chain
+mechanically before applying any fix (DS hallucinates SEV 10s ~25%
+of the time per `feedback_deepseek_hallucination_patterns.md`).
