@@ -21,7 +21,7 @@ See audit trail in git history.
 ### Épica 1.1: Docker Infrastructure (19 SP)
 
 - [x] 1.1.A Multi-stage Dockerfile: Stage 1 copies go.work + all 15 go.mod for cache-friendly deps layer. Stage 2 builds SPA (Node) into cmd/neo-nexus/static/. Stage 3 builds Go binaries with GOWORK=/app/go.work. Stage 4 runtime alpine with ca-certificates — 5 SP
-- [ ] 1.1.B docker-compose.yaml: SINGLE neoanvil container (Nexus spawns workers internally — fd inheritance requires same process tree). Separate ollama + ollama-embed services. Named volumes for .neo/db/ (NOT bind mounts — BoltDB flock breaks on overlayfs). Health checks on all 3 services — 5 SP
+- [x] 1.1.B docker-compose.yaml: SINGLE neoanvil container (Nexus spawns workers internally — fd inheritance requires same process tree). Separate ollama + ollama-embed services. Named volumes for .neo/db/ (NOT bind mounts — BoltDB flock breaks on overlayfs). Health checks on all 3 services — 5 SP
 - [ ] 1.1.C Docker networking: override bind_addr to 0.0.0.0 via NEO_BIND_ADDR env var. Ollama URLs use service names (http://ollama:11434). Disable Nexus ServiceManager Ollama lifecycle in Docker mode (compose manages Ollama separately) — 5 SP
 - [x] 1.1.D .dockerignore + Makefile targets (docker-build, docker-up, docker-down, docker-logs) — 2 SP
 - [ ] 1.1.E Documentation: docs/onboarding/docker.md with gotchas (no host+container simultaneous, named volumes only, port conflicts) — 2 SP

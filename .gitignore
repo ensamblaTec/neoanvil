@@ -16,6 +16,8 @@ bin/
 .neo/models/
 .neo/.env
 .neo/mode
+# docker-compose runtime overrides (1.1.B). .env.example is the committed template.
+.env
 .neo/credentials.json
 .neo/docs/doc-prev-note
 .claude/scheduled_tasks.lock

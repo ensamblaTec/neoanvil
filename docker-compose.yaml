@@ -1,0 +1,124 @@
+# NeoAnvil — docker-compose stack (Area 1.1.B)
+#
+# Three services:
+#   · neoanvil      — Nexus dispatcher + spawned MCP workers (fd-inheritance
+#                     requires SINGLE container; do NOT split into multiple).
+#   · ollama        — LLM inference (chat/completion).
+#   · ollama-embed  — dedicated embedding endpoint (nomic-embed-text).
+#                     Separated because embed traffic should not contend with
+#                     chat completion latency.
+#
+# All ports are env-overridable (see .env.example) so the stack can run
+# side-by-side with a native install:
+#   default              → 9000 / 8087 / 11434 / 11435 (collides with native)
+#   recommended override → 19000 / 18087 / 11534 / 11535
+#
+# Volumes are NAMED (not bind-mounts). BoltDB flock semantics break under
+# overlayfs, and named volumes use the host's native filesystem driver
+# (ext4/xfs), which honors flock correctly.
+#
+# GPU: ollama services request all NVIDIA GPUs via the modern compose
+# `deploy.resources` block. Requires `nvidia-container-toolkit` on the
+# host. If absent, comment out the `deploy:` blocks — Ollama still runs
+# on CPU, just slower.
+
+services:
+
+  neoanvil:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GOAMD64: ${GOAMD64:-v3}
+    image: neoanvil:${NEOANVIL_TAG:-local}
+    container_name: neoanvil
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-embed:
+        condition: service_healthy
+    environment:
+      # 1.1.C will wire these into neo-nexus config; for now they document
+      # the contract the container expects.
+      NEO_BIND_ADDR: "0.0.0.0"
+      OLLAMA_HOST:       "http://ollama:11434"
+      OLLAMA_EMBED_HOST: "http://ollama-embed:11434"
+    ports:
+      - "${NEXUS_PORT:-9000}:9000"      # MCP dispatcher
+      - "${HUD_PORT:-8087}:8087"        # Operator HUD dashboard
+    volumes:
+      - neoanvil-state:/home/neo/.neo   # nexus.yaml + workspaces.json + credentials.json + db/
+      - neoanvil-work:/home/neo/work    # workspace source (operator binds their repo here at use-time)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/status > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - neoanvil-net
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_TAG:-latest}
+    container_name: neoanvil-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"          # warm models in VRAM 30min after last call
+      OLLAMA_NUM_PARALLEL: "2"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - neoanvil-net
+
+  ollama-embed:
+    image: ollama/ollama:${OLLAMA_TAG:-latest}
+    container_name: neoanvil-ollama-embed
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_EMBED_PORT:-11435}:11434"
+    volumes:
+      - ollama-embed-models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_NUM_PARALLEL: "4"          # Embed workload is small + parallel-friendly
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - neoanvil-net
+
+networks:
+  neoanvil-net:
+    driver: bridge
+
+volumes:
+  neoanvil-state:
+  neoanvil-work:
+  ollama-models:
+  ollama-embed-models:
