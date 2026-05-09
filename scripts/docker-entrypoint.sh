@@ -78,12 +78,25 @@ seed_if_absent() {
         echo "[entrypoint] WARNING: $dst is a symlink — refusing to overwrite ($label)"
         return 0
     fi
-    if [ -e "$dst" ]; then
-        return 0  # already populated; preserve operator edits
+    # Re-seed when host source is newer than the seeded copy. Without
+    # this, credentials rotated on the host stay stale in the named
+    # volume — operator's `docker compose down && up` cycle does NOT
+    # re-trigger seeding because the volume persists. mtime-based
+    # check is non-destructive: only re-seeds when host has a strictly
+    # newer file. [DS-AUDIT 1.4 Finding 2, SEV 7]
+    if [ -e "$dst" ] && [ "$src" -ot "$dst" ]; then
+        return 0  # already populated and not older than dest; preserve
     fi
-    cp "$src" "$dst"
-    chown -h "$NEO_USER:$NEO_USER" "$dst"
-    chmod 600 "$dst"  # tighter perms for credential-class files
+    # Atomic write via temp + rename. A kill mid-`cp` would otherwise
+    # leave a partial dst that the next-boot guard (`[ -e dst ]`) skips,
+    # leaving Nexus to load a corrupt config. Using a sibling tempfile
+    # keeps the rename(2) on the same filesystem (POSIX-atomic).
+    # [DS-AUDIT 1.4 Finding 3, SEV 5]
+    tmp="${dst}.seeding"
+    cp "$src" "$tmp"
+    chown -h "$NEO_USER:$NEO_USER" "$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$dst"
     echo "[entrypoint] seeded $dst from $label"
 }
 

@@ -89,6 +89,13 @@ WORKDIR /app
 # C-backed and needs gcc + musl-dev to compile its parser cores.
 # The README's "Pure Go, Zero-CGO" tag refers to the project's OWN
 # packages; transitive deps (tree-sitter) still require CGO=1.
+#
+# `--no-cache` skips apk's index cache (smaller layer). Alpine signs
+# packages, so MITM/repo-poisoning is bounded by the signing keys
+# baked into the alpine base image. For air-gapped or stricter
+# supply-chain environments, override the apk repo via a build arg
+# pointing to an internal mirror with pinned digests.
+# [DS-AUDIT 1.4 Finding 1, SEV 8 — supply-chain hardening trade-off]
 RUN apk add --no-cache gcc musl-dev
 
 # Reuse the populated MODULE cache from stage 1. We don't try to copy
