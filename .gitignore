@@ -105,3 +105,4 @@ cmd/neo/neo
 # Session logs (private, not for public repo)
 docs/session/report*.md
 docs/session/SESSION-*.md
+plugin-jira

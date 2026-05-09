@@ -46,16 +46,21 @@ func (toolRegistry *ToolRegistry) List() []map[string]any {
 	var list []map[string]any
 	for _, tool := range toolRegistry.tools {
 		schema := tool.InputSchema()
-		// [SRE-85.B.1] Inject target_workspace into every tool schema.
-		// Nexus extracts this field for workspace routing before forwarding to child.
-		// The child ignores it — it's a transport-level routing hint.
-		if schema.Properties == nil {
-			schema.Properties = make(map[string]any)
+		// [Area 4.2.B] Clone Properties before mutating. If a Tool's
+		// InputSchema returns the same map across calls (e.g., a
+		// cached schema), naïve mutation would persist `target_workspace`
+		// keys across renders + pollute the OpenAPI spec output.
+		props := make(map[string]any, len(schema.Properties)+1)
+		for k, v := range schema.Properties {
+			props[k] = v
 		}
-		schema.Properties["target_workspace"] = map[string]any{
+		// [SRE-85.B.1] Inject target_workspace on the CLONE so the
+		// underlying Tool's schema stays pristine.
+		props["target_workspace"] = map[string]any{
 			"type":        "string",
 			"description": "Optional. Workspace ID or name for Nexus routing. If omitted, routes to active workspace.",
 		}
+		schema.Properties = props
 		list = append(list, map[string]any{
 			"name":        tool.Name(),
 			"description": tool.Description(),

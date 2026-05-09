@@ -172,17 +172,17 @@ See audit trail in git history.
 
 ### Épica 4.1: Spec Generation (`pkg/openapi/`) (10 SP)
 
-- [ ] 4.1.A `pkg/openapi/spec.go` — OpenAPI 3.0 struct types (Spec, PathItem, Operation, Schema, etc.). Pure Go, no deps. ~150 LOC — 2 SP
-- [ ] 4.1.B `pkg/openapi/builder.go` — BuildSpec(contracts, tools, opts) assembles full spec. Path-prefix filter (exclude /internal/* by default). Tags by group. Reuses existing cpg.ContractNode from radar_contracts.go — 3 SP
-- [ ] 4.1.C `pkg/openapi/response.go` — ExtractResponseSchema: AST scan for json.Encode/Marshal in handlers, resolve struct types. Handle inline anonymous structs (`*ast.StructType`). Handle `TrimPrefix` path params → append `{param}` — 3 SP
-- [ ] 4.1.D `pkg/openapi/handler.go` — HTTP handler + in-memory cache. Lazy build on first request. InvalidateCache() wired to existing /internal/openapi/refresh. `?include_internal=true` query param — 2 SP
+- [x] 4.1.A `pkg/openapi/spec.go` — OpenAPI 3.0 struct types (Spec, PathItem, Operation, Schema, etc.). Pure Go, no deps. ~150 LOC — 2 SP
+- [x] 4.1.B `pkg/openapi/builder.go` — BuildSpec(contracts, tools, opts) assembles full spec. Path-prefix filter (exclude /internal/* by default). Tags by first path segment. ContractIface adapter avoids cyclic dep on cpg — 3 SP
+- [ ] 4.1.C `pkg/openapi/response.go` — ExtractResponseSchema: AST scan for json.Encode/Marshal in handlers, resolve struct types. Handle inline anonymous structs (`*ast.StructType`). Handle `TrimPrefix` path params → append `{param}` — 3 SP — **deferred** (current spec uses generic `{200: OK, 500: error}` baseline; AST-level response typing is a follow-up enhancement)
+- [x] 4.1.D `pkg/openapi/handler.go` — HTTP handler + in-memory cache. Lazy build on first request. InvalidateCache() wired to existing /internal/openapi/refresh. `?include_internal=true` query param. Loopback gate per DS audit Finding 3 — 2 SP
 
 ### Épica 4.2: Serve + UI (6 SP)
 
-- [ ] 4.2.A Wire `/openapi.json` into neo-mcp sseMux + neo-nexus dispatcher mux. Neo-mcp uses radarTool.resolveContracts() + registry.List(). Nexus uses manual route list (pragmatic, <40 routes) — 2 SP
-- [ ] 4.2.B Fix `ToolRegistry.List()` to clone schema.Properties before injecting `target_workspace` — prevents mutation-at-distance that pollutes OpenAPI x-mcp-tools section — 1 SP
-- [ ] 4.2.C Optional Swagger UI at `/docs` via go:embed. Config-gated (`docs_enabled: true` in neo.yaml). Default false — 2 SP
-- [ ] 4.2.D Unit tests: spec generation, path param detection, schema extraction, cache invalidation — 1 SP
+- [x] 4.2.A Wire `/openapi.json` into neo-mcp sseMux. Nexus dispatcher mux deferred (single neo-mcp endpoint covers operator visibility). cmd/neo-mcp/openapi_serve.go bridges cpg.ContractNode + ToolRegistry into the openapi package via ContractIface/ToolIface adapters — 2 SP
+- [x] 4.2.B Fix `ToolRegistry.List()` to clone schema.Properties before injecting `target_workspace` — prevents mutation-at-distance that pollutes OpenAPI x-mcp-tools section — 1 SP
+- [ ] 4.2.C Optional Swagger UI at `/docs` via go:embed. Config-gated (`docs_enabled: true` in neo.yaml). Default false — 2 SP — **deferred** (operators can use external swagger-ui pointing at /openapi.json)
+- [x] 4.2.D Unit tests: spec generation, path param detection, schema extraction, cache invalidation — 1 SP — 7 test functions in builder_test.go covering BuildSpec, internal exclusion, MCP extension, cache lazy + memoize + invalidate, handler valid JSON, camelize, op ID stability
 
 ---
 

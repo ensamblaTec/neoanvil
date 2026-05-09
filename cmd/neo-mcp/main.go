@@ -1034,6 +1034,11 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	// [SRE-24.4] MCP 2025-03-26 spec: OAuth 2.1 discovery endpoints for SSE transport.
 	// Claude Code SDK hits /.well-known/oauth-authorization-server before connecting.
 	// This is a local-only server — we return valid metadata with a no-op token endpoint.
+	// [Area 4.2.A] Build the OpenAPI serve cache once tools are registered.
+	// Lazy build inside the cache means contracts are only scanned on the
+	// first /openapi.json hit — boot stays fast.
+	setupOpenAPIServeCache(workspace, registry)
+
 	go func() {
 		sseMux := http.NewServeMux()
 		sseAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.SSEPort)
@@ -1279,14 +1284,22 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 		// [334.B] POST /internal/openapi/refresh — Nexus calls this on siblings when the
 		// spec file hash changes in any member workspace. Invalidates the local HotCache
 		// so the next ParseOpenAPIContracts call re-reads the spec from disk.
+		// [Area 4.2.A] Also drops the rendered openapi.json cache so the next GET re-builds.
 		sseMux.HandleFunc("/internal/openapi/refresh", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
 			cpg.InvalidateOpenAPICache(workspace)
+			openAPIServeCache.InvalidateCache()
 			w.WriteHeader(http.StatusNoContent)
 		})
+
+		// [Area 4.2.A] GET /openapi.json — auto-generated OpenAPI 3.0 spec
+		// covering the dispatcher's HTTP routes + the MCP tool registry
+		// (under x-mcp-tools). Pass `?include_internal=true` to surface
+		// /internal/* endpoints (default excludes them).
+		sseMux.Handle("/openapi.json", openAPIServeCache.Handler())
 
 		// [287.C] GET /internal/rag/shared/query?k=N  body: {"vector":[…float32]}
 		// Returns top-K DocMeta hits from the shared graph (loopback-only, no lock needed).
