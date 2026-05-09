@@ -850,11 +850,18 @@ COMPOSE              ?= docker compose
 .PHONY: docker-build docker-up docker-down docker-logs
 
 # docker-build: builds the multi-stage image. Override the SIMD baseline
-# with `make docker-build DOCKER_GOAMD64=v1` for portable images.
+# with `make docker-build DOCKER_GOAMD64=v1` for portable images. UID/GID
+# default to the calling user's so bind-mounted files stay readable by
+# the host operator. Override via `USER_ID=2000 USER_GID=2000 make ...`.
+DOCKER_USER_ID  ?= $(shell id -u)
+DOCKER_USER_GID ?= $(shell id -g)
+
 docker-build:
-	@printf "\033[36m[docker]\033[0m building $(DOCKER_IMAGE):$(DOCKER_TAG) (GOAMD64=$(DOCKER_GOAMD64))\n"
+	@printf "\033[36m[docker]\033[0m building $(DOCKER_IMAGE):$(DOCKER_TAG) (GOAMD64=$(DOCKER_GOAMD64), UID=$(DOCKER_USER_ID), GID=$(DOCKER_USER_GID))\n"
 	docker build \
 		--build-arg GOAMD64=$(DOCKER_GOAMD64) \
+		--build-arg USER_ID=$(DOCKER_USER_ID) \
+		--build-arg USER_GID=$(DOCKER_USER_GID) \
 		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
 		-f Dockerfile .
 
@@ -901,13 +908,14 @@ docker-seed:
 	@printf "\033[32m[docker-seed]\033[0m done\n"
 
 # docker-status: shows container health + named volume sizes for a
-# quick "is everything alive and persisting" summary.
+# quick "is everything alive and persisting" summary. Volume names use
+# the COMPOSE_PROJECT_NAME prefix that compose actually applies.
 .PHONY: docker-status
 docker-status:
 	@printf "\033[36m[docker-status]\033[0m containers:\n"
 	@$(COMPOSE) ps 2>&1
-	@printf "\n\033[36m[docker-status]\033[0m named volumes:\n"
-	@for v in neoanvil_neoanvil-state neoanvil_neoanvil-work neoanvil_ollama-models neoanvil_ollama-embed-models; do \
+	@printf "\n\033[36m[docker-status]\033[0m named volumes (project=$(COMPOSE_PROJECT_NAME)):\n"
+	@for v in $(COMPOSE_PROJECT_NAME)_neoanvil-state $(COMPOSE_PROJECT_NAME)_neoanvil-work $(COMPOSE_PROJECT_NAME)_ollama-models $(COMPOSE_PROJECT_NAME)_ollama-embed-models; do \
 		size=$$(docker run --rm -v $$v:/v alpine sh -c 'du -sh /v 2>/dev/null | cut -f1' 2>/dev/null); \
-		[ -n "$$size" ] && printf "  %-35s %s\n" "$$v" "$$size" || printf "  %-35s (not present)\n" "$$v"; \
+		[ -n "$$size" ] && printf "  %-50s %s\n" "$$v" "$$size" || printf "  %-50s (not present)\n" "$$v"; \
 	done
