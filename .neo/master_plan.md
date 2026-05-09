@@ -228,7 +228,7 @@ notifications:
 ### Épica 5.2: Nexus Integration (6 SP)
 
 - [x] 5.2.A ProcessPool lifecycle callbacks: foundation via `dispatchNexusEvent` helper — call sites can plumb in OnChildStarted / OnChildStopped via simple call (no callback registration overhead) — 1 SP
-- [ ] 5.2.B `cmd/neo-nexus/notify_subscriber.go`: SSE reader per child (GET /events with X-Neo-Internal-Token auth). Parse SSE frames → Notifier.Dispatch(). Lifecycle hooks for connect/disconnect. SIGHUP reload — 3 SP — **deferred** (the streaming reader is substantive; foundation in 5.2.A+C is enough for synchronous callers like watchdog status changes)
+- [x] 5.2.B `cmd/neo-nexus/notify_subscriber.go`: SSE reader per child with bufio scanner, exponential reconnect backoff (1s→30s cap), event-type→severity classifier (oom_guard/thermal_rollback/policy_veto promote to sev 9, heartbeat/inference filter out). subscriberManager tracks per-workspace context cancels. ensureNotifySubscribers reconciles vs pool snapshot every 30s — 3 SP
 - [x] 5.2.C Wiring in main.go: notifier built at boot via `initNotifier(notifyConfigFromNexus(cfg))`. Boot event dispatched. nexus.yaml NotificationsConfig field is the next op (returns disabled today via shim) — 1 SP
 - [ ] 5.2.D Integration test: mock child with /events SSE → verify webhook received notification via httptest — 1 SP — **deferred** (paired with 5.2.B)
 
