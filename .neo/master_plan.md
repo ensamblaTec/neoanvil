@@ -24,7 +24,7 @@ See audit trail in git history.
 - [x] 1.1.B docker-compose.yaml: SINGLE neoanvil container (Nexus spawns workers internally — fd inheritance requires same process tree). Separate ollama + ollama-embed services. Named volumes for .neo/db/ (NOT bind mounts — BoltDB flock breaks on overlayfs). Health checks on all 3 services — 5 SP
 - [x] 1.1.C Docker networking: override bind_addr to 0.0.0.0 via NEO_BIND_ADDR env var. Ollama URLs use service names (http://ollama:11434). Disable Nexus ServiceManager Ollama lifecycle in Docker mode (compose manages Ollama separately) — 5 SP
 - [x] 1.1.D .dockerignore + Makefile targets (docker-build, docker-up, docker-down, docker-logs) — 2 SP
-- [ ] 1.1.E Documentation: docs/onboarding/docker.md with gotchas (no host+container simultaneous, named volumes only, port conflicts) — 2 SP
+- [x] 1.1.E Documentation: docs/onboarding/docker.md (5-min quick-start + side-by-side recipe + persistence summary + gotchas table). Companion deep dive at docs/onboarding/docker-architecture.md (architecture + memory model + lifecycle + migration paths) — 2 SP
 
 ### Épica 1.4: Pattern D — Hybrid host-bind workflow (15 SP)
 
@@ -119,7 +119,7 @@ See audit trail in git history.
 
 - [x] 2.3.A plugins.yaml.example entry (commented stub) + `make build-plugins` auto-discovers cmd/plugin-github via existing glob — 1 SP — `neo login --provider github` vault wiring deferred (paired with 2.1.A)
 - [x] 2.3.B Unit tests: tools/list enum coverage, __health__ short-circuit, cross_ref dedup + custom pattern, requireOwnerRepo validation, intFromArgs multi-shape extraction — 2 SP
-- [ ] 2.3.C Integration test: spawn plugin process, JSON-RPC handshake, tools/list shape validation, mock GitHub API with httptest.Server for 3 key actions — 2 SP — **deferred** (mirror-copy of cmd/plugin-jira/integ_test.go pattern; lands when GitHub testmock surface is added to internal/testmock/)
+- [x] 2.3.C Integration test: cmd/plugin-github/integ_test.go — 3 cases (handshake+list_prs against testmock, __health__ short-circuit verifying NO upstream call, cross_ref local-only regex). Mirrors cmd/plugin-jira/integ_test.go shape. Drove the loopback-vs-public HTTP client split in pkg/github (testmock 127.0.0.1 needs SafeInternalHTTPClient instead of the SSRF-blocking SafeHTTPClient) — 2 SP
 
 ---
 
@@ -230,7 +230,7 @@ notifications:
 - [x] 5.2.A ProcessPool lifecycle callbacks: foundation via `dispatchNexusEvent` helper — call sites can plumb in OnChildStarted / OnChildStopped via simple call (no callback registration overhead) — 1 SP
 - [x] 5.2.B `cmd/neo-nexus/notify_subscriber.go`: SSE reader per child with bufio scanner, exponential reconnect backoff (1s→30s cap), event-type→severity classifier (oom_guard/thermal_rollback/policy_veto promote to sev 9, heartbeat/inference filter out). subscriberManager tracks per-workspace context cancels. ensureNotifySubscribers reconciles vs pool snapshot every 30s — 3 SP
 - [x] 5.2.C Wiring in main.go: notifier built at boot via `initNotifier(notifyConfigFromNexus(cfg))`. Boot event dispatched. nexus.yaml NotificationsConfig field is the next op (returns disabled today via shim) — 1 SP
-- [ ] 5.2.D Integration test: mock child with /events SSE → verify webhook received notification via httptest — 1 SP — **deferred** (paired with 5.2.B)
+- [x] 5.2.D Integration test: cmd/neo-nexus/notify_subscriber_test.go — 3 test groups: ParsesSSEFrames (httptest server emits 5 SSE frames over 250ms, verifies webhook receives ≥1 POST with the right kind), AuthFailureBackoff (401 returns errAuthRejected sentinel), SeverityClassifier (6 sub-cases verifying chatty events filtered + critical events fire). Drove the same loopback-vs-public HTTP client split in pkg/notify — 1 SP
 
 ---
 

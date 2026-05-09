@@ -123,9 +123,25 @@ func New(cfg NotificationsConfig) (*Notifier, error) {
 			}
 		}
 	}
+	// HTTP client selection mirrors pkg/github.NewClient: if ALL
+	// configured webhooks point to loopback (typical for testmock /
+	// local relays), use SafeInternalHTTPClient which permits
+	// loopback only. Otherwise SafeHTTPClient (production default,
+	// blocks loopback + private ranges as anti-SSRF).
+	httpClient := sre.SafeHTTPClient()
+	allLoopback := len(cfg.Webhooks) > 0
+	for _, w := range cfg.Webhooks {
+		if w.URL == "" || !urlIsLoopback(w.URL) {
+			allLoopback = false
+			break
+		}
+	}
+	if allLoopback {
+		httpClient = sre.SafeInternalHTTPClient(60)
+	}
 	n := &Notifier{
 		cfg:     cfg,
-		client:  sre.SafeHTTPClient(),
+		client:  httpClient,
 		dedup:   make(map[string]time.Time, 16),
 		buckets: make(map[string]*tokenBucket, len(cfg.Webhooks)),
 	}
@@ -275,6 +291,30 @@ func (n *Notifier) post(rawURL string, body []byte) error {
 // errInvalidEvent is returned by formatters when a required field
 // (Kind, Title) is missing.
 var errInvalidEvent = errors.New("event missing Kind or Title")
+
+// urlIsLoopback returns true iff the parsed URL host resolves to a
+// loopback address. Used to pick the right HTTP client at notifier
+// boot. Pure-syntactic check — no DNS resolution.
+func urlIsLoopback(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || host == "::1" {
+		return true
+	}
+	if strings.HasPrefix(host, "127.") {
+		return true
+	}
+	if strings.HasPrefix(host, "::ffff:") {
+		return urlIsLoopback("https://" + host[7:])
+	}
+	return false
+}
 
 // MarshalJSON exposes the notifier config WITHOUT webhook URLs —
 // Slack/Discord both embed the auth token in the URL, so dumping

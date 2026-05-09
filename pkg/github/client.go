@@ -44,6 +44,13 @@ type Config struct {
 
 // NewClient validates the config and returns a ready-to-use Client.
 // Token is required. BaseURL defaults to api.github.com when empty.
+//
+// HTTP client selection:
+//   · SafeHTTPClient (anti-SSRF, blocks loopback + private ranges)
+//     for public BaseURLs — production default for api.github.com.
+//   · SafeInternalHTTPClient for loopback BaseURLs — needed for
+//     testmock-backed integration tests + self-hosted Enterprise on
+//     local networks. Detected via parsed URL host.
 func NewClient(cfg Config) (*Client, error) {
 	if cfg.Token == "" {
 		return nil, errors.New("token is required")
@@ -53,14 +60,41 @@ func NewClient(cfg Config) (*Client, error) {
 		base = "https://api.github.com"
 	}
 	base = strings.TrimRight(base, "/")
-	if _, err := url.ParseRequestURI(base); err != nil {
+	parsed, err := url.ParseRequestURI(base)
+	if err != nil {
 		return nil, fmt.Errorf("invalid base_url %q: %w", base, err)
+	}
+	httpClient := sre.SafeHTTPClient()
+	if isLoopbackHost(parsed.Hostname()) {
+		// Loopback target → testmock or self-hosted on local network;
+		// SafeHTTPClient would refuse SSRF-style. SafeInternalHTTPClient
+		// allows loopback only — still anti-SSRF for any other range.
+		httpClient = sre.SafeInternalHTTPClient(300)
 	}
 	return &Client{
 		BaseURL: base,
 		Token:   cfg.Token,
-		HTTP:    sre.SafeHTTPClient(),
+		HTTP:    httpClient,
 	}, nil
+}
+
+// isLoopbackHost recognises 127.x, ::1, IPv4-mapped IPv6, and the
+// "localhost" alias. Used to pick the right HTTP client per
+// production-vs-testmock target.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || host == "::1" {
+		return true
+	}
+	if strings.HasPrefix(host, "127.") {
+		return true
+	}
+	if strings.HasPrefix(host, "::ffff:") {
+		return isLoopbackHost(host[7:])
+	}
+	return false
 }
 
 // Do executes a request with auth + retry. The body argument is
