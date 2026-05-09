@@ -166,13 +166,24 @@ type rpcChan struct {
 	scanner *bufio.Scanner
 }
 
+// skipIfShortOrWindows guards the E2E suite + registers a 30s wall-clock
+// budget. Note: NOT parallel-safe — bootPool calls t.Setenv("HOME", ...)
+// to isolate plugin config lookups, and t.Setenv panics under t.Parallel()
+// per the testing package contract. [Area 3.3.C]
 func skipIfShortOrWindows(t *testing.T) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("E2E test — skipped under -short")
 	}
 	if runtime.GOOS == "windows" {
 		t.Skip("Nexus E2E is POSIX-only")
 	}
+	start := time.Now()
+	t.Cleanup(func() {
+		if elapsed := time.Since(start); elapsed > 30*time.Second {
+			t.Errorf("E2E test exceeded 30s budget (took %s) — split or speed up", elapsed)
+		}
+	})
 }
 
 func buildBinary(t *testing.T, pkgPath, name string) string {

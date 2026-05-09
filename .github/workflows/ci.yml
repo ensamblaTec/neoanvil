@@ -27,11 +27,32 @@ jobs:
           exit 1
         fi
 
-    - name: Execute Tests (Race Detector)
-      run: go test -v -race ./...
+    - name: Execute Unit Tests (Race Detector, -short skips subprocess integ)
+      run: go test -v -race -short ./...
 
     - name: Build Orchestrator (neo-mcp)
       run: go build -o bin/neo-mcp ./cmd/neo-mcp
 
     - name: Build Chaos Simulator (stress)
       run: go build -o bin/stress ./cmd/stress
+
+  integration-tests:
+    # Area 3.3.B — subprocess plugin + Nexus E2E suite. Spawns real plugin
+    # binaries and drives them via JSON-RPC. Runs only after the unit suite
+    # passes so a broken pkg/ change is reported in the faster job first.
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26'
+
+    - name: Install Dependencies
+      run: go mod tidy
+
+    - name: Run plugin + Nexus integration tests
+      run: make test-integration

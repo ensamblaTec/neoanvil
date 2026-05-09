@@ -153,14 +153,26 @@ type rpcChannel struct {
 	scanner *bufio.Scanner
 }
 
-// skipIfShortOrWindows centralises the platform/short-mode guard.
+// skipIfShortOrWindows centralises the platform/short-mode guard, opts the
+// test into parallel execution (each test has its own t.TempDir + spawned
+// process, so there's no shared state), and registers a 30s budget cleanup
+// that fails the test if the integ pipeline regressed wall-clock-wise.
+// [Area 3.3.C]
 func skipIfShortOrWindows(t *testing.T) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test — skipped under -short")
 	}
 	if runtime.GOOS == "windows" {
 		t.Skip("plugin subprocess integration tests are POSIX-only")
 	}
+	t.Parallel()
+	start := time.Now()
+	t.Cleanup(func() {
+		if elapsed := time.Since(start); elapsed > 30*time.Second {
+			t.Errorf("integ test exceeded 30s budget (took %s) — split or speed up", elapsed)
+		}
+	})
 }
 
 // buildPluginBinary compiles the plugin's main package into a tmp dir

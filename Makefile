@@ -503,6 +503,19 @@ build-all:
 test:
 	$(GO) test -short ./pkg/...
 
+# test-integration: Area 3.3.B + 1.3.D — exercises the subprocess plugin
+# tests under cmd/plugin-jira, cmd/plugin-deepseek, and cmd/neo-nexus.
+# The tests self-compile their own binaries via `go build` inside t.TempDir(),
+# so the explicit `make build-plugins` is a sanity gate that fails fast if
+# any plugin won't link. Filter `Integration|E2E` is package-scoped to the
+# three subprocess test suites; broader pkg-level E2E tests run under `make test`.
+.PHONY: test-integration
+test-integration: build-plugins
+	@printf "\033[36m[make]\033[0m running plugin subprocess + Nexus E2E integration tests\n"
+	$(GO) test -race -timeout 5m -count=1 \
+		-run 'Integration|E2E' \
+		./cmd/plugin-jira/... ./cmd/plugin-deepseek/... ./cmd/neo-nexus/...
+
 # bench: RAG hot-path benchmarks with the active SIMD flag. Results printed
 # to stdout; pipe to tee if you want to keep them.
 bench:
