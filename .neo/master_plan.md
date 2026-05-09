@@ -220,10 +220,10 @@ notifications:
 
 ### Épica 5.1: Core Notification Library (8 SP)
 
-- [ ] 5.1.A Config types in pkg/nexus/config.go: NotificationsConfig, WebhookConfig, RateLimitConfig. Defaults + YAML example. Webhook URL resolved via os.ExpandEnv() — 1 SP
-- [ ] 5.1.B `pkg/notify/notify.go`: Notifier struct, Dispatch(), dedup cache (sync.Map + expiry sweep), route lookup, per-webhook TokenBucket. Uses sre.SafeHTTPClient() for external POSTs. Reject non-HTTPS in prod unless NEO_NOTIFY_ALLOW_HTTP=1 — 3 SP
-- [ ] 5.1.C `pkg/notify/slack.go` + `discord.go`: Format payloads per provider. Slack blocks with color-coded severity. Discord embeds with RGB color. MessageFormatter per event type — 2 SP
-- [ ] 5.1.D `pkg/notify/notify_test.go`: Unit tests with httptest mock webhook. Rate limit, dedup, routing, format, env var interpolation — 2 SP
+- [x] 5.1.A Config types in pkg/notify: NotificationsConfig, WebhookConfig, RateLimit. Defaults applied at New() (BurstPerMinute=10, DedupWindowSec=60). Webhook URL resolved via os.ExpandEnv() — 1 SP
+- [x] 5.1.B `pkg/notify/notify.go`: Notifier struct, Dispatch(), dedup map (sha256 key + window sweep), route lookup with min_severity gate, per-webhook tokenBucket. Uses sre.SafeHTTPClient() for external POSTs. Refuses non-HTTPS unless allow_http:true — 3 SP
+- [x] 5.1.C `pkg/notify/slack.go` + `discord.go`: Block Kit (Slack) + embed (Discord) formatters. Severity → emoji/RGB color. Sorted-key fields for deterministic output — 2 SP
+- [x] 5.1.D `pkg/notify/notify_test.go`: 6 unit tests covering env expansion, HTTPS refusal, route+dedup via httptest TLS server, slack/discord shape, empty-title rejection, token bucket refill — 2 SP
 
 ### Épica 5.2: Nexus Integration (6 SP)
 
