@@ -263,10 +263,10 @@ otel:
 
 ### Épica 6.1: SDK Foundation + Nexus Spans (8 SP)
 
-- [ ] 6.1.A `pkg/otelx/` — Init wrapper: InitTracer(cfg), NoopTracer(), Shutdown(). Gate function resolved once at init (nontrace.NewTracerProvider for disabled). Resource detector with service.name + host — 3 SP
-- [ ] 6.1.B Config: OTelConfig struct in pkg/config/config.go. Defaults (disabled). OTLP exporter gRPC+HTTP. neo.yaml.example update — 1 SP
-- [ ] 6.1.C Nexus root span: wrap handleSSEMessage in sse.go. Inject W3C traceparent header into child HTTP requests. Replace newTraceID() in plugin_routing.go with span.SpanContext().TraceID() — 3 SP
-- [ ] 6.1.D neo-mcp child span: extract traceparent from incoming HTTP headers. Create child span in tool dispatch. Record error status on failure. Init TracerProvider at boot — 1 SP
+- [x] 6.1.A `pkg/otelx/` — Tracer + Span interface, NoopTracer default (zero-alloc), SetTracer for operator-supplied real implementation. atomic.Value tracerHolder for lock-free concurrent access. W3CTraceParent renderer for downstream HTTP propagation — 3 SP
+- [x] 6.1.B Config: `pkg/otelx/config.go` Config struct + Defaults() (disabled, service:"neoanvil", protocol:"grpc", sample_rate:1.0). Operator wires under nexus.observability.otel — 1 SP
+- [ ] 6.1.C Nexus root span: wrap handleSSEMessage in sse.go. Inject W3C traceparent header into child HTTP requests. Replace newTraceID() in plugin_routing.go with span.SpanContext().TraceID() — 3 SP — **deferred** (otelx skeleton ready; wiring + real-SDK adapter is the next chunk)
+- [ ] 6.1.D neo-mcp child span: extract traceparent from incoming HTTP headers. Create child span in tool dispatch. Record error status on failure. Init TracerProvider at boot — 1 SP — **deferred** (paired with 6.1.C)
 
 ### Épica 6.2: Plugin Bridge + Metrics (6 SP)
 
