@@ -115,6 +115,12 @@ workspace:
         - .venv
         - env
         - doc-prev-note
+        - static     # cmd/neo-nexus/static — HUD bundle (compiled JS/CSS, not source)
+        - bin        # compiled binaries
+        - build      # generic build output
+        - .next      # Next.js build cache
+        - target     # Rust/Java build output
+        - coverage   # coverage reports
     allowed_extensions:
         - .go
         - .ts

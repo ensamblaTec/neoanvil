@@ -120,20 +120,20 @@ See audit trail in git history.
 
 ### Épica 3.1: Mock Infrastructure (`internal/testmock/`) (11 SP)
 
-- [ ] 3.1.A `internal/testmock/jira.go` — Jira Cloud REST v3 mock. Endpoints: GET /issue/{key}, GET /issue/{key}/transitions, POST /issue/{key}/transitions, POST /issue. Configurable fixtures, Basic Auth validation, 429 simulation, call history — 3 SP
-- [ ] 3.1.B `internal/testmock/deepseek.go` — DeepSeek Chat API mock. Endpoint: POST /chat/completions. Bearer auth, configurable reply, atomic call counter, token usage block — 2 SP
-- [ ] 3.1.C `internal/testmock/ollama.go` — Ollama mock. Endpoints: GET /api/tags, POST /api/embed, POST /api/generate. Deterministic embedding vectors — 2 SP
-- [ ] 3.1.D `internal/testmock/github.go` — GitHub REST v3 mock (stub for future plugin). Endpoints: GET /repos/{owner}/{repo}/pulls, POST /repos/{owner}/{repo}/issues — 1 SP
-- [ ] 3.1.E `internal/testmock/harness.go` — Composes all mocks + returns Env map for plugin subprocess injection. `Harness.VaultLookup()` compatible with pkg/nexus/plugin_pool.go. All servers auto-closed via t.Cleanup — 3 SP
+- [x] 3.1.A `internal/testmock/jira.go` — Jira Cloud REST v3 mock. Endpoints: GET /issue/{key}, GET /issue/{key}/transitions, POST /issue/{key}/transitions, POST /issue. Configurable fixtures, Basic Auth validation, 429 simulation, call history — 3 SP — `68a8286`
+- [x] 3.1.B `internal/testmock/deepseek.go` — DeepSeek Chat API mock. Endpoint: POST /chat/completions. Bearer auth, configurable reply, atomic call counter, token usage block — 2 SP — `1e9351f`
+- [x] 3.1.C `internal/testmock/ollama.go` — Ollama mock. Endpoints: GET /api/tags, POST /api/embed, POST /api/generate. Deterministic embedding vectors — 2 SP — `619763d`
+- [x] 3.1.D `internal/testmock/github.go` — GitHub REST v3 mock (stub for future plugin). Endpoints: GET /repos/{owner}/{repo}/pulls, POST /repos/{owner}/{repo}/issues — 1 SP — `cdf0511`
+- [x] 3.1.E `internal/testmock/harness.go` — Composes all mocks + returns Env map for plugin subprocess injection. `Harness.VaultLookup()` compatible with pkg/nexus/plugin_pool.go. All servers auto-closed via t.Cleanup — 3 SP — `9154ba8`
 
 ### Épica 3.2: Plugin Subprocess Integration Tests (12 SP)
 
 **Prerequisite:** 2 production code changes: (a) `DEEPSEEK_BASE_URL` env var in cmd/plugin-deepseek/main.go buildState(), (b) `JIRA_BASE_URL` env var override in cmd/plugin-jira to bypass domain-based URL.
 
-- [ ] 3.2.A Production fix: DEEPSEEK_BASE_URL + JIRA_BASE_URL env var overrides (enables mock injection into subprocesses) — 1 SP
-- [ ] 3.2.B `cmd/plugin-jira/integ_test.go` — Build binary, spawn, handshake, test get_context + transition against mock. Error propagation test (404 ticket, auth failure) — 3 SP
-- [ ] 3.2.C `cmd/plugin-deepseek/integ_test.go` — Build binary, spawn, test distill_payload + map_reduce (verify parallel call count via atomic counter). Timeout test — 3 SP
-- [ ] 3.2.D `cmd/neo-nexus/integ_e2e_test.go` — Full stack: Nexus + 1 workspace + both plugins. Verify tool routing chain end-to-end, idempotency cache, plugin health polling. Run with -race — 5 SP
+- [x] 3.2.A Production fix: DEEPSEEK_BASE_URL + JIRA_BASE_URL env var overrides (enables mock injection into subprocesses) — 1 SP — `d875bad`
+- [x] 3.2.B `cmd/plugin-jira/integ_test.go` — Build binary, spawn, handshake, test get_context + transition against mock. Error propagation test (404 ticket, auth failure) — 3 SP — `ccc1b34`
+- [x] 3.2.C `cmd/plugin-deepseek/integ_test.go` — Build binary, spawn, test distill_payload + map_reduce (verify parallel call count via atomic counter). Timeout test — 3 SP — `cc58253`
+- [x] 3.2.D `cmd/neo-nexus/integ_e2e_test.go` — Full stack: Nexus + 1 workspace + both plugins. Verify tool routing chain end-to-end, idempotency cache, plugin health polling. Run with -race — 5 SP — `5044072`
 
 ### Épica 3.3: CI Pipeline (5 SP)
 
