@@ -40,6 +40,16 @@ fi
 log "preflight: leftover containers from previous run?"
 $COMPOSE down --timeout 5 >/dev/null 2>&1 || true
 
+# Pattern D bind-mounts ${PWD} into the container, so `.neo/db/*.bbolt`
+# is shared between native and Docker. BoltDB flock is exclusive — if
+# a native neo-mcp is holding the lock, the container child will fail
+# with "[SRE-FATAL] failed to acquire lock from bbolt" and the smoke
+# error 60s later is unhelpful. Detect the conflict up front.
+log "preflight: native neo-mcp / neo-nexus holding repo locks?"
+if pgrep -af 'bin/neo-(mcp|nexus)' | grep -qF "$(pwd)"; then
+    err "native neo-mcp/nexus is using this repo path. Stop it before docker-smoke (e.g. pkill -f bin/neo-nexus + Ctrl+C any 'make rebuild-restart' tail). Side-by-side mode requires REPO_PATH to point at a different clone."
+fi
+
 # ─── 2. Bring up ──────────────────────────────────────────────────────
 log "docker compose up -d"
 $COMPOSE up -d >/dev/null 2>&1 || err "docker compose up failed"
