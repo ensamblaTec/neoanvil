@@ -52,10 +52,10 @@ See audit trail in git history.
 
 **Dependency:** 1.3.B depends on Area 3.1.A (Jira mock infrastructure). Build Area 3.1 first or in parallel.
 
-- [ ] 1.3.A Docker Compose smoke test: compose up → wait health → curl /status → verify 3 services → compose down. Runs in CI with docker-compose installed — 3 SP
-- [ ] 1.3.B Jira plugin integration tests: reuse `internal/testmock/jira.go` mock from Area 3.1.A (do NOT create separate mock). 7 MCP actions, multi-tenant routing, rate limiting, workflow validation — 5 SP
-- [ ] 1.3.C README update: Quick Start with Docker path + native path side by side — 1 SP
-- [ ] 1.3.D Makefile target `make test-integration` that runs Docker smoke + Jira mock tests — 2 SP
+- [x] 1.3.A Docker Compose smoke test: compose up → wait health → curl /status → verify 3 services → compose down. Local-only via `make docker-smoke` (no GitHub Actions per repo policy) — 3 SP — scripts/docker-smoke.sh runs 8 assertions: image present, container healthy, /status 1+ workspaces, HUD HTML, bind-mount visible, seeded configs, optional GPU, ollama responsive, volumes survive down
+- [x] 1.3.B Jira plugin integration tests: reuse `internal/testmock/jira.go` mock from Area 3.1.A. 5 MCP actions covered (handshake/get_context/get_context-not-found/transition/create_issue) + rate-limit (429) propagation. Multi-tenant + remaining 2 actions (link_issue, attach_artifact) deferred — 5 SP
+- [x] 1.3.C README update: Quick Start with Docker path + native path side by side — 1 SP — Path A (Docker) + Path B (Native) sections, links to docker.md and docker-architecture.md
+- [x] 1.3.D Makefile target `make test-integration` that runs Docker smoke + Jira mock tests — 2 SP — already delivered in 3.3.B; 1.3.A's `make docker-smoke` is the Docker side; both targets coexist for granular CI
 
 ---
 

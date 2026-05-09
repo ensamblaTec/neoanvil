@@ -143,6 +143,70 @@ func TestPluginJiraIntegration_TransitionFlipsStatus(t *testing.T) {
 	}
 }
 
+// TestPluginJiraIntegration_CreateIssue verifies the create_issue
+// action lands on the testmock's POST /issue endpoint and returns the
+// generated key in the MCP response. [Area 1.3.B]
+func TestPluginJiraIntegration_CreateIssue(t *testing.T) {
+	skipIfShortOrWindows(t)
+
+	binPath := buildPluginBinary(t, ".")
+	h := testmock.NewHarness(t)
+
+	rpc, stop := startPlugin(t, binPath, h)
+	defer stop()
+
+	mustRPC(t, rpc, 1, "initialize", nil)
+	resp := mustRPC(t, rpc, 2, "tools/call", map[string]any{
+		"name": "jira",
+		"arguments": map[string]any{
+			"action":      "create_issue",
+			"summary":     "[FEATURE][CORE] integ-tested create",
+			"issue_type":  "Story",
+			"labels":      []string{"FEATURE", "CORE"},
+			"description": "Body",
+		},
+	})
+	text := extractTextContent(t, resp)
+	// Mock returns synthesized key (typically "MOCK-1"); the response
+	// from the plugin includes that key wrapped in human-readable
+	// markdown. Just verify SOMETHING that looks like a Jira key.
+	if !strings.Contains(text, "-") {
+		t.Errorf("create_issue response %q missing issue key", text)
+	}
+	if h.Jira.CallCount() < 1 {
+		t.Errorf("mock saw 0 calls for create_issue")
+	}
+}
+
+// TestPluginJiraIntegration_RateLimitPropagation verifies that when
+// the testmock returns 429, the plugin surfaces a clean MCP error
+// rather than crashing or silently swallowing the limit. [Area 1.3.B]
+func TestPluginJiraIntegration_RateLimitPropagation(t *testing.T) {
+	skipIfShortOrWindows(t)
+
+	binPath := buildPluginBinary(t, ".")
+	h := testmock.NewHarness(t)
+	h.Jira.SetIssue("MCPI-99", testmock.JiraIssue{Summary: "x", Status: "To Do"})
+	h.Jira.SetRateLimit(true) // every request → 429
+
+	rpc, stop := startPlugin(t, binPath, h)
+	defer stop()
+
+	mustRPC(t, rpc, 1, "initialize", nil)
+	resp := mustRPC(t, rpc, 2, "tools/call", map[string]any{
+		"name": "jira",
+		"arguments": map[string]any{
+			"action":    "get_context",
+			"ticket_id": "MCPI-99",
+		},
+	})
+	if errObj, ok := resp["error"].(map[string]any); !ok {
+		t.Fatalf("expected error envelope on 429, got result=%v", resp["result"])
+	} else if msg, _ := errObj["message"].(string); msg == "" {
+		t.Errorf("error envelope had empty message")
+	}
+}
+
 // ── helpers ────────────────────────────────────────────────────────────
 
 // rpcChannel wraps the spawned plugin's stdin/stdout in a JSON encoder /

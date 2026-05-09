@@ -29,6 +29,38 @@ NeoAnvil is a **Model Context Protocol (MCP) server** written in pure Go that pr
 
 ## Quick Start
 
+NeoAnvil supports two parallel deployment paths. Pick one:
+
+### Path A — Docker (recommended for new operators)
+
+```bash
+git clone https://github.com/ensamblatec/neoanvil && cd neoanvil
+
+# 1. Build the multi-stage image (~3 min cold; UID/GID auto-detected
+#    so bind-mounted host files stay editable from your IDE).
+make docker-build
+
+# 2. Bring up the stack (3 services: neoanvil + ollama + ollama-embed)
+make docker-up
+
+# 3. Pull the LLM + embed models on first up (one-time)
+docker exec -it neoanvil-ollama       ollama pull llama3.2:3b
+docker exec -it neoanvil-ollama-embed ollama pull nomic-embed-text
+
+# 4. Verify
+make docker-status
+curl http://127.0.0.1:9000/status
+```
+
+The container auto-registers your repo as workspace `<basename>-<8hex>`.
+Point your MCP client at `http://127.0.0.1:9000/mcp/sse`.
+
+For side-by-side with a native install (defaults clash on
+9000/8087/11434/11435), see [`docs/onboarding/docker.md`](./docs/onboarding/docker.md);
+deeper architecture in [`docs/onboarding/docker-architecture.md`](./docs/onboarding/docker-architecture.md).
+
+### Path B — Native (recommended for hot-reload development)
+
 ```bash
 # Prerequisites: Go 1.26+, Ollama (optional, for embeddings)
 
@@ -37,28 +69,20 @@ git clone https://github.com/ensamblatec/neoanvil && cd neoanvil
 go work sync
 make build          # builds neo-mcp + neo-nexus + neo CLI
 
-# 2. Initialize workspace
-cp neo.yaml.example neo.yaml
-cp .neo/.env.example .neo/.env    # add your secrets here
+# 2. Scaffold a fresh workspace (or reuse existing one)
+neo setup my-workspace      # generates neo.yaml + .mcp.json
+cp .neo/.env.example .neo/.env    # add secrets here
 
 # 3. Start the dispatcher
 make rebuild-restart              # neo-nexus on :9000, workers on :91xx
 
-# 4. Connect your AI assistant
-cat > .mcp.json <<'JSON'
-{
-  "mcpServers": {
-    "neoanvil": {
-      "type": "sse",
-      "url": "http://127.0.0.1:9000/workspaces/<workspace-id>/mcp/sse"
-    }
-  }
-}
-JSON
-
-# 5. Verify
+# 4. Verify
 curl http://127.0.0.1:9000/status
 ```
+
+`neo setup` (Area 1.2) generates `neo.yaml` + `.mcp.json` with sensible
+defaults; flags include `--bare`, `--with-ollama`, `--docker`, `--yes`
+(non-interactive CI).
 
 ## Architecture
 

@@ -907,6 +907,13 @@ docker-seed:
 	@docker exec -u root neoanvil chown -R neo:neo /home/neo/work/repo/.neo 2>/dev/null || true
 	@printf "\033[32m[docker-seed]\033[0m done\n"
 
+# docker-smoke: run scripts/docker-smoke.sh — 8-check end-to-end
+# validation of the compose stack. Useful as a CI gate before merging
+# Pattern D / Dockerfile / compose changes. [Area 1.3.A]
+.PHONY: docker-smoke
+docker-smoke:
+	@bash scripts/docker-smoke.sh
+
 # docker-status: shows container health + named volume sizes for a
 # quick "is everything alive and persisting" summary. Volume names use
 # the COMPOSE_PROJECT_NAME prefix that compose actually applies.
