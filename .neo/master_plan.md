@@ -138,7 +138,7 @@ See audit trail in git history.
 ### Épica 3.3: CI Pipeline (5 SP)
 
 - [x] 3.3.A Add `testing.Short()` guard to all new integration tests — 1 SP — landed in-line with 3.2.B/C/D via `skipIfShortOrWindows()` helpers
-- [x] 3.3.B New CI job `integration-tests`: build plugin binaries, run `-run 'Integration|E2E'`, timeout 5min, after unit tests pass — 2 SP
+- [x] 3.3.B `make test-integration` Makefile target: builds plugin binaries, runs `-race -run 'Integration|E2E'` over the 3 subprocess test packages, 5min timeout. Local-only by design — no GitHub Actions CI in this repo. Operator runs manually before merge — 2 SP
 - [x] 3.3.C `t.Parallel()` (plugin tests; E2E excluded due to t.Setenv) + per-test 30s budget assertion via t.Cleanup — 2 SP
 
 ### Épica 3.4: Wire ops.go forward-pass scaffolding (5 SP)
