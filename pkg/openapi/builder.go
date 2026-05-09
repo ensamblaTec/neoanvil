@@ -36,6 +36,12 @@ type BuildOptions struct {
 	BaseURL        string // e.g. "http://127.0.0.1:9000"
 	IncludeInternal bool   // when false, /internal/* paths are excluded
 	IncludeMCPTools bool   // attach x-mcp-tools extension under info
+
+	// ResponseScanner, when non-nil, is consulted per operation to
+	// fill in the 200 response schema from the handler's AST.
+	// Falls back to the generic baseline (`{200: OK, 500: error}`)
+	// when the scanner has no info for this handler. [Area 4.1.C]
+	ResponseScanner *HandlerScanner
 }
 
 // BuildSpec returns an OpenAPI 3.0 document covering the given
@@ -79,6 +85,19 @@ func BuildSpec(contracts []ContractIface, tools []ToolIface, opts BuildOptions) 
 			Summary:     c.GetBackendFn(),
 			Responses:   defaultResponses(),
 			Parameters:  pathParameters(opPath),
+		}
+		// [Area 4.1.C] Promote the 200 response from baseline to
+		// schema-typed when the scanner resolved the handler's
+		// encode target.
+		if opts.ResponseScanner != nil {
+			if schema := opts.ResponseScanner.SchemaFor(c.GetBackendFn()); schema != nil {
+				op.Responses["200"] = Response{
+					Description: "OK",
+					Content: map[string]MediaType{
+						"application/json": {Schema: schema},
+					},
+				}
+			}
 		}
 		item := spec.Paths[opPath]
 		switch method {

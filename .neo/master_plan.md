@@ -174,7 +174,7 @@ See audit trail in git history.
 
 - [x] 4.1.A `pkg/openapi/spec.go` — OpenAPI 3.0 struct types (Spec, PathItem, Operation, Schema, etc.). Pure Go, no deps. ~150 LOC — 2 SP
 - [x] 4.1.B `pkg/openapi/builder.go` — BuildSpec(contracts, tools, opts) assembles full spec. Path-prefix filter (exclude /internal/* by default). Tags by first path segment. ContractIface adapter avoids cyclic dep on cpg — 3 SP
-- [ ] 4.1.C `pkg/openapi/response.go` — ExtractResponseSchema: AST scan for json.Encode/Marshal in handlers, resolve struct types. Handle inline anonymous structs (`*ast.StructType`). Handle `TrimPrefix` path params → append `{param}` — 3 SP — **deferred** (current spec uses generic `{200: OK, 500: error}` baseline; AST-level response typing is a follow-up enhancement)
+- [x] 4.1.C `pkg/openapi/response.go` — HandlerScanner walks workspace, parses Go AST, maps each handler to the struct type it Encode/Marshal's. Two-pass index resolves both direct composite literals and local-var bindings. JSON tags drive field names (with `-` omit support). Recursion cap at depth 4 prevents infinite loops on self-referential types. BuildOptions.ResponseScanner promotes the 200 response from baseline to schema-typed when resolution succeeds — 3 SP
 - [x] 4.1.D `pkg/openapi/handler.go` — HTTP handler + in-memory cache. Lazy build on first request. InvalidateCache() wired to existing /internal/openapi/refresh. `?include_internal=true` query param. Loopback gate per DS audit Finding 3 — 2 SP
 
 ### Épica 4.2: Serve + UI (6 SP)
