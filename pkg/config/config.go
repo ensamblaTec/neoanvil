@@ -1423,6 +1423,14 @@ func LoadConfig(path string) (*NeoConfig, error) {
 			// boot — defaultNeoConfig() can't do it without the dir.
 			unused := false
 			applyCPGDefaults(cfg, &unused, dir)
+			// [Bug-2/3 fix] Apply env overrides on the no-yaml path too.
+			// Without this, a Nexus-spawned child whose workspace lacks a
+			// neo.yaml binds to the default :8085 (NEO_PORT ignored) and
+			// hits relative-URL Ollama (OLLAMA_HOST ignored) because the
+			// env-override block at line 1484+ was only reached on the
+			// yaml-present path. Extracted to applyChildEnvOverrides so
+			// both branches stay in sync.
+			applyChildEnvOverrides(cfg)
 			return cfg, nil
 		}
 		return nil, err
@@ -1472,39 +1480,9 @@ func LoadConfig(path string) (*NeoConfig, error) {
 		}
 	}
 
-	// [NEXUS/SRE-85] When running as a Nexus child, NEO_PORT overrides the SSE port
-	// and derives auxiliary ports to avoid collisions across children on the same host.
-	// NEO_PORT is injected by pkg/nexus/process_pool.go before exec.Cmd.Start().
-	//
-	// Port layout per child (NEO_PORT = base):
-	//   base+0   → SSE/MCP transport (/mcp/message, /health, dashboard APIs)
-	//   base+100 → Diagnostics/pprof
-	//   base+200 → SRE Listener (external incidents)
-	//   DashboardPort → disabled (HUD served by Nexus since Épica 85)
-	if neoPort := os.Getenv("NEO_PORT"); neoPort != "" {
-		if p, convErr := strconv.Atoi(neoPort); convErr == nil && p > 0 {
-			cfg.Server.SSEPort = p
-			cfg.Server.DiagnosticsPort = p + 100
-			cfg.Server.SREListenerPort = p + 200
-			cfg.Server.DashboardPort = 0 // HUD served by Nexus, not child
-		}
-	}
-
-	// [NEXUS-EMBED] OLLAMA_EMBED_HOST env override — Nexus injects this via child.extra_env
-	// so all workspaces share the dedicated :11435 embedding instance without touching neo.yaml.
-	// Applied after write-back so the env value is never persisted to disk (Zero-Hardcoding).
-	if embedHost := os.Getenv("OLLAMA_EMBED_HOST"); embedHost != "" {
-		cfg.AI.EmbedBaseURL = embedHost
-	}
-
-	// [Area 1.1.C] OLLAMA_HOST env override — symmetric with OLLAMA_EMBED_HOST.
-	// Set by docker-compose so the container talks to `http://ollama:11434`
-	// (compose-managed instance) instead of the default localhost:11434
-	// (which would point to itself inside the container). Same Zero-Hardcoding
-	// rule: never persisted to disk.
-	if llmHost := os.Getenv("OLLAMA_HOST"); llmHost != "" {
-		cfg.AI.BaseURL = llmHost
-	}
+	// Env overrides — extracted to applyChildEnvOverrides so the
+	// no-yaml early-return path can call it too. [Bug-2/3 fix]
+	applyChildEnvOverrides(cfg)
 
 	// Auto-sync .neo/.env.example with any ${VAR} references found in the YAML template.
 	dotEnvDir := filepath.Join(filepath.Dir(path), ".neo")
@@ -1514,6 +1492,42 @@ func LoadConfig(path string) (*NeoConfig, error) {
 	cfg = applyProjectConfig(cfg, filepath.Dir(path))
 
 	return cfg, nil
+}
+
+// applyChildEnvOverrides applies the runtime env-var overrides that
+// Nexus injects into spawned children + that compose injects into the
+// neoanvil container. Idempotent + side-effect-free on disk (overrides
+// never write back to neo.yaml — keep secrets out of the file).
+//
+// Env vars honoured (all optional; unset = leave config as-is):
+//
+//	NEO_PORT          → cfg.Server.{SSE,Diagnostics,SREListener,Dashboard}Port
+//	OLLAMA_HOST       → cfg.AI.BaseURL
+//	OLLAMA_EMBED_HOST → cfg.AI.EmbedBaseURL
+//
+// [NEXUS/SRE-85 + Area 1.1.C + Bug-2/3 fix]
+//
+// Port layout per child (NEO_PORT = base):
+//
+//	base+0   → SSE/MCP transport (/mcp/message, /health, dashboard APIs)
+//	base+100 → Diagnostics/pprof
+//	base+200 → SRE Listener (external incidents)
+//	DashboardPort → disabled (HUD served by Nexus since Épica 85)
+func applyChildEnvOverrides(cfg *NeoConfig) {
+	if neoPort := os.Getenv("NEO_PORT"); neoPort != "" {
+		if p, convErr := strconv.Atoi(neoPort); convErr == nil && p > 0 {
+			cfg.Server.SSEPort = p
+			cfg.Server.DiagnosticsPort = p + 100
+			cfg.Server.SREListenerPort = p + 200
+			cfg.Server.DashboardPort = 0
+		}
+	}
+	if embedHost := os.Getenv("OLLAMA_EMBED_HOST"); embedHost != "" {
+		cfg.AI.EmbedBaseURL = embedHost
+	}
+	if llmHost := os.Getenv("OLLAMA_HOST"); llmHost != "" {
+		cfg.AI.BaseURL = llmHost
+	}
 }
 
 // applyProjectConfig loads .neo-project/neo.yaml walking up from workspaceDir and

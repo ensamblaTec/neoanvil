@@ -405,6 +405,15 @@ func main() {
 	mux.HandleFunc("/.well-known/", oauthProxy)
 	mux.HandleFunc("/oauth/", oauthProxy)
 
+	// [Area 4.2.A + Bug-6 fix] Proxy /openapi.json + /docs to the
+	// active workspace's child neo-mcp. The endpoints live on the
+	// child's sseMux (cmd/neo-mcp/main.go); without this proxy the
+	// dispatcher returned 404 for them. Reuses the oauthProxy
+	// active-workspace lookup so the operator hits a single URL
+	// regardless of which workspace is active.
+	mux.HandleFunc("/openapi.json", oauthProxy)
+	mux.HandleFunc("/docs", oauthProxy)
+
 	// Health endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, `{"status":"ok","workspaces":%d}`, len(pool.List()))

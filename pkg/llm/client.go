@@ -24,15 +24,16 @@ type Client struct {
 }
 
 // NewClient creates an LLM client configured for the given Ollama endpoint.
-// [SRE-110.A] Uses SafeHTTPClient (anti-SSRF) — Ollama URL comes from neo.yaml
-// (potentially external host) so the same SSRF guard as user-config endpoints applies.
+// [SRE-110.A + Bug-4 fix] Uses SafeOperatorHTTPClient since the URL is
+// operator-configured (neo.yaml / OLLAMA_HOST env), not user-influenced.
+// SafeHTTPClient's RFC-1918 block falsely-positives Docker bridge IPs.
 func NewClient(ollamaURL, model string, maxTokens int, temperature float64) *Client {
 	return &Client{
 		OllamaURL:   ollamaURL,
 		Model:       model,
 		MaxTokens:   maxTokens,
 		Temperature: temperature,
-		httpClient:  sre.SafeHTTPClient(),
+		httpClient:  sre.SafeOperatorHTTPClient(30),
 	}
 }
 

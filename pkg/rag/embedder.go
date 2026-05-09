@@ -176,7 +176,12 @@ func NewOllamaEmbedder(baseURL, model string, embedTimeoutSeconds, embedConcurre
 		Model:        model,
 		embedTimeout: timeout,
 		breaker:      sre.NewCircuitBreaker[[]float32](5, sre.BreakerResetTimeout),
-		client:       sre.SafeHTTPClient(),
+		// SafeOperatorHTTPClient (not SafeHTTPClient) — the Ollama URL
+		// is operator-configured via neo.yaml/OLLAMA_HOST/OLLAMA_EMBED_HOST,
+		// not user-influenced. SafeHTTPClient's RFC 1918 block falsely-
+		// positives Docker bridge networks (172.16/12) where compose-
+		// managed Ollama lives. [Bug-4 fix]
+		client:       sre.SafeOperatorHTTPClient(30),
 		sem:          make(chan struct{}, embedConcurrency),
 		globalSem:    getGlobalEmbedSem(baseURL, embedConcurrency),
 		maxChars:     maxChars,

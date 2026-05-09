@@ -55,6 +55,76 @@ func TestLoadConfigCreatesFile(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_EnvOverridesAppliedWhenYAMLAbsent regression-tests
+// Bug-2/3: when the workspace directory has no neo.yaml, LoadConfig
+// took an early-return path that skipped the env-override block at
+// the bottom. As a result, a Nexus-spawned child whose workspace
+// dir is empty (typical Docker scenario where REPO_PATH points at a
+// fresh repo) bound to the default :8085 instead of the NEO_PORT
+// Nexus injected, and reached for an empty-host Ollama URL.
+//
+// Fix extracted env-override application into applyChildEnvOverrides
+// and called it on both code paths. This test asserts the no-yaml
+// path now honours all three vars. [Bug-2/3 fix regression]
+func TestLoadConfig_EnvOverridesAppliedWhenYAMLAbsent(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "neo.yaml")
+
+	t.Setenv("NEO_PORT", "9500")
+	t.Setenv("OLLAMA_HOST", "http://ollama-test:11434")
+	t.Setenv("OLLAMA_EMBED_HOST", "http://ollama-embed-test:11434")
+
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.Server.SSEPort; got != 9500 {
+		t.Errorf("SSEPort = %d, want 9500 (NEO_PORT override)", got)
+	}
+	if got := cfg.Server.DiagnosticsPort; got != 9600 {
+		t.Errorf("DiagnosticsPort = %d, want 9600 (NEO_PORT+100)", got)
+	}
+	if got := cfg.Server.SREListenerPort; got != 9700 {
+		t.Errorf("SREListenerPort = %d, want 9700 (NEO_PORT+200)", got)
+	}
+	if got := cfg.Server.DashboardPort; got != 0 {
+		t.Errorf("DashboardPort = %d, want 0 (HUD on Nexus)", got)
+	}
+	if got := cfg.AI.BaseURL; got != "http://ollama-test:11434" {
+		t.Errorf("AI.BaseURL = %q, want OLLAMA_HOST override", got)
+	}
+	if got := cfg.AI.EmbedBaseURL; got != "http://ollama-embed-test:11434" {
+		t.Errorf("AI.EmbedBaseURL = %q, want OLLAMA_EMBED_HOST override", got)
+	}
+}
+
+// TestLoadConfig_EnvOverridesAppliedWhenYAMLPresent verifies the
+// same overrides on the YAML-present path (the path that worked
+// before the fix). Pin so a future refactor doesn't accidentally
+// regress one branch while fixing the other.
+func TestLoadConfig_EnvOverridesAppliedWhenYAMLPresent(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "neo.yaml")
+	if err := os.WriteFile(cfgPath, []byte("server:\n  mode: pair\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("NEO_PORT", "9500")
+	t.Setenv("OLLAMA_HOST", "http://ollama-test:11434")
+
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.SSEPort != 9500 {
+		t.Errorf("SSEPort = %d, want 9500", cfg.Server.SSEPort)
+	}
+	if cfg.AI.BaseURL != "http://ollama-test:11434" {
+		t.Errorf("BaseURL = %q, want override", cfg.AI.BaseURL)
+	}
+}
+
 func TestLoadConfigBackfill(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "neo.yaml")

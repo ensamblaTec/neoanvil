@@ -81,6 +81,48 @@ ws_count=$(echo "$status_body" | python3 -c 'import sys,json; print(len(json.loa
 [ "$ws_count" -lt 1 ] && err "/status returned 0 workspaces (auto-register failed?)"
 ok "/status: $ws_count workspace(s) registered"
 
+# [Bug-2/3 regression] Wait until at least one workspace is `running`
+# (not just registered). The previous smoke skipped this check and
+# the 1.4.E pass falsely greenlit a build whose child neo-mcp was
+# stuck in boot timeout.
+log "wait for first workspace to reach status=running (max 60s)"
+deadline=$(( $(date +%s) + 60 ))
+while true; do
+    running=$(curl -s --max-time 3 "http://127.0.0.1:${PORT}/status" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(sum(1 for w in d if w.get("status") == "running"))
+except Exception:
+    print(0)
+' 2>/dev/null || echo 0)
+    [ "$running" -ge 1 ] && break
+    [ "$(date +%s)" -ge "$deadline" ] && err "no workspace reached running state in 60s (child neo-mcp boot regression?)"
+    sleep 2
+done
+ok "first workspace is running"
+
+# [Phase F regression] /openapi.json is wired in the child's sseMux,
+# so it only responds once the child is up. Both the spec response
+# and the Swagger UI are smoke-tested here.
+log "GET /openapi.json → expect valid OpenAPI 3.0 spec"
+openapi_status=$(curl -s -o /tmp/openapi.json -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/openapi.json")
+[ "$openapi_status" = "200" ] || err "/openapi.json returned HTTP $openapi_status (expected 200)"
+python3 -c "
+import json, sys
+d = json.load(open('/tmp/openapi.json'))
+assert d.get('openapi','').startswith('3.'), 'openapi version missing'
+assert 'paths' in d, 'paths missing'
+print(f'  spec ok: openapi={d[\"openapi\"]}, paths={len(d[\"paths\"])}, x-mcp-tools={len(d.get(\"x-mcp-tools\", []))}')
+" || err "/openapi.json body is malformed"
+ok "/openapi.json valid"
+
+log "GET /docs → expect Swagger UI HTML"
+docs_status=$(curl -s -o /tmp/docs.html -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/docs")
+[ "$docs_status" = "200" ] || err "/docs returned HTTP $docs_status (expected 200 — Swagger UI)"
+grep -qi "swagger" /tmp/docs.html || err "/docs body missing 'swagger' marker"
+ok "/docs Swagger UI served"
+
 log "GET HUD /  → expect HTML"
 hud_body=$(curl -s --max-time 5 "http://127.0.0.1:${HUD_PORT}/") || err "HUD unreachable"
 echo "$hud_body" | grep -qi '<!doctype' || err "HUD did not return HTML"

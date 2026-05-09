@@ -575,6 +575,19 @@ func (pp *ProcessPool) monitorChild(proc *WorkspaceProcess) {
 // no fatal on miss) so /status JSON exposes BootPhase + BootPct while
 // the child is still loading. Lets operators (and BRIEFING peers
 // section) disambiguate "alive, loading 67%" from "hung".
+// healthProbeHost translates a bind-address into a destination address
+// for health probes. "0.0.0.0" / "::" / "" all mean "bind any" — they
+// are not valid destinations, so we redirect to 127.0.0.1 (loopback)
+// since the child IS listening on it (binding any interface includes
+// loopback). [Bug-5 fix — Docker NEO_BIND_ADDR=0.0.0.0 case]
+func healthProbeHost(bindAddr string) string {
+	switch bindAddr {
+	case "", "0.0.0.0", "::", "[::]":
+		return "127.0.0.1"
+	}
+	return bindAddr
+}
+
 func (pp *ProcessPool) verifyBoot(proc *WorkspaceProcess) {
 	grace := time.Duration(pp.cfg.Nexus.Child.BootGraceSeconds) * time.Second
 	timeout := time.Duration(pp.cfg.Nexus.Child.StartupTimeoutSeconds) * time.Second
@@ -583,14 +596,22 @@ func (pp *ProcessPool) verifyBoot(proc *WorkspaceProcess) {
 	time.Sleep(grace)
 
 	// [SRE-103.B] Child health target is loopback server-controlled.
+	// We force the host to 127.0.0.1 here regardless of bind_addr —
+	// the child binds 0.0.0.0 in Docker mode (NEO_BIND_ADDR=0.0.0.0),
+	// but you can't dial to 0.0.0.0 from a client; it's a "bind-any"
+	// address, not a destination. The child binding all interfaces
+	// includes loopback, so the health probe stays correct in both
+	// native (127.0.0.1) and Docker (0.0.0.0 listen, 127.0.0.1 probe)
+	// modes. [Bug-5 fix]
 	client := sre.SafeInternalHTTPClient(2)
+	healthHost := healthProbeHost(pp.cfg.Nexus.BindAddr)
 	healthURL := fmt.Sprintf("http://%s:%d%s",
-		pp.cfg.Nexus.BindAddr,
+		healthHost,
 		proc.Port,
 		pp.cfg.Nexus.Watchdog.HealthEndpoint,
 	)
 	progressURL := fmt.Sprintf("http://%s:%d/boot_progress",
-		pp.cfg.Nexus.BindAddr, proc.Port)
+		healthHost, proc.Port)
 
 	backoff := 500 * time.Millisecond
 	for time.Now().Before(deadline) {
@@ -805,7 +826,7 @@ func (pp *ProcessPool) Health(workspaceID string) bool {
 	// [SRE-103.B] Child health target is loopback server-controlled.
 	client := sre.SafeInternalHTTPClient(2)
 	url := fmt.Sprintf("http://%s:%d%s",
-		pp.cfg.Nexus.BindAddr,
+		healthProbeHost(pp.cfg.Nexus.BindAddr),
 		proc.Port,
 		pp.cfg.Nexus.Watchdog.HealthEndpoint,
 	)
@@ -1161,7 +1182,7 @@ func (pp *ProcessPool) WatchDog(ctx context.Context) {
 // true when the response is HTTP 200. [Épica 302.E.2]
 func (pp *ProcessPool) checkChildHealth(p *WorkspaceProcess, client *http.Client) bool {
 	url := fmt.Sprintf("http://%s:%d%s",
-		pp.cfg.Nexus.BindAddr,
+		healthProbeHost(pp.cfg.Nexus.BindAddr),
 		p.Port,
 		pp.cfg.Nexus.Watchdog.HealthEndpoint,
 	)
@@ -1376,7 +1397,7 @@ func processNameForPID(pid int) string {
 // Returns true when adoption succeeded. [SRE-80.C.1-ADOPT]
 func (pp *ProcessPool) tryAdoptProcess(entry workspace.WorkspaceEntry, port int) bool {
 	healthURL := fmt.Sprintf("http://%s:%d%s",
-		pp.cfg.Nexus.BindAddr, port,
+		healthProbeHost(pp.cfg.Nexus.BindAddr), port,
 		pp.cfg.Nexus.Watchdog.HealthEndpoint,
 	)
 	client := sre.SafeInternalHTTPClient(2)

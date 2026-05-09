@@ -46,7 +46,10 @@ func ValidateOllamaEmbedModel(ctx context.Context, baseURL, model string) error 
 	if err != nil {
 		return fmt.Errorf("build /api/tags request: %w", err)
 	}
-	client := sre.SafeInternalHTTPClient(3)
+	// SafeOperatorHTTPClient (not SafeInternalHTTPClient) — see Bug-4
+	// reasoning in embedder.go. Docker bridge IPs (172.16/12) are
+	// neither loopback nor a SSRF threat when operator-configured.
+	client := sre.SafeOperatorHTTPClient(3)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrOllamaUnreachable, err)

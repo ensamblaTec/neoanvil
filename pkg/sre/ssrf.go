@@ -145,6 +145,61 @@ func SafeInternalHTTPClientD(timeout time.Duration) *http.Client {
 
 // SafeHTTPClient crea un cliente HTTP Zero-Trust blindado contra SSRF.
 // Internal localhost services on trusted ports (configured in neo.yaml) bypass the guard.
+// SafeOperatorHTTPClient returns a client suitable for endpoints whose
+// URL is explicitly configured by the operator (neo.yaml fields,
+// nexus.yaml, or env-var overrides like OLLAMA_HOST). Differs from
+// SafeHTTPClient in that it does NOT block RFC 1918 private ranges or
+// loopback — those are legitimate targets for compose-managed
+// services (Docker bridge networks live in 172.16/12 + 10.0/8) and
+// internal cluster DNS resolutions.
+//
+// Multicast / unspecified / link-local addresses are still blocked
+// because they're never legitimate destination IPs for a real
+// service. CGNAT (100.64/10) is allowed since some operators run
+// internal services there.
+//
+// Use this for: pkg/rag embedder, pkg/llm client, and other places
+// that hit operator-configured URLs.
+//
+// Use SafeHTTPClient (not this) when the URL comes from request
+// input (chaos drill target, webhook URL from a 3p provider's
+// payload, anything user-influenced).
+//
+// [Bug-4 fix — Docker bridge network falsely-positive on SafeHTTPClient]
+func SafeOperatorHTTPClient(timeoutSec int) *http.Client {
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+	return &http.Client{
+		Timeout: time.Duration(timeoutSec) * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := net.LookupIP(host)
+				if err != nil || len(ips) == 0 {
+					return nil, fmt.Errorf("resolución DNS fallida para %s", host)
+				}
+				// Reject only the addresses that NEVER make sense as
+				// destinations: multicast, unspecified, link-local
+				// (fe80::/10 is router-discovery, never an app target).
+				// Private + loopback are allowed because the operator
+				// set the URL deliberately.
+				for _, raw := range ips {
+					ip := canonicalIP(raw)
+					if ip.IsMulticast() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+						return nil, fmt.Errorf("[SRE-SSRF] SafeOperatorHTTPClient: dirección no-direccionable bloqueada (%s)", raw.String())
+					}
+				}
+				safeAddr := net.JoinHostPort(ips[0].String(), port)
+				return net.DialTimeout(network, safeAddr, 5*time.Second)
+			},
+		},
+	}
+}
+
 func SafeHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 15 * time.Second,

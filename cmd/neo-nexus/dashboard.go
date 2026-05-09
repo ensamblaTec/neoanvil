@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -47,6 +48,31 @@ type NexusDashboardOpts struct {
 }
 
 // ListenNexusDashboard starts the Operator HUD on the given port and blocks
+// isHUDAllowed returns true iff the connection came from a trusted
+// network — loopback always, plus RFC 1918 private ranges and Docker
+// bridge IPs (172.16/12, 10.0/8) when running in container mode.
+// Public IPs are always rejected. [Bug-7 fix — Docker NAT case]
+func isHUDAllowed(remoteAddr string) bool {
+	host := remoteAddr
+	if i := strings.LastIndex(host, ":"); i > 0 {
+		host = host[:i]
+	}
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+		return true
+	}
+	if strings.HasPrefix(host, "127.") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	// IsPrivate covers 10/8, 172.16/12, 192.168/16, fc00::/7.
+	return ip.IsPrivate() || ip.IsLoopback()
+}
+
 // until ctx is cancelled.
 func ListenNexusDashboard(ctx context.Context, opts NexusDashboardOpts) {
 	host := opts.Host
@@ -58,14 +84,19 @@ func ListenNexusDashboard(ctx context.Context, opts NexusDashboardOpts) {
 	mux := http.NewServeMux()
 
 	// Localhost enforcement — same guard as the original dashboard.
+	// When NEO_BIND_ADDR=0.0.0.0 (Docker mode), the operator hits HUD
+	// from the host through Docker NAT — RemoteAddr is the bridge IP
+	// (172.16/12) or whatever Docker assigned. Allow private ranges
+	// in that case so the operator can access the dashboard from
+	// the host machine. The compose stack itself is loopback-only on
+	// the host side via the published port mapping. [Bug-7 fix]
 	guard := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			remote := r.RemoteAddr
-			if len(remote) > 9 && remote[:9] == "127.0.0.1" || remote == "::1" {
+			if isHUDAllowed(r.RemoteAddr) {
 				next(w, r)
 				return
 			}
-			http.Error(w, "HUD access restricted to localhost", http.StatusForbidden)
+			http.Error(w, "HUD access restricted to localhost or private network", http.StatusForbidden)
 		}
 	}
 
