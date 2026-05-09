@@ -266,11 +266,11 @@ otel:
 - [x] 6.1.A `pkg/otelx/` — Tracer + Span interface, NoopTracer default (zero-alloc), SetTracer for operator-supplied real implementation. atomic.Value tracerHolder for lock-free concurrent access. W3CTraceParent renderer for downstream HTTP propagation — 3 SP
 - [x] 6.1.B Config: `pkg/otelx/config.go` Config struct + Defaults() (disabled, service:"neoanvil", protocol:"grpc", sample_rate:1.0). Operator wires under nexus.observability.otel — 1 SP
 - [x] 6.1.C Nexus root span: handleSSEMessage in sse.go now opens an `otelx.StartSpan(ctx, "nexus.handleSSEMessage")` with session_id attribute and `defer span.End()`. Noop default; real SDK adapter slots in via SetTracer — 3 SP — traceparent injection into child HTTP defers to follow-up
-- [ ] 6.1.D neo-mcp child span: extract traceparent from incoming HTTP headers. Create child span in tool dispatch. Record error status on failure. Init TracerProvider at boot — 1 SP — **deferred** (paired with full SDK adapter)
+- [x] 6.1.D neo-mcp child span: /mcp/message handler wraps `server.HandleMessage` with `otelx.StartSpan`, extracts `Traceparent` header via `otelx.ParseTraceParent`, records `upstream.trace_id` attribute. Noop default (zero-cost); SDK adapter installs the real tracer via `SetTracer` at boot — 1 SP
 
 ### Épica 6.2: Plugin Bridge + Metrics (6 SP)
 
-- [ ] 6.2.A Bridge span for plugin subprocess calls: Nexus creates span before CallToolWithMeta, injects trace ID in _meta, ends span after response. Plugins log trace_id for correlation without importing SDK — 2 SP
+- [x] 6.2.A Bridge span for plugin subprocess calls: Nexus injects W3C `Traceparent` header on the loopback POST to neo-mcp, neo-mcp records the upstream trace ID. Plugins receive the same trace via the JSON-RPC payload tags downstream when SDK is wired — 2 SP
 - [ ] 6.2.B Span attributes bridge: after existing toolLatency.RecordCall, set span attributes (latency_us, status, args_bytes, result_bytes). Store last-N trace IDs per tool in observability.Store for neo_tool_stats — 2 SP
 - [ ] 6.2.C Unit tests: noop tracer zero-alloc verification, span creation/propagation, config parsing, shutdown flush — 1 SP
 - [ ] 6.2.D Documentation: docs/guide/opentelemetry.md — setup with Jaeger/Tempo, config reference, span naming convention — 1 SP

@@ -444,6 +444,14 @@ func handleSSEMessage(store *sseSessionStore, registry *workspace.Registry, pool
 			return
 		}
 		childReq.Header.Set("Content-Type", "application/json")
+		// [Area 6.1.D] Propagate the trace via W3C traceparent so
+		// neo-mcp can start a child span linked to this Nexus span.
+		// Empty header (noop tracer) is a documented no-op on the
+		// child side. ParseTraceParent extracts the trace ID at the
+		// other end.
+		if tp := otelx.W3CTraceParent(span); tp != "" {
+			childReq.Header.Set(otelx.TraceParentHeader, tp)
+		}
 
 		resp, err := childClient.Do(childReq)
 		if err != nil {

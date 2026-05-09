@@ -41,6 +41,7 @@ import (
 	"github.com/ensamblatec/neoanvil/pkg/mctx"
 	"github.com/ensamblatec/neoanvil/pkg/memx"
 	"github.com/ensamblatec/neoanvil/pkg/mesh"
+	"github.com/ensamblatec/neoanvil/pkg/otelx"
 	"github.com/ensamblatec/neoanvil/pkg/phoenix"
 	"github.com/ensamblatec/neoanvil/pkg/rag"
 	"github.com/ensamblatec/neoanvil/pkg/sre"
@@ -1134,7 +1135,20 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 		})
 
 		// [SRE-85.C] Single RPC endpoint — Nexus proxies /mcp/message here.
-		sseMux.HandleFunc(cfg.Server.SSEMessagePath, server.HandleMessage(mcpHandler))
+		// [Area 6.1.D] Wrap with otelx span: extract Traceparent from
+		// the request, start a child span tagged with the upstream
+		// trace ID. Noop tracer = zero-cost wrapping.
+		mcpHandlerFn := server.HandleMessage(mcpHandler)
+		sseMux.HandleFunc(cfg.Server.SSEMessagePath, func(w http.ResponseWriter, r *http.Request) {
+			ctx, span := otelx.StartSpan(r.Context(), "mcp.message")
+			defer span.End()
+			if tp := r.Header.Get(otelx.TraceParentHeader); tp != "" {
+				if tid := otelx.ParseTraceParent(tp); tid != "" {
+					span.SetAttribute("upstream.trace_id", tid)
+				}
+			}
+			mcpHandlerFn(w, r.WithContext(ctx))
+		})
 
 		// [SRE-85.A.4] Register dashboard data endpoints on sseMux (headless worker).
 		// Nexus proxies these to the operator HUD.

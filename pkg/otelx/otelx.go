@@ -121,6 +121,34 @@ func Shutdown(ctx context.Context) error {
 	return CurrentTracer().Shutdown(ctx)
 }
 
+// ParseTraceParent extracts the trace ID from a W3C traceparent
+// header value. Returns "" when the header is empty or malformed.
+// Used by neo-mcp to start a child span linked to the Nexus root.
+//
+// Format spec: `<version 2hex>-<traceID 32hex>-<spanID 16hex>-<flags 2hex>`
+func ParseTraceParent(header string) (traceID string) {
+	if len(header) < 55 {
+		return ""
+	}
+	if header[2] != '-' || header[35] != '-' {
+		return ""
+	}
+	tid := header[3:35]
+	// Quick hex sanity check — no allocation, no regex.
+	for i := range 32 {
+		c := tid[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return ""
+		}
+	}
+	return tid
+}
+
+// TraceParentHeader is the canonical name of the W3C Trace Context
+// header. Use this constant to keep request injection + extraction
+// in sync across packages.
+const TraceParentHeader = "Traceparent"
+
 // W3CTraceParent renders a span's TraceID as a W3C-compliant
 // `traceparent` header value. Returns "" if TraceID is empty (noop
 // tracer). Callers inject this into outbound HTTP requests so
