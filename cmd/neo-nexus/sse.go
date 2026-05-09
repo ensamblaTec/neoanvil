@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/nexus"
+	"github.com/ensamblatec/neoanvil/pkg/otelx"
 	"github.com/ensamblatec/neoanvil/pkg/sre"
 	"github.com/ensamblatec/neoanvil/pkg/workspace"
 )
@@ -287,7 +288,17 @@ func handleSSEMessage(store *sseSessionStore, registry *workspace.Registry, pool
 			return
 		}
 
+		// [Area 6.1.C] Wrap each MCP message in a span so tracing
+		// backends correlate Nexus → child round-trips. Noop when
+		// no real tracer is installed (default), so the cost is one
+		// allocation-free interface call. defer span.End() ensures
+		// the span closes even if a downstream handler panics.
+		ctx, span := otelx.StartSpan(r.Context(), "nexus.handleSSEMessage")
+		defer span.End()
+		r = r.WithContext(ctx)
+
 		sessionID := r.URL.Query().Get("sessionId")
+		span.SetAttribute("session_id", sessionID)
 		log.Printf("[NEXUS-MSG] POST %s sessionId=%q origin=%s", r.URL.Path, sessionID, r.RemoteAddr)
 
 		// Read the body (needed for scatter-gather inspection and forwarding).

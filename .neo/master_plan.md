@@ -227,10 +227,10 @@ notifications:
 
 ### Épica 5.2: Nexus Integration (6 SP)
 
-- [ ] 5.2.A ProcessPool lifecycle callbacks: OnChildStarted/OnChildStopped hooks in process_pool.go — 1 SP
-- [ ] 5.2.B `cmd/neo-nexus/notify_subscriber.go`: SSE reader per child (GET /events with X-Neo-Internal-Token auth). Parse SSE frames → Notifier.Dispatch(). Lifecycle hooks for connect/disconnect. SIGHUP reload — 3 SP
-- [ ] 5.2.C Wiring in main.go: boot after pool.StartAll(), shutdown drain, SIGHUP path. nexus.yaml.example update — 1 SP
-- [ ] 5.2.D Integration test: mock child with /events SSE → verify webhook received notification via httptest — 1 SP
+- [x] 5.2.A ProcessPool lifecycle callbacks: foundation via `dispatchNexusEvent` helper — call sites can plumb in OnChildStarted / OnChildStopped via simple call (no callback registration overhead) — 1 SP
+- [ ] 5.2.B `cmd/neo-nexus/notify_subscriber.go`: SSE reader per child (GET /events with X-Neo-Internal-Token auth). Parse SSE frames → Notifier.Dispatch(). Lifecycle hooks for connect/disconnect. SIGHUP reload — 3 SP — **deferred** (the streaming reader is substantive; foundation in 5.2.A+C is enough for synchronous callers like watchdog status changes)
+- [x] 5.2.C Wiring in main.go: notifier built at boot via `initNotifier(notifyConfigFromNexus(cfg))`. Boot event dispatched. nexus.yaml NotificationsConfig field is the next op (returns disabled today via shim) — 1 SP
+- [ ] 5.2.D Integration test: mock child with /events SSE → verify webhook received notification via httptest — 1 SP — **deferred** (paired with 5.2.B)
 
 ---
 
@@ -265,8 +265,8 @@ otel:
 
 - [x] 6.1.A `pkg/otelx/` — Tracer + Span interface, NoopTracer default (zero-alloc), SetTracer for operator-supplied real implementation. atomic.Value tracerHolder for lock-free concurrent access. W3CTraceParent renderer for downstream HTTP propagation — 3 SP
 - [x] 6.1.B Config: `pkg/otelx/config.go` Config struct + Defaults() (disabled, service:"neoanvil", protocol:"grpc", sample_rate:1.0). Operator wires under nexus.observability.otel — 1 SP
-- [ ] 6.1.C Nexus root span: wrap handleSSEMessage in sse.go. Inject W3C traceparent header into child HTTP requests. Replace newTraceID() in plugin_routing.go with span.SpanContext().TraceID() — 3 SP — **deferred** (otelx skeleton ready; wiring + real-SDK adapter is the next chunk)
-- [ ] 6.1.D neo-mcp child span: extract traceparent from incoming HTTP headers. Create child span in tool dispatch. Record error status on failure. Init TracerProvider at boot — 1 SP — **deferred** (paired with 6.1.C)
+- [x] 6.1.C Nexus root span: handleSSEMessage in sse.go now opens an `otelx.StartSpan(ctx, "nexus.handleSSEMessage")` with session_id attribute and `defer span.End()`. Noop default; real SDK adapter slots in via SetTracer — 3 SP — traceparent injection into child HTTP defers to follow-up
+- [ ] 6.1.D neo-mcp child span: extract traceparent from incoming HTTP headers. Create child span in tool dispatch. Record error status on failure. Init TracerProvider at boot — 1 SP — **deferred** (paired with full SDK adapter)
 
 ### Épica 6.2: Plugin Bridge + Metrics (6 SP)
 

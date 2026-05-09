@@ -91,6 +91,19 @@ func main() {
 	}
 	log.Printf("[NEXUS] Registry loaded: %d workspace(s)", len(registry.Workspaces))
 
+	// [Area 5.2.A+C] Notifier (Slack/Discord). Default disabled —
+	// nexus.yaml::notifications.enabled=true to wire webhooks.
+	// Currently always-disabled boot path because nexus.yaml doesn't
+	// yet have a NotificationsConfig field; this seam means call sites
+	// can use dispatchNexusEvent today and it's a no-op until the
+	// config knob lands. Visible boot log confirms readiness.
+	initNotifier(notifyConfigFromNexus(cfg))
+	dispatchNexusEvent("nexus_boot", 2, "Nexus dispatcher started",
+		"Multi-workspace dispatcher online", map[string]any{
+			"port":       cfg.Nexus.DispatcherPort,
+			"workspaces": len(registry.Workspaces),
+		})
+
 	// Initialize port allocator from config
 	allocator := nexus.NewPortAllocator(cfg.Nexus.PortRangeBase, cfg.Nexus.PortRangeSize, cfg.Nexus.PortsFile)
 
