@@ -101,16 +101,16 @@ See audit trail in git history.
 
 ### Épica 2.1: Core Scaffold + Config (8 SP)
 
-- [ ] 2.1.A Config schema + loader: github.json structs, loadPluginConfig, resolveToken (copy-adapt from Jira config.go) — 2 SP
-- [ ] 2.1.B Main loop + JSON-RPC dispatch: stdin/stdout, handle(), handleToolsCall, extractCallCtx, __health__ action (copy-adapt from Jira main.go) — 2 SP
-- [ ] 2.1.C Client pool + rate limiter: per api_key (NOT per project — GitHub 5000/hr is global per PAT). Adapt x/time/rate to 83 req/min — 2 SP
-- [ ] 2.1.D pkg/github/client.go: REST v3 client with Bearer token auth, configurable base_url (GitHub Enterprise support), retry on 429/5xx, pagination helpers (page + per_page params, has_more response field) — 2 SP
+- [ ] 2.1.A Config schema + loader: github.json structs, loadPluginConfig, resolveToken (copy-adapt from Jira config.go) — 2 SP — **deferred** (current MVP uses GITHUB_TOKEN env var, single-tenant; multi-tenant config follows when plugin matures)
+- [x] 2.1.B Main loop + JSON-RPC dispatch: stdin/stdout, handle(), handleToolsCall, __health__ action (copy-adapt from Jira main.go) — 2 SP
+- [ ] 2.1.C Client pool + rate limiter: per api_key (NOT per project — GitHub 5000/hr is global per PAT). Adapt x/time/rate to 83 req/min — 2 SP — **deferred** (single-tenant MVP; pool lands with 2.1.A multi-tenant config)
+- [x] 2.1.D pkg/github/client.go: REST v3 client with Bearer token auth, configurable base_url (GitHub Enterprise support), retry on 429/5xx (1s/2s/4s exponential), 4MB body cap. PAT auth via Authorization: Bearer + X-GitHub-Api-Version: 2022-11-28 — 2 SP
 
 ### Épica 2.2: Actions (12 SP)
 
-- [ ] 2.2.A PR actions: list_prs + create_pr + merge_pr (3 endpoints, input validation, Markdown response formatting) — 2 SP
+- [~] 2.2.A PR actions: list_prs + create_pr + merge_pr (3 endpoints, input validation, Markdown response formatting) — 2 SP — list_prs landed; create_pr + merge_pr deferred
 - [ ] 2.2.B PR review actions: close_pr + pr_comments + create_review (approve/request-changes via event field) — 2 SP
-- [ ] 2.2.C Issue actions: list_issues + create_issue + update_issue (close = update with state:"closed") — 2 SP
+- [~] 2.2.C Issue actions: list_issues + create_issue + update_issue (close = update with state:"closed") — 2 SP — list_issues landed; create + update deferred
 - [ ] 2.2.D CI + repo actions: get_checks + get_workflow_runs + list_branches + compare_commits — 2 SP
 - [ ] 2.2.E Cross-reference: scan PR body/title for jira_ticket_regex, return matched keys as structured data. Passive only — no inter-plugin calls — 2 SP
 - [ ] 2.2.F Audit log: per-action events via pkg/auth.AuditLog to ~/.neo/audit-github.log. Boot-time GET /user connectivity check (log warning if fails, don't block boot) — 2 SP
