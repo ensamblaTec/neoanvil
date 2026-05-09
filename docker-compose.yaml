@@ -33,6 +33,13 @@ services:
     image: neoanvil:${NEOANVIL_TAG:-local}
     container_name: neoanvil
     restart: unless-stopped
+    # Defense in depth (DS-AUDIT 1.1.B follow-up): block setuid binaries
+    # from acquiring privileges even if a CVE in `su-exec` or the kernel
+    # is later disclosed. The entrypoint still legitimately uses `su-exec`
+    # to drop privileges (which doesn't *gain* — only loses), so this is
+    # additive hardening with no functional cost.
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       ollama:
         condition: service_healthy

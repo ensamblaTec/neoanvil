@@ -53,7 +53,12 @@ FROM node:${NODE_VERSION}-alpine AS hud-builder
 WORKDIR /app/web
 
 COPY web/package.json web/package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+# `npm install` (not `npm ci`) — package-lock.json is gitignored in this
+# repo by design (matches `make build-hud` semantics). Reproducibility
+# trade-off accepted: hud-builder pulls latest minor versions matching
+# package.json semver. If reproducibility is later required, drop the
+# package-lock from .gitignore + switch to `npm ci`.
+RUN npm install --no-audit --no-fund
 
 COPY web/ ./
 RUN npm run build
@@ -101,19 +106,32 @@ RUN mkdir -p /out \
 # ─────────────────────────── Stage 4: runtime ─────────────────────────
 FROM alpine:${ALPINE_VERSION} AS runtime
 
-RUN apk add --no-cache ca-certificates tzdata \
+# `su-exec` is a ~10KB static helper (alpine-native gosu equivalent)
+# used by docker-entrypoint.sh to drop from root → neo without forking.
+# `wget` is BusyBox built-in (used by the compose healthcheck).
+RUN apk add --no-cache ca-certificates tzdata su-exec \
  && addgroup -S neo \
  && adduser  -S -G neo -h /home/neo neo \
- && mkdir -p /data /home/neo/.neo \
- && chown -R neo:neo /data /home/neo
+ && mkdir -p /home/neo/.neo /home/neo/.neo-seed /home/neo/work \
+ && chown -R neo:neo /home/neo
 
-COPY --from=go-builder /out/neo-mcp           /usr/local/bin/neo-mcp
-COPY --from=go-builder /out/neo-nexus         /usr/local/bin/neo-nexus
-COPY --from=go-builder /out/neo               /usr/local/bin/neo
+COPY --from=go-builder /out/neo-mcp             /usr/local/bin/neo-mcp
+COPY --from=go-builder /out/neo-nexus           /usr/local/bin/neo-nexus
+COPY --from=go-builder /out/neo                 /usr/local/bin/neo
 COPY --from=go-builder /out/neo-plugin-jira     /usr/local/bin/neo-plugin-jira
 COPY --from=go-builder /out/neo-plugin-deepseek /usr/local/bin/neo-plugin-deepseek
 
-USER neo
+# Seed template — entrypoint copies this to ~/.neo/nexus.yaml on first
+# boot if the volume doesn't already have one. Lives under .neo-seed/
+# (NOT .neo/) so the named volume mount at .neo/ doesn't shadow it.
+COPY nexus.yaml.example /home/neo/.neo-seed/nexus.yaml
+
+# Entrypoint runs as root, reconciles volume ownership + seeds nexus.yaml,
+# then drops to `neo` via su-exec. Do NOT set `USER neo` here — the
+# entrypoint MUST start as root to chown the named volumes.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 WORKDIR /home/neo
 
 # Nexus dispatcher (9000) + dashboard HUD (8087). Child workspaces bind
@@ -123,4 +141,4 @@ EXPOSE 9000 8087
 
 # Single entrypoint: Nexus owns the process tree (children inherit fd's,
 # so they MUST live in the same container).
-ENTRYPOINT ["/usr/local/bin/neo-nexus"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
