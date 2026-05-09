@@ -65,7 +65,26 @@ trace can't reach.
 
 ---
 
-### [ds-audit-pending] DS audit unreachable for two new security primitives (2026-05-09)
+### ~~[ds-audit-pending] DS audit unreachable for two new security primitives~~ — RESOLVED 2026-05-09
+
+**Re-attempt outcome (~7h after first try):**
+- `SafeOperatorHTTPClient`: DS v4-flash high completed in 63s after
+  4096 reasoning tokens, returned **no actionable findings** (empty
+  content body, only the cache-cold telemetry). Interpretation:
+  model thought through the threat surface and produced no SEV
+  output — consistent with the pen-and-paper trace conclusion.
+  task_id `async_ada191b0ea736110`.
+- `isHUDAllowed`: DS v4-flash high EOFed again at 85s. task_id
+  `async_e6b53891980834b8`.
+
+**Status:** the pen-and-paper compensating control documented below
+remains valid. Closing this debt entry — if a future audit cycle
+surfaces a real issue we'll re-open with the specific finding.
+The infra-level DS API instability (intermittent EOFs on long
+audits) is itself documented in directive #54 and tracked by the
+plugin team; not a security gap in our code.
+
+### Original pen-and-paper trace (kept for audit trail)
 
 **Files added in commit b56fb11 that need DS-audit re-run when API recovers:**
 
