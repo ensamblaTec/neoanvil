@@ -73,6 +73,7 @@ func main() {
 		spaceCmd(),       // [PILAR-XXIII / 124.8] Active space/board per provider
 		jiraIDCmd(),      // [134.B.4] Resolve master_plan epic ID → Jira MCPI-N
 		brainCmd(),       // [PILAR-XXVI / 135.D] Brain Portable: push/pull encrypted snapshots
+		setupCmd(),       // [Area 1.2] Scaffold a fresh workspace (neo.yaml + .mcp.json)
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

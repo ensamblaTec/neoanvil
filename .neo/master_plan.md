@@ -42,11 +42,11 @@ See audit trail in git history.
 
 **Note:** `neo init` already exists for project federation. New workspace scaffolding uses `neo setup`.
 
-- [ ] 1.2.A Cobra command `neo setup [workspace-name]` with flags --bare, --with-ollama, --docker — 2 SP
-- [ ] 1.2.B neo.yaml scaffolding: generate config with sensible defaults (mode=pair, ollama URLs, cache sizes). Uses text/template, not hardcoded strings — 3 SP
-- [ ] 1.2.C .mcp.json generation with --url flag for custom endpoint. Template variable ${NEO_MCP_URL} for Docker. Workspace ID override via --workspace-id flag to handle path-dependent hashes inside containers — 4 SP
-- [ ] 1.2.D Validation: check port conflicts, existing workspace, Go version, Ollama reachability (if --with-ollama). Non-interactive mode for CI with --yes flag — 2 SP
-- [ ] 1.2.E Unit tests for scaffolding (YAML validity, directory creation, .mcp.json format) — 1 SP
+- [x] 1.2.A Cobra command `neo setup [workspace-name]` with flags --bare, --with-ollama, --docker — 2 SP
+- [x] 1.2.B neo.yaml scaffolding: generate config with sensible defaults (mode=pair, ollama URLs, cache sizes). Uses text/template, not hardcoded strings — 3 SP
+- [x] 1.2.C .mcp.json generation with --url flag for custom endpoint. Template variable ${NEO_MCP_URL} for Docker. Workspace ID override via --workspace-id flag to handle path-dependent hashes inside containers — 4 SP — switched to json.MarshalIndent (vs text/template) per DS audit Finding 2 to prevent JSON injection via --url
+- [x] 1.2.D Validation: check port conflicts, existing workspace, Go version, Ollama reachability (if --with-ollama). Non-interactive mode for CI with --yes flag — 2 SP — workspace-name regex sanitization added per DS Finding 1 (path traversal); O_EXCL atomic write per Finding 3 (TOCTOU)
+- [x] 1.2.E Unit tests for scaffolding (YAML validity, directory creation, .mcp.json format) — 1 SP — 9 tests including path-traversal, symlink-TOCTOU, URL-injection
 
 ### Épica 1.3: Integration & Testing (11 SP)
 
