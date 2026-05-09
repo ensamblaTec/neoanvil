@@ -36,7 +36,7 @@ See audit trail in git history.
 - [x] 1.4.B scripts/docker-entrypoint.sh — `seed_if_absent` helper that copies host-bind RO sources into the named volume only when destination is missing AND not a symlink (TOCTOU defense from DS audit). Three sources: image template (nexus.yaml) + host bind credentials.json + host bind plugins.yaml. `chmod 600` on credential-class files — 3 SP
 - [x] 1.4.C Makefile — `docker-seed` (one-time copy of master_plan / audit-baseline / technical_debt into the running container) + `docker-status` (health + named volume sizes summary) — 2 SP
 - [x] 1.4.D Architecture doc — `docs/onboarding/docker-architecture.md`. Layered ascii diagram, persistence matrix, memory model table, lifecycle commands, migration paths (native↔Docker bidirectional), troubleshooting table, scalability notes — 3 SP
-- [x] 1.4.E Smoke test — end-to-end `make docker-up && curl /status`, GPU passthrough check, side-by-side mode validation, BoltDB lock-conflict test — 3 SP
+- [x] 1.4.E Smoke test — end-to-end `make docker-up && curl /status`, GPU passthrough check, side-by-side mode validation, BoltDB lock-conflict test — 3 SP — initial smoke false-passed (only checked container health). Deeper smoke run on 2026-05-09 caught 6 bugs that prevented children from reaching running state: env-override fallthrough in LoadConfig (Bug 2/3), SafeHTTPClient rejecting Docker bridge (Bug 4), 0.0.0.0 dial in healthProbe (Bug 5), missing /openapi.json+/docs proxy (Bug 6), HUD localhost-only guard vs Docker NAT (Bug 7). All fixed in commit b56fb11. Smoke extended to wait for status=running + validate /openapi.json + /docs. All 8 checks now pass on i5-10400 + RTX 3090.
 
 ### Épica 1.2: `neo setup` CLI Command (12 SP)
 
