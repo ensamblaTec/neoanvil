@@ -267,7 +267,7 @@ func RunAsync(store *AsyncTaskStore, conn *plugin.Connected, toolName string, ar
 func (s *AsyncTaskStore) SubmitBatch(pluginName, action string, count int) (string, []string, error) {
 	batchID := "batch_" + hex.EncodeToString(func() []byte { b := make([]byte, 6); rand.Read(b); return b }())
 	taskIDs := make([]string, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		id, err := s.Submit(pluginName, action)
 		if err != nil {
 			return batchID, taskIDs, fmt.Errorf("submit %d/%d: %w", i, count, err)

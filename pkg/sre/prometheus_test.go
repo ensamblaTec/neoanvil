@@ -10,7 +10,7 @@ import (
 func TestPrometheusName(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"mes_ingested_total", "neo_mes_ingested_total"},
-		{"Goroutines_Active", "neoanvilroutines_active"},
+		{"Goroutines_Active", "neo_goroutines_active"},
 		{"weird-chars.@here", "neo_weird_chars__here"},
 	}
 	for _, c := range cases {
@@ -63,7 +63,7 @@ func TestWritePrometheusMetrics_PicksUpExpvars(t *testing.T) {
 		"# HELP neo_mes_ingested_total",
 		"# TYPE neo_mes_ingested_total counter",
 		"neo_mes_ingested_total 123",
-		"neoanvilroutines_active", // gauge from expvar.Func
+		"neo_goroutines_active", // gauge from expvar.Func
 	} {
 		if !strings.Contains(out, needle) {
 			t.Errorf("metrics missing %q in output:\n%s", needle, out)

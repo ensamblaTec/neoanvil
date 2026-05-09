@@ -141,6 +141,15 @@ See audit trail in git history.
 - [x] 3.3.B New CI job `integration-tests`: build plugin binaries, run `-run 'Integration|E2E'`, timeout 5min, after unit tests pass — 2 SP
 - [x] 3.3.C `t.Parallel()` (plugin tests; E2E excluded due to t.Setenv) + per-test 30s budget assertion via t.Cleanup — 2 SP
 
+### Épica 3.4: Wire ops.go forward-pass scaffolding (5 SP)
+
+**Carry-over:** 3.2.B note ("Wire during Area 3.2.B (Jira integration tests will exercise them)") was unfulfilled at 3.2.B closure (commit ccc1b34). 10 U1000 staticcheck findings hold the audit-ci baseline up. Track here as explicit work.
+
+- [ ] 3.4.A Wire `auditMultiTenant` into ops main path — call from `dispatch_*.go` after each transition/create_issue with project name + result. Verify ~/.neo/audit-jira.log gains tenant field — 2 SP
+- [ ] 3.4.B Wire `checkConnectivity` lazy ping per api_key on first request per tenant — 1 SP
+- [ ] 3.4.C Wire `installShutdownHandler` + `shutdownDrain` in main loop — drain in-flight RPCs on SIGTERM with 5s timeout — 1 SP
+- [ ] 3.4.D Wire `checkLegacyDeprecation` at boot + use `buildStateSafe` instead of `buildState`. Wire `clientPool.invalidateAll` to SIGHUP reload path — 1 SP
+
 ---
 
 ## Area 4: OpenAPI Auto-Generated Spec (16 SP)
@@ -258,7 +267,7 @@ otel:
 
 ## Known Debt
 
-- **ops.go unwired functions:** `auditMultiTenant`, `checkConnectivity`, `checkLegacyDeprecation`, `installShutdownHandler`, `buildStateSafe` are implemented but not called from main.go. Wire during Area 3.2.B (Jira integration tests will exercise them).
+- **ops.go unwired functions:** Tracked as Épica 3.4 (5 SP). Audit-baseline absorbs the 10 U1000 findings; wire-up restores them to "real code path" state.
 - **Template render order:** `renderTemplate` iterates map non-deterministically. Low risk (placeholder values rarely contain `{other_placeholder}`) but could cause edge case. Fix: sort keys before render.
 - **Audit log blocking:** `auditMultiTenant` calls `audit.Append()` synchronously. If disk is slow, MCP response delays. Future: async buffered channel writer.
 

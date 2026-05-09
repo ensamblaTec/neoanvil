@@ -3,6 +3,16 @@
 # Regenerate after a clean landing; CI gate lives in `make audit-ci`.
 
 === staticcheck ===
+cmd/plugin-jira/ops.go:107:6: type connectivityResult is unused (U1000)
+cmd/plugin-jira/ops.go:114:2: var connCheckMu is unused (U1000)
+cmd/plugin-jira/ops.go:115:2: var connCheckResults is unused (U1000)
+cmd/plugin-jira/ops.go:120:6: func checkConnectivity is unused (U1000)
+cmd/plugin-jira/ops.go:170:6: func buildStateSafe is unused (U1000)
+cmd/plugin-jira/ops.go:180:6: func checkLegacyDeprecation is unused (U1000)
+cmd/plugin-jira/ops.go:243:6: func installShutdownHandler is unused (U1000)
+cmd/plugin-jira/ops.go:70:6: type auditEntry is unused (U1000)
+cmd/plugin-jira/ops.go:80:17: func (*state).auditMultiTenant is unused (U1000)
+cmd/plugin-jira/pool.go:95:22: func (*clientPool).invalidateAll is unused (U1000)
 
 === ineffassign ===
 

@@ -85,7 +85,7 @@ func TestAsyncStore_FailWithError(t *testing.T) {
 
 func TestAsyncStore_MaxPendingReject(t *testing.T) {
 	store := newTestAsyncStore(t)
-	for i := 0; i < asyncMaxPending; i++ {
+	for i := range asyncMaxPending {
 		_, err := store.Submit("test", "action")
 		if err != nil {
 			t.Fatalf("Submit %d: %v", i, err)
