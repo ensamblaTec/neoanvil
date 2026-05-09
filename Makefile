@@ -831,3 +831,39 @@ freshness:
 			echo "[freshness] ✓ $$bin is $${delta}m ahead of last cmd|pkg commit"; \
 		fi; \
 	done
+
+# ═════════════════════════════════════════════════════════════════════
+# Docker (Area 1.1.D)
+# ═════════════════════════════════════════════════════════════════════
+
+DOCKER_IMAGE      ?= neoanvil
+DOCKER_TAG        ?= local
+DOCKER_GOAMD64    ?= v3
+COMPOSE           ?= docker compose
+
+.PHONY: docker-build docker-up docker-down docker-logs
+
+# docker-build: builds the multi-stage image. Override the SIMD baseline
+# with `make docker-build DOCKER_GOAMD64=v1` for portable images.
+docker-build:
+	@printf "\033[36m[docker]\033[0m building $(DOCKER_IMAGE):$(DOCKER_TAG) (GOAMD64=$(DOCKER_GOAMD64))\n"
+	docker build \
+		--build-arg GOAMD64=$(DOCKER_GOAMD64) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
+		-f Dockerfile .
+
+# docker-up: starts the stack (defined in 1.1.B compose file). Detached.
+docker-up:
+	@if [ ! -f docker-compose.yaml ] && [ ! -f docker-compose.yml ]; then \
+		printf "\033[33m[docker]\033[0m no docker-compose.yaml yet — Area 1.1.B not landed\n"; exit 1; \
+	fi
+	$(COMPOSE) up -d
+
+# docker-down: stops the stack and removes containers. Volumes survive
+# unless the operator passes `make docker-down DOWN_FLAGS=-v`.
+docker-down:
+	$(COMPOSE) down $(DOWN_FLAGS)
+
+# docker-logs: tails Nexus + Ollama logs.
+docker-logs:
+	$(COMPOSE) logs -f --tail=100
