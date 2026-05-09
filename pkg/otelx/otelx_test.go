@@ -119,6 +119,81 @@ func (f *fakeTracer) StartSpan(ctx context.Context, name string) (context.Contex
 }
 func (f *fakeTracer) Shutdown(ctx context.Context) error { return nil }
 
+// TestRecordingTracer_CapturesAttributes exercises the in-memory
+// SDK adapter. End() flushes to FinishedSpans; Attributes() returns
+// a snapshot for tests.
+func TestRecordingTracer_CapturesAttributes(t *testing.T) {
+	tracer := NewRecordingTracer(0) // default cap
+	defer SetTracer(nil)
+	SetTracer(tracer)
+
+	_, span := StartSpan(context.Background(), "test.op")
+	span.SetAttribute("workspace_id", "ws-1")
+	span.SetAttribute("status", 200)
+	span.End()
+
+	finished := tracer.FinishedSpans()
+	if len(finished) != 1 {
+		t.Fatalf("expected 1 finished span, got %d", len(finished))
+	}
+	got := finished[0]
+	if got.Name != "test.op" {
+		t.Errorf("name = %q, want test.op", got.Name)
+	}
+	if got.Attrs["workspace_id"] != "ws-1" {
+		t.Errorf("workspace_id attr missing or wrong: %v", got.Attrs)
+	}
+	if got.TraceID == "" || len(got.TraceID) != 32 {
+		t.Errorf("traceID = %q, want 32-hex", got.TraceID)
+	}
+}
+
+// TestRecordingTracer_ErrorStatus verifies RecordError + SetStatus
+// both surface to FinishedSpan.Status.
+func TestRecordingTracer_ErrorStatus(t *testing.T) {
+	tracer := NewRecordingTracer(0)
+	defer SetTracer(nil)
+	SetTracer(tracer)
+
+	_, span := StartSpan(context.Background(), "failing.op")
+	span.RecordError(errors.New("boom"))
+	span.End()
+
+	got := tracer.FinishedSpans()[0]
+	if got.Status != StatusError {
+		t.Errorf("status = %d, want StatusError(%d)", got.Status, StatusError)
+	}
+	if got.Error != "boom" {
+		t.Errorf("error msg = %q, want boom", got.Error)
+	}
+}
+
+// TestRecordingTracer_RingCap verifies the bounded ring evicts
+// oldest spans past the cap.
+func TestRecordingTracer_RingCap(t *testing.T) {
+	tracer := NewRecordingTracer(3)
+	defer SetTracer(nil)
+	SetTracer(tracer)
+
+	for i := range 5 {
+		_, span := StartSpan(context.Background(), "op")
+		span.SetAttribute("i", i)
+		span.End()
+	}
+
+	finished := tracer.FinishedSpans()
+	if len(finished) != 3 {
+		t.Fatalf("ring cap not enforced: %d spans, want 3", len(finished))
+	}
+	// Oldest (i=2) should be at index 0; newest (i=4) at index 2.
+	if finished[0].Attrs["i"] != 2 {
+		t.Errorf("oldest expected i=2, got %v", finished[0].Attrs["i"])
+	}
+	if finished[2].Attrs["i"] != 4 {
+		t.Errorf("newest expected i=4, got %v", finished[2].Attrs["i"])
+	}
+}
+
 type fakeSpan struct {
 	name    string
 	traceID string

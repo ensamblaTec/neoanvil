@@ -23,6 +23,8 @@ package otelx
 
 import (
 	"context"
+	"maps"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -62,6 +64,27 @@ type noopTracer struct{}
 // noopSpan implements Span as no-ops.
 type noopSpan struct{}
 
+// AttributeRecorder is implemented by tracers that can be queried
+// for span attributes after End — primarily for tests + the
+// neo_tool_stats integration which surfaces last-N trace IDs per
+// tool. The noop tracer doesn't implement it; SDK adapters do.
+// [Area 6.2.B]
+type AttributeRecorder interface {
+	LastAttributes(spanID string) map[string]any
+}
+
+// RecordingSpan is the shape adapters expose for recording-only
+// spans (no exporter). Useful in tests where we want to assert
+// attributes were set without spinning up an OTLP collector.
+//
+// Adapters can implement this on top of their Span type so test
+// helpers reach the underlying state.
+// [Area 6.2.C]
+type RecordingSpan interface {
+	Span
+	Attributes() map[string]any
+}
+
 func (noopTracer) StartSpan(ctx context.Context, name string) (context.Context, Span) {
 	return ctx, noopSpan{}
 }
@@ -72,6 +95,173 @@ func (noopSpan) SetStatus(code SpanStatus, description string) {}
 func (noopSpan) RecordError(err error)                      {}
 func (noopSpan) End()                                       {}
 func (noopSpan) TraceID() string                            { return "" }
+
+// ─── Recording adapter ───────────────────────────────────────────────
+//
+// RecordingTracer is a fully in-memory adapter — no exporter, no
+// network. Useful in tests, for development sanity checks, and as
+// a reference implementation for operators writing their own SDK
+// adapter (e.g., one that wraps go.opentelemetry.io/otel).
+//
+// Storage is bounded: the most-recent N spans are kept (default 256
+// per process) so a long-running test doesn't accumulate forever.
+// [Area 6.2.B + 6.2.C]
+
+const recordingDefaultCap = 256
+
+// RecordingTracer keeps a ring of finished spans + their attributes.
+// Each StartSpan returns a fresh recordingSpan; End appends to the
+// ring (oldest evicted at cap).
+type RecordingTracer struct {
+	mu     sync.Mutex
+	cap    int
+	spans  []*recordingSpan // ring buffer of finished spans
+	traceCounter uint64       // monotonic so traceIDs stay unique within one process
+}
+
+// NewRecordingTracer constructs a tracer that records up to cap
+// finished spans in memory. Pass 0 for the default cap (256).
+func NewRecordingTracer(cap int) *RecordingTracer {
+	if cap <= 0 {
+		cap = recordingDefaultCap
+	}
+	return &RecordingTracer{cap: cap}
+}
+
+// StartSpan returns a recordingSpan with a fresh trace ID. Real OTel
+// SDKs would derive the parent span ID from the context here; we
+// don't have a parent-handle yet (operator-supplied adapter does).
+func (t *RecordingTracer) StartSpan(ctx context.Context, name string) (context.Context, Span) {
+	t.mu.Lock()
+	t.traceCounter++
+	tc := t.traceCounter
+	t.mu.Unlock()
+	tid := traceIDFromCounter(tc)
+	s := &recordingSpan{
+		owner:     t,
+		name:      name,
+		traceID:   tid,
+		startedAt: time.Now(),
+		attrs:     map[string]any{},
+	}
+	return ctx, s
+}
+
+func (t *RecordingTracer) Shutdown(ctx context.Context) error { return nil }
+
+// FinishedSpans returns a copy of the recorded ring, oldest first.
+// Useful in tests.
+func (t *RecordingTracer) FinishedSpans() []FinishedSpan {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]FinishedSpan, len(t.spans))
+	for i, s := range t.spans {
+		out[i] = FinishedSpan{
+			Name:     s.name,
+			TraceID:  s.traceID,
+			Status:   s.status,
+			Attrs:    cloneMap(s.attrs),
+			Duration: s.endedAt.Sub(s.startedAt),
+			Error:    s.errMsg,
+		}
+	}
+	return out
+}
+
+// FinishedSpan is the read-only snapshot of a recorded span.
+type FinishedSpan struct {
+	Name     string
+	TraceID  string
+	Status   SpanStatus
+	Attrs    map[string]any
+	Duration time.Duration
+	Error    string
+}
+
+// recordingSpan is the live span; appended to owner.spans on End.
+type recordingSpan struct {
+	owner     *RecordingTracer
+	name      string
+	traceID   string
+	startedAt time.Time
+	endedAt   time.Time
+	status    SpanStatus
+	errMsg    string
+	mu        sync.Mutex
+	attrs     map[string]any
+}
+
+func (s *recordingSpan) SetAttribute(key string, value any) {
+	s.mu.Lock()
+	s.attrs[key] = value
+	s.mu.Unlock()
+}
+
+func (s *recordingSpan) SetStatus(code SpanStatus, description string) {
+	s.mu.Lock()
+	s.status = code
+	if description != "" {
+		s.errMsg = description
+	}
+	s.mu.Unlock()
+}
+
+func (s *recordingSpan) RecordError(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	s.status = StatusError
+	s.errMsg = err.Error()
+	s.mu.Unlock()
+}
+
+func (s *recordingSpan) End() {
+	s.mu.Lock()
+	s.endedAt = time.Now()
+	s.mu.Unlock()
+	s.owner.mu.Lock()
+	s.owner.spans = append(s.owner.spans, s)
+	if len(s.owner.spans) > s.owner.cap {
+		s.owner.spans = s.owner.spans[len(s.owner.spans)-s.owner.cap:]
+	}
+	s.owner.mu.Unlock()
+}
+
+func (s *recordingSpan) TraceID() string { return s.traceID }
+
+// Attributes returns a snapshot of the span's recorded attributes.
+// [Area 6.2.B — span attributes bridge for neo_tool_stats]
+func (s *recordingSpan) Attributes() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneMap(s.attrs)
+}
+
+// traceIDFromCounter renders a 32-hex trace ID from an atomic
+// monotonic counter. Deterministic per process — good enough for
+// tests + correlation. Real SDK adapters use crypto/rand.
+func traceIDFromCounter(c uint64) string {
+	const hex = "0123456789abcdef"
+	var buf [32]byte
+	for i := range buf {
+		buf[i] = '0'
+	}
+	for i := 31; i >= 0 && c > 0; i-- {
+		buf[i] = hex[c&0x0f]
+		c >>= 4
+	}
+	return string(buf[:])
+}
+
+func cloneMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	maps.Copy(out, m)
+	return out
+}
 
 // tracerHolder wraps the Tracer interface in a concrete type so
 // atomic.Value sees a consistent dynamic type across stores. Without
