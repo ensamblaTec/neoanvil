@@ -16,15 +16,18 @@ NeoAnvil is a **Model Context Protocol (MCP) server** written in pure Go that pr
 
 ## Features
 
-- **16 MCP tools / 60+ operations** — unified toolkit for code intelligence, mutation certification, chaos testing, memory, and caching
+- **14 MCP tools / 60+ operations** — unified toolkit for code intelligence, mutation certification, chaos testing, memory, and caching (counted from live `GET /openapi.json::x-mcp-tools`)
 - **23 radar intents** — BRIEFING, BLAST_RADIUS, SEMANTIC_CODE, AST_AUDIT, GRAPH_WALK, FILE_EXTRACT, and more
 - **Multi-workspace dispatcher** (Neo-Nexus) — manages multiple workspaces behind a single SSE endpoint
 - **4-tier federation** — workspace, project, org, and nexus-level configuration and knowledge stores
-- **Plugin system** — subprocess MCP plugins (Jira Cloud, DeepSeek) with per-tenant rate limiting
+- **Plugin system** — subprocess MCP plugins (Jira Cloud, DeepSeek, GitHub) with per-tenant rate limiting and `__health__` zombie detection
+- **OpenAPI surface** — `GET /openapi.json` returns the live MCP tool registry as OpenAPI 3.0; Swagger UI served at `/docs`
+- **OpenTelemetry tracing** — W3C traceparent propagation Nexus → child neo-mcp via `X-Neo-Traceparent`; pluggable `pkg/otelx` tracer (noop by default, RecordingTracer for tests)
+- **Webhook notifications** — `pkg/notify` Slack + Discord dispatcher fed by per-child SSE subscribers (allowlist-filtered events with retry+backoff)
 - **Code Property Graph** — SSA-based call graph with PageRank, BFS walk, and fast-boot persistence
 - **HNSW vector index** — semantic code search with embedding cache and binary quantization
 - **3-layer cache stack** — QueryCache (54ns hit), TextCache (33ns hit), EmbeddingCache
-- **Zero-CGO** — cross-compiles to linux/darwin x amd64/arm64 with SIMD auto-vectorization via GOAMD64/GOARM64
+- **Pure Go native build** — cross-compiles to linux/darwin × amd64/arm64 with SIMD auto-vectorization via GOAMD64/GOARM64. Docker stage 3 enables CGO for tree-sitter parsers (gcc + musl-dev)
 - **Operator HUD** — real-time dashboard with SSE event bus (21 event types)
 
 ## Quick Start
@@ -203,12 +206,13 @@ plugins:
 | `neo_tool_stats` | Per-tool latency percentiles (p50/p95/p99) |
 | `neo_log_analyzer` | Log analysis with HNSW incident correlation |
 
-### Plugins (2)
+### Plugins (3)
 
 | Plugin | Purpose |
 |--------|---------|
-| `jira` | Jira Cloud integration — multi-tenant, per-project workflows, naming enforcement |
-| `deepseek` | DeepSeek API fan-out — distill, refactor, red-team audit, boilerplate generation |
+| `jira` | Jira Cloud integration — multi-tenant, per-project workflows, naming enforcement (7 actions) |
+| `deepseek` | DeepSeek API fan-out — distill, refactor, red-team audit, boilerplate generation (4 actions) |
+| `github` | GitHub integration — PRs, issues, files, commits, repos, search, branches, releases (11 actions, multi-tenant) |
 
 ## Operating Modes
 
