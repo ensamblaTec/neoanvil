@@ -1298,8 +1298,14 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 		// [Area 4.2.A] GET /openapi.json — auto-generated OpenAPI 3.0 spec
 		// covering the dispatcher's HTTP routes + the MCP tool registry
 		// (under x-mcp-tools). Pass `?include_internal=true` to surface
-		// /internal/* endpoints (default excludes them).
+		// /internal/* endpoints (default excludes them — loopback only).
 		sseMux.Handle("/openapi.json", openAPIServeCache.Handler())
+
+		// [Area 4.2.C] GET /docs — Swagger UI rendering /openapi.json.
+		// Loads swagger-ui-dist from CDN at view time so the binary
+		// stays small (no 3MB of embedded JS). For air-gapped operators,
+		// edit pkg/openapi/docs.go to point at an internal mirror.
+		sseMux.Handle("/docs", openapiDocsHandler())
 
 		// [287.C] GET /internal/rag/shared/query?k=N  body: {"vector":[…float32]}
 		// Returns top-K DocMeta hits from the shared graph (loopback-only, no lock needed).

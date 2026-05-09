@@ -243,3 +243,169 @@ func (c *Client) GetUser(ctx context.Context) (string, error) {
 	}
 	return out.Login, nil
 }
+
+// CreatePR opens a new pull request. base is the target branch
+// (typically "main"); head is the source. Body may be empty.
+// [Area 2.2.A]
+func (c *Client) CreatePR(ctx context.Context, owner, repo, title, body, head, base string) (*PullRequest, error) {
+	if title == "" || head == "" || base == "" {
+		return nil, errors.New("title, head, base are required")
+	}
+	payload := map[string]any{
+		"title": title,
+		"body":  body,
+		"head":  head,
+		"base":  base,
+	}
+	var out PullRequest
+	path := fmt.Sprintf("/repos/%s/%s/pulls", url.PathEscape(owner), url.PathEscape(repo))
+	if err := c.Do(ctx, http.MethodPost, path, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// MergePR merges an open PR. mergeMethod ∈ {"merge", "squash", "rebase"}.
+// [Area 2.2.A]
+func (c *Client) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod, commitTitle string) error {
+	if mergeMethod == "" {
+		mergeMethod = "merge"
+	}
+	payload := map[string]any{
+		"merge_method": mergeMethod,
+	}
+	if commitTitle != "" {
+		payload["commit_title"] = commitTitle
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", url.PathEscape(owner), url.PathEscape(repo), number)
+	return c.Do(ctx, http.MethodPut, path, payload, nil)
+}
+
+// ClosePR closes a PR without merging. [Area 2.2.B]
+func (c *Client) ClosePR(ctx context.Context, owner, repo string, number int) error {
+	payload := map[string]any{"state": "closed"}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", url.PathEscape(owner), url.PathEscape(repo), number)
+	return c.Do(ctx, http.MethodPatch, path, payload, nil)
+}
+
+// PRComment is one item from `GET /repos/.../issues/{n}/comments` —
+// the API returns this same shape for both PR and issue comments.
+type PRComment struct {
+	ID      int64  `json:"id"`
+	Body    string `json:"body"`
+	HTMLURL string `json:"html_url"`
+	User    struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt string `json:"created_at"`
+}
+
+// PRComments returns the comments on a PR (or issue — same endpoint).
+// [Area 2.2.B]
+func (c *Client) PRComments(ctx context.Context, owner, repo string, number int) ([]PRComment, error) {
+	var out []PRComment
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100", url.PathEscape(owner), url.PathEscape(repo), number)
+	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CreateReview posts a PR review. event ∈ {"APPROVE", "REQUEST_CHANGES", "COMMENT"}.
+// [Area 2.2.B]
+func (c *Client) CreateReview(ctx context.Context, owner, repo string, number int, event, body string) error {
+	payload := map[string]any{
+		"event": event,
+		"body":  body,
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", url.PathEscape(owner), url.PathEscape(repo), number)
+	return c.Do(ctx, http.MethodPost, path, payload, nil)
+}
+
+// CreateIssue opens a new issue. labels is optional. [Area 2.2.C]
+func (c *Client) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*Issue, error) {
+	if title == "" {
+		return nil, errors.New("title is required")
+	}
+	payload := map[string]any{
+		"title": title,
+		"body":  body,
+	}
+	if len(labels) > 0 {
+		payload["labels"] = labels
+	}
+	var out Issue
+	path := fmt.Sprintf("/repos/%s/%s/issues", url.PathEscape(owner), url.PathEscape(repo))
+	if err := c.Do(ctx, http.MethodPost, path, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateIssue patches an issue. Pass state="closed" to close. [Area 2.2.C]
+func (c *Client) UpdateIssue(ctx context.Context, owner, repo string, number int, fields map[string]any) error {
+	if len(fields) == 0 {
+		return errors.New("update fields are required")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number)
+	return c.Do(ctx, http.MethodPatch, path, fields, nil)
+}
+
+// CheckRun mirrors the GitHub Actions check_run shape we surface.
+type CheckRun struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`     // queued|in_progress|completed
+	Conclusion string `json:"conclusion"` // success|failure|neutral|cancelled|...
+	HTMLURL    string `json:"html_url"`
+}
+
+// GetChecks returns all check runs for a commit ref (typically a PR
+// head SHA or branch name). [Area 2.2.D]
+func (c *Client) GetChecks(ctx context.Context, owner, repo, ref string) ([]CheckRun, error) {
+	if ref == "" {
+		return nil, errors.New("ref is required")
+	}
+	var raw struct {
+		CheckRuns []CheckRun `json:"check_runs"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(ref))
+	if err := c.Do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	return raw.CheckRuns, nil
+}
+
+// Branch represents one repo branch in list responses.
+type Branch struct {
+	Name      string `json:"name"`
+	Protected bool   `json:"protected"`
+	Commit    struct {
+		SHA string `json:"sha"`
+	} `json:"commit"`
+}
+
+// ListBranches enumerates branches for owner/repo. [Area 2.2.D]
+func (c *Client) ListBranches(ctx context.Context, owner, repo string) ([]Branch, error) {
+	var out []Branch
+	path := fmt.Sprintf("/repos/%s/%s/branches?per_page=100", url.PathEscape(owner), url.PathEscape(repo))
+	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CompareCommits returns the diff metadata for base...head. The
+// returned Commits slice is bounded server-side to ~250.
+// [Area 2.2.D]
+func (c *Client) CompareCommits(ctx context.Context, owner, repo, base, head string) (map[string]any, error) {
+	if base == "" || head == "" {
+		return nil, errors.New("base and head are required")
+	}
+	var out map[string]any
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(base), url.PathEscape(head))
+	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

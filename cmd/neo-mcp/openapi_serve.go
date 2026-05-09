@@ -5,9 +5,17 @@
 package main
 
 import (
+	"net/http"
+
 	"github.com/ensamblatec/neoanvil/pkg/cpg"
 	"github.com/ensamblatec/neoanvil/pkg/openapi"
 )
+
+// openapiDocsHandler returns the Swagger UI handler. Wrapper here so
+// main.go doesn't have to import pkg/openapi directly. [Area 4.2.C]
+func openapiDocsHandler() http.Handler {
+	return openapi.DocsHandler()
+}
 
 // openAPIServeCache is the per-process spec cache. The Handler is
 // wired from main.go into the SSE mux under `/openapi.json`. Cache

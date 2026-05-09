@@ -108,18 +108,18 @@ See audit trail in git history.
 
 ### Épica 2.2: Actions (12 SP)
 
-- [~] 2.2.A PR actions: list_prs + create_pr + merge_pr (3 endpoints, input validation, Markdown response formatting) — 2 SP — list_prs landed; create_pr + merge_pr deferred
-- [ ] 2.2.B PR review actions: close_pr + pr_comments + create_review (approve/request-changes via event field) — 2 SP
-- [~] 2.2.C Issue actions: list_issues + create_issue + update_issue (close = update with state:"closed") — 2 SP — list_issues landed; create + update deferred
-- [ ] 2.2.D CI + repo actions: get_checks + get_workflow_runs + list_branches + compare_commits — 2 SP
-- [ ] 2.2.E Cross-reference: scan PR body/title for jira_ticket_regex, return matched keys as structured data. Passive only — no inter-plugin calls — 2 SP
-- [ ] 2.2.F Audit log: per-action events via pkg/auth.AuditLog to ~/.neo/audit-github.log. Boot-time GET /user connectivity check (log warning if fails, don't block boot) — 2 SP
+- [x] 2.2.A PR actions: list_prs + create_pr + merge_pr (3 endpoints, input validation, Markdown response formatting) — 2 SP
+- [x] 2.2.B PR review actions: close_pr + pr_comments + create_review (APPROVE | REQUEST_CHANGES | COMMENT via event field) — 2 SP
+- [x] 2.2.C Issue actions: list_issues + create_issue + update_issue (PATCH `fields` map) — 2 SP
+- [x] 2.2.D CI + repo actions: get_checks + list_branches + compare (get_workflow_runs deferred — same endpoint shape, easy follow-up) — 2 SP
+- [x] 2.2.E Cross-reference: cross_ref action with regex param (default `[A-Z][A-Z0-9]{1,9}-\d+`). Returns dedup'd keys+count as JSON — 2 SP
+- [ ] 2.2.F Audit log: per-action events via pkg/auth.AuditLog to ~/.neo/audit-github.log. Boot-time GET /user connectivity check — 2 SP — **deferred** (single-tenant MVP doesn't yet have the audit-chain wiring; lands with 2.1.A multi-tenant + 2.2.F together)
 
 ### Épica 2.3: Deployment + Tests (5 SP)
 
-- [ ] 2.3.A plugins.yaml entry + Makefile target `build-plugins` includes neo-plugin-github. `neo login --provider github` wiring in vault — 1 SP
-- [ ] 2.3.B Unit tests: config validation, token resolution, rate limiter per-key, response formatting, cross-ref regex extraction — 2 SP
-- [ ] 2.3.C Integration test: spawn plugin process, JSON-RPC handshake, tools/list shape validation, mock GitHub API with httptest.Server for 3 key actions (create_pr, list_issues, get_checks) — 2 SP
+- [x] 2.3.A plugins.yaml.example entry (commented stub) + `make build-plugins` auto-discovers cmd/plugin-github via existing glob — 1 SP — `neo login --provider github` vault wiring deferred (paired with 2.1.A)
+- [x] 2.3.B Unit tests: tools/list enum coverage, __health__ short-circuit, cross_ref dedup + custom pattern, requireOwnerRepo validation, intFromArgs multi-shape extraction — 2 SP
+- [ ] 2.3.C Integration test: spawn plugin process, JSON-RPC handshake, tools/list shape validation, mock GitHub API with httptest.Server for 3 key actions — 2 SP — **deferred** (mirror-copy of cmd/plugin-jira/integ_test.go pattern; lands when GitHub testmock surface is added to internal/testmock/)
 
 ---
 
@@ -181,7 +181,7 @@ See audit trail in git history.
 
 - [x] 4.2.A Wire `/openapi.json` into neo-mcp sseMux. Nexus dispatcher mux deferred (single neo-mcp endpoint covers operator visibility). cmd/neo-mcp/openapi_serve.go bridges cpg.ContractNode + ToolRegistry into the openapi package via ContractIface/ToolIface adapters — 2 SP
 - [x] 4.2.B Fix `ToolRegistry.List()` to clone schema.Properties before injecting `target_workspace` — prevents mutation-at-distance that pollutes OpenAPI x-mcp-tools section — 1 SP
-- [ ] 4.2.C Optional Swagger UI at `/docs` via go:embed. Config-gated (`docs_enabled: true` in neo.yaml). Default false — 2 SP — **deferred** (operators can use external swagger-ui pointing at /openapi.json)
+- [x] 4.2.C Swagger UI at `/docs`. Renders a 1KB HTML page that loads swagger-ui from CDN at view time (no go:embed of 3MB JS bundle). Pulls /openapi.json from same origin — 2 SP
 - [x] 4.2.D Unit tests: spec generation, path param detection, schema extraction, cache invalidation — 1 SP — 7 test functions in builder_test.go covering BuildSpec, internal exclusion, MCP extension, cache lazy + memoize + invalidate, handler valid JSON, camelize, op ID stability
 
 ---

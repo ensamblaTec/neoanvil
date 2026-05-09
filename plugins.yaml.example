@@ -159,13 +159,24 @@ plugins:
   #     - neoanvil-XXXXX         # restringe a workspaces específicos (recomendado)
 
   # --------------------------------------------------------------------------
-  # Stub for future plugins. Remove or replace when adding real entries.
+  # GitHub plugin (Area 2 — MVP delivered via cmd/plugin-github).
+  # 13 actions: list_prs, create_pr, merge_pr, close_pr, pr_comments,
+  # create_review, list_issues, create_issue, update_issue, get_checks,
+  # list_branches, compare, cross_ref (extract Jira keys from text).
+  # Plus mandatory __health__.
+  #
+  # Auth: PAT only (OAuth deferred to a follow-up). Single-tenant in v1
+  # — multi-tenant per-repo config arrives with Area 2.1.A.
   # --------------------------------------------------------------------------
   # - name: github
-  #   description: "GitHub Issues / Pull Requests integration."
-  #   binary: /usr/local/bin/neo-plugin-github
-  #   env_from_vault: [GITHUB_TOKEN]
+  #   description: "GitHub REST v3: PRs, issues, reviews, CI, branches, cross-ref."
+  #   binary: /home/<you>/go/src/github.com/ensamblatec/neoanvil/bin/neo-plugin-github
+  #   args: []
+  #   env_from_vault:
+  #     - GITHUB_TOKEN          # PAT from github.com/settings/tokens
+  #     # - GITHUB_BASE_URL     # optional GitHub Enterprise endpoint
   #   tier: nexus
+  #   namespace_prefix: github
   #   enabled: false
-  #   # max_memory_mb: 128
-  #   # max_cpu_percent: 25
+  #   allowed_workspaces:
+  #     - neoanvil-XXXXX
