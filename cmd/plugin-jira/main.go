@@ -29,10 +29,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/auth"
@@ -135,24 +137,70 @@ func (s *state) currentBoard() string {
 }
 
 func main() {
-	st, err := buildState()
+	// 3.4.D — buildStateSafe wraps buildState with edge-case error
+	// reporting so plugin boot failures get a consistent "plugin-jira
+	// init: <root cause>" prefix in stderr.
+	st, err := buildStateSafe()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "plugin-jira: init failed:", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	atomic.StoreInt64(&st.startedAtUnix, time.Now().Unix())
+
+	// 3.4.D — surface legacy config artifacts so the operator knows
+	// to migrate them to ~/.neo/plugins/jira.json.
+	checkLegacyDeprecation()
+
+	// 3.4.B — boot-time connectivity check per configured api_key.
+	// Logs OK/FAIL once per tenant; subsequent dispatch calls fast-path
+	// past the in-process result cache (5min TTL inside checkConnectivity).
+	runBootConnectivityChecks(st)
+
+	// 3.4.C — graceful drain on SIGTERM/SIGINT. The handler closes the
+	// drain context after waiting up to 5s for in-flight RPCs to
+	// complete; the scanner loop exits when ctx is cancelled.
+	drain := newShutdownDrain(5 * time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	installShutdownHandler(drain, cancel)
+	st.ctx = ctx
+
+	// 3.4.D follow-up — SIGHUP triggers per-tenant pool invalidation
+	// so credential rotations + plugin manifest edits take effect
+	// without a full plugin restart.
+	if st.pool != nil {
+		installPoolReloadHandler(st)
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 1<<16), 1<<20)
 	enc := json.NewEncoder(os.Stdout)
 
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		var req map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
 			fmt.Fprintln(os.Stderr, "plugin-jira: bad json:", err)
 			continue
 		}
-		resp := st.handle(req)
+		// Wrap handle() in a closure so a panic in any action handler
+		// still releases the drain counter — without `defer`, a crashed
+		// handler would leak the track() and drain.waitOrTimeout would
+		// stall the full 5s before forcing shutdown. [DS-AUDIT 3.4 Finding 4]
+		resp := func() (resp map[string]any) {
+			drain.track()
+			defer drain.done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "plugin-jira: panic in handle: %v\n", r)
+					resp = rpcErr(req["id"], -32603, "internal panic")
+				}
+			}()
+			return st.handle(req)
+		}()
 		if resp == nil {
 			continue
 		}
@@ -161,6 +209,46 @@ func main() {
 			return
 		}
 	}
+}
+
+// runBootConnectivityChecks fires checkConnectivity for each configured
+// project's api_key in single-tenant or multi-tenant mode. Errors are
+// logged but non-fatal — Jira may be temporarily down at boot, and the
+// per-call retry path will reattempt.
+// [3.4.B]
+func runBootConnectivityChecks(st *state) {
+	if st.pluginCfg == nil {
+		// Legacy single-tenant: client is already constructed. Skip
+		// the explicit ping; the first real GetIssue surfaces failures.
+		return
+	}
+	for projName, proj := range st.pluginCfg.Projects {
+		key, ok := st.pluginCfg.APIKeys[proj.APIKeyRef]
+		if !ok {
+			continue
+		}
+		token, terr := resolveToken(key)
+		if terr != nil {
+			fmt.Fprintf(os.Stderr, "plugin-jira: connectivity skip %q: %v\n", projName, terr)
+			continue
+		}
+		_ = checkConnectivity(projName+"/"+proj.APIKeyRef, key, token)
+	}
+}
+
+// installPoolReloadHandler wires SIGHUP to clientPool.invalidateAll so
+// operators can rotate credentials or edit the plugin manifest and have
+// the next request use the fresh state without restarting the whole
+// plugin process. [3.4.D]
+func installPoolReloadHandler(st *state) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP)
+	go func() {
+		for range sigCh {
+			st.pool.invalidateAll()
+			fmt.Fprintln(os.Stderr, "plugin-jira: SIGHUP — client pool invalidated, next request rebuilds")
+		}
+	}()
 }
 
 // buildState reads required env vars and constructs the Jira client +

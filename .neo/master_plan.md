@@ -157,10 +157,10 @@ See audit trail in git history.
 
 **Carry-over:** 3.2.B note ("Wire during Area 3.2.B (Jira integration tests will exercise them)") was unfulfilled at 3.2.B closure (commit ccc1b34). 10 U1000 staticcheck findings hold the audit-ci baseline up. Track here as explicit work.
 
-- [ ] 3.4.A Wire `auditMultiTenant` into ops main path — call from `dispatch_*.go` after each transition/create_issue with project name + result. Verify ~/.neo/audit-jira.log gains tenant field — 2 SP
-- [ ] 3.4.B Wire `checkConnectivity` lazy ping per api_key on first request per tenant — 1 SP
-- [ ] 3.4.C Wire `installShutdownHandler` + `shutdownDrain` in main loop — drain in-flight RPCs on SIGTERM with 5s timeout — 1 SP
-- [ ] 3.4.D Wire `checkLegacyDeprecation` at boot + use `buildStateSafe` instead of `buildState`. Wire `clientPool.invalidateAll` to SIGHUP reload path — 1 SP
+- [ ] 3.4.A Wire `auditMultiTenant` into ops main path — call from `dispatch_*.go` after each transition/create_issue with project name + result. Verify ~/.neo/audit-jira.log gains tenant field — 2 SP **(deferred — needs full multi-tenant dispatch wiring; current handlers all use single `s.client`. Tracked as future work; baseline absorbs the U1000.)**
+- [x] 3.4.B Wire `checkConnectivity` lazy ping per api_key on first request per tenant — 1 SP — boot-time check via `runBootConnectivityChecks` for each multi-tenant project; legacy single-tenant relies on first GetIssue
+- [x] 3.4.C Wire `installShutdownHandler` + `shutdownDrain` in main loop — drain in-flight RPCs on SIGTERM with 5s timeout — 1 SP — panic-safe via `defer drain.done()` per DS audit
+- [x] 3.4.D Wire `checkLegacyDeprecation` at boot + use `buildStateSafe` instead of `buildState`. Wire `clientPool.invalidateAll` to SIGHUP reload path — 1 SP
 
 ---
 

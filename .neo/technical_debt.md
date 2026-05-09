@@ -8,6 +8,35 @@
 
 ## Active deferred items
 
+### Pre-existing plugin-jira input validation gaps (surfaced by 3.4 DS audit)
+
+**SEV 10 — Path traversal in `attach_artifact` + `prepare_doc_pack`:**
+`folder_path` and `repo_root` action arguments flow directly to
+`jira.AttachZipFolder` / `jira.PrepareDocPack` with no allowlist.
+A client authenticated for any tenant can request
+`folder_path=/etc/ssh` or `repo_root=/` to make the plugin zip and
+upload arbitrary host-readable files to a Jira ticket as evidence of
+exfiltration. Fix: anchor `folder_path` under `~/.neo/jira-docs/`
+(or operator-configured base) + validate `repo_root` against
+registered workspaces only; reject `..` segments after `filepath.Clean`.
+
+**SEV 8 — Ticket ID injection in URL paths:**
+`ticket_id` argument is interpolated into `<base>/rest/api/3/issue/<id>`
+without validation. An input like `MCPI-1/../rest/api/3/serverInfo`
+could (depending on URL normalization in `pkg/jira/client.go`) bypass
+issue-scoped routing and reach arbitrary Jira REST endpoints.
+Fix: validate against `^[A-Z][A-Z0-9]+-[0-9]+$` regex at the action
+boundary; rely on `net/url.PathEscape` not raw `fmt.Sprintf` in the
+client.
+
+**Both findings are pre-existing in the plugin codebase** (not
+introduced by 3.4 wire-up). Tracked here so the next plugin-jira
+hardening pass can scoop them up. Out of scope for the 3.4 epic
+(which was about wiring forward-pass scaffolding, not adding input
+validation).
+
+
+
 ### [ds-audit-pending] Pattern D Docker stack — DeepSeek pro audit
 
 **Status:** 2026-05-09 — Nexus down during the planned DS pro audit
