@@ -105,5 +105,7 @@ cmd/neo/neo
 # Session logs (private, not for public repo)
 docs/session/report*.md
 docs/session/SESSION-*.md
-plugin-jira
-plugin-github
+/plugin-jira
+/plugin-github
+cmd/plugin-jira/plugin-jira
+cmd/plugin-github/plugin-github

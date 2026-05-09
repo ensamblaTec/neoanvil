@@ -8,32 +8,34 @@
 
 ## Active deferred items
 
-### Pre-existing plugin-jira input validation gaps (surfaced by 3.4 DS audit)
+### ~~Pre-existing plugin-jira input validation gaps~~ — RESOLVED 2026-05-09
 
-**SEV 10 — Path traversal in `attach_artifact` + `prepare_doc_pack`:**
-`folder_path` and `repo_root` action arguments flow directly to
-`jira.AttachZipFolder` / `jira.PrepareDocPack` with no allowlist.
-A client authenticated for any tenant can request
-`folder_path=/etc/ssh` or `repo_root=/` to make the plugin zip and
-upload arbitrary host-readable files to a Jira ticket as evidence of
-exfiltration. Fix: anchor `folder_path` under `~/.neo/jira-docs/`
-(or operator-configured base) + validate `repo_root` against
-registered workspaces only; reject `..` segments after `filepath.Clean`.
+**Status:** closed across two commits this session.
 
-**SEV 8 — Ticket ID injection in URL paths:**
-`ticket_id` argument is interpolated into `<base>/rest/api/3/issue/<id>`
-without validation. An input like `MCPI-1/../rest/api/3/serverInfo`
-could (depending on URL normalization in `pkg/jira/client.go`) bypass
-issue-scoped routing and reach arbitrary Jira REST endpoints.
-Fix: validate against `^[A-Z][A-Z0-9]+-[0-9]+$` regex at the action
-boundary; rely on `net/url.PathEscape` not raw `fmt.Sprintf` in the
-client.
+- **SEV 10 (path traversal in `attach_artifact` + `prepare_doc_pack`):**
+  fixed in `4296483 fix(plugin-jira): close DS-audited input validation
+  gaps (Phase E)`. `validateSafeFolderPath` anchors `folder_path` under
+  `~/.neo/jira-docs/` via `filepath.Rel` + `..`-segment rejection;
+  `validateSafeRepoRoot` requires the path to exist and be a directory.
+  Both are wired in `callAttachArtifact` (line 776) and
+  `callPrepareDocPack` (line 818). Verified by
+  `TestValidateSafeFolderPath_*` + `TestValidateSafeRepoRoot_*`.
 
-**Both findings are pre-existing in the plugin codebase** (not
-introduced by 3.4 wire-up). Tracked here so the next plugin-jira
-hardening pass can scoop them up. Out of scope for the 3.4 epic
-(which was about wiring forward-pass scaffolding, not adding input
-validation).
+- **SEV 8 (ticket-ID injection in URL paths):** the SEV 8 attack surface
+  was effectively neutralised by `pkg/jira/client.go` which uses
+  `url.PathEscape(key)` on every path-interpolated key (see lines 169,
+  270, 337, 680, 794) — `MCPI-1/../rest/api/3/serverInfo` becomes
+  `MCPI-1%2F..%2Frest%2Fapi%2F3%2FserverInfo`, sent as a literal issue
+  key to Jira (404 not-found). Defense-in-depth `validateTicketID`
+  applied at the action boundary in `callGetContext` (489),
+  `callTransition` (516), `callUpdateIssue` (604),
+  `callAttachArtifact` (769), `callPrepareDocPack` (815).
+
+- **Residual gap closed:** `callLinkIssue` (line 735) was not running
+  `validateTicketID` on `from_key`/`to_key`. Not exploitable today
+  (those keys go in the JSON body of `pkg/jira/Client.LinkIssue`, not
+  URL path) but breaks symmetry. Closed via this commit; covered by
+  `TestCallLinkIssue_RejectsMalformedKeys`.
 
 
 

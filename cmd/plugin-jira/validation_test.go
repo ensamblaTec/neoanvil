@@ -7,6 +7,45 @@ import (
 	"testing"
 )
 
+// TestCallLinkIssue_RejectsMalformedKeys confirms link_issue applies
+// validateTicketID at the dispatch boundary on both from_key and to_key.
+// Defense-in-depth: even though pkg/jira/Client.LinkIssue uses a JSON
+// body (not URL interpolation), keeping validation symmetric across
+// all dispatch handlers prevents future refactors from quietly opening
+// a path-injection vector. [Phase E follow-up]
+func TestCallLinkIssue_RejectsMalformedKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "from_key path traversal",
+			args: map[string]any{"from_key": "MCPI-1/../admin", "to_key": "MCPI-2", "link_type": "Blocks"},
+			want: "from_key:",
+		},
+		{
+			name: "to_key lowercase",
+			args: map[string]any{"from_key": "MCPI-1", "to_key": "abc-1", "link_type": "Blocks"},
+			want: "to_key:",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &state{}
+			resp := s.callLinkIssue(1, tc.args, callCtx{})
+			errObj, ok := resp["error"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected error response, got %v", resp)
+			}
+			msg, _ := errObj["message"].(string)
+			if !strings.Contains(msg, tc.want) {
+				t.Errorf("error message %q does not contain %q", msg, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateTicketID(t *testing.T) {
 	good := []string{"MCPI-1", "ABC-12345", "TEST-1", "AB-1"}
 	bad := []string{

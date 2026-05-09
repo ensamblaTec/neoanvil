@@ -739,6 +739,12 @@ func (s *state) callLinkIssue(id any, args map[string]any, _ callCtx) map[string
 	if from == "" || to == "" || linkType == "" {
 		return rpcErr(id, -32602, "from_key, to_key and link_type are required")
 	}
+	if err := validateTicketID(from); err != nil {
+		return rpcErr(id, -32602, "from_key: "+err.Error())
+	}
+	if err := validateTicketID(to); err != nil {
+		return rpcErr(id, -32602, "to_key: "+err.Error())
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
