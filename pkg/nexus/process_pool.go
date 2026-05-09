@@ -878,13 +878,21 @@ func (pp *ProcessPool) RegisterCold(entry workspace.WorkspaceEntry) {
 // the new spawn binds the port still held by the dying child. Polls
 // every 100ms — typical SIGTERM grace is sub-second on healthy
 // children, so we converge quickly.
+//
+// Reads proc.Status under the lock — the previous version released
+// the RLock then dereferenced proc.Status, which is a plain string
+// field (not atomic). -race flagged the dirty read.
 func (pp *ProcessPool) waitForStopped(workspaceID string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		pp.mu.RLock()
 		proc := pp.processes[workspaceID]
+		var status ProcessStatus
+		if proc != nil {
+			status = proc.Status
+		}
 		pp.mu.RUnlock()
-		if proc == nil || proc.Status != StatusStopping {
+		if proc == nil || status != StatusStopping {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)

@@ -59,8 +59,11 @@ func TestCachedBuild(t *testing.T) {
 	if elapsed2 != 0 {
 		t.Errorf("expected elapsed=0 on cache hit, got %v", elapsed2)
 	}
-	if wallClock2 > 10*time.Millisecond {
-		t.Errorf("cache hit took %v, expected <10ms", wallClock2)
+	// Threshold relaxed from 10ms → 100ms because the race detector
+	// adds 2-20× overhead — cold rebuild takes ~1s, so 100ms still
+	// validates "cached" without `-race` flapping the test.
+	if wallClock2 > 100*time.Millisecond {
+		t.Errorf("cache hit took %v, expected <100ms", wallClock2)
 	}
 
 	if len(g1.Nodes) != len(g2.Nodes) {
@@ -103,11 +106,15 @@ func TestCacheGobRoundtrip(t *testing.T) {
 
 	t.Logf("gob encode: %v  decode: %v  (nodes=%d edges=%d)", encElapsed, decElapsed, len(g.Nodes), len(g.Edges))
 
-	if encElapsed > 20*time.Millisecond {
-		t.Errorf("gob encode took %v, expected <20ms", encElapsed)
+	// Threshold relaxed from 20ms → 200ms — same reasoning as
+	// TestCachedBuild: race detector adds 2-20× overhead. The
+	// purpose is "gob round-trip is fast vs network/disk", not a
+	// hard latency target.
+	if encElapsed > 200*time.Millisecond {
+		t.Errorf("gob encode took %v, expected <200ms", encElapsed)
 	}
-	if decElapsed > 20*time.Millisecond {
-		t.Errorf("gob decode took %v, expected <20ms", decElapsed)
+	if decElapsed > 200*time.Millisecond {
+		t.Errorf("gob decode took %v, expected <200ms", decElapsed)
 	}
 }
 
