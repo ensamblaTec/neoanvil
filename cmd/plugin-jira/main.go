@@ -462,8 +462,11 @@ func extractCallCtx(params map[string]any) callCtx {
 func (s *state) callGetContext(id any, args map[string]any, _ callCtx) map[string]any {
 	ticketID, _ := args["ticket_id"].(string)
 	ticketID = strings.TrimSpace(ticketID)
-	if ticketID == "" {
-		return rpcErr(id, -32602, "ticket_id is required")
+	// Reject anything that doesn't match the Jira issue-key shape so a
+	// crafted input like "MCPI-1/../rest/api/3/serverInfo" can't bypass
+	// issue-scoped routing in the upstream client. [DS-AUDIT 3.4 Finding 3]
+	if err := validateTicketID(ticketID); err != nil {
+		return rpcErr(id, -32602, err.Error())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -490,8 +493,11 @@ func (s *state) callTransition(id any, args map[string]any, _ callCtx) map[strin
 
 	ticketID = strings.TrimSpace(ticketID)
 	targetStatus = strings.TrimSpace(targetStatus)
-	if ticketID == "" || targetStatus == "" {
-		return rpcErr(id, -32602, "ticket_id and target_status are required")
+	if err := validateTicketID(ticketID); err != nil {
+		return rpcErr(id, -32602, err.Error())
+	}
+	if targetStatus == "" {
+		return rpcErr(id, -32602, "target_status is required")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -571,8 +577,8 @@ func (s *state) callCreateIssue(id any, args map[string]any, _ callCtx) map[stri
 func (s *state) callUpdateIssue(id any, args map[string]any, _ callCtx) map[string]any {
 	ticketID, _ := args["ticket_id"].(string)
 	ticketID = strings.TrimSpace(ticketID)
-	if ticketID == "" {
-		return rpcErr(id, -32602, "ticket_id is required for update_issue")
+	if err := validateTicketID(ticketID); err != nil {
+		return rpcErr(id, -32602, err.Error())
 	}
 
 	in := buildUpdateInput(args)
@@ -734,16 +740,16 @@ func (s *state) callLinkIssue(id any, args map[string]any, _ callCtx) map[string
 // exist and contain at least one file.
 func (s *state) callAttachArtifact(id any, args map[string]any, _ callCtx) map[string]any {
 	ticketID := strFromArgs(args, "ticket_id")
-	if ticketID == "" {
-		return rpcErr(id, -32602, "ticket_id is required")
+	if err := validateTicketID(ticketID); err != nil {
+		return rpcErr(id, -32602, err.Error())
 	}
-	folderPath := strFromArgs(args, "folder_path")
-	if folderPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return rpcErr(id, -32603, "cannot resolve $HOME for default folder_path")
-		}
-		folderPath = filepath.Join(home, ".neo", "jira-docs", ticketID)
+	// Anchor folder_path under ~/.neo/jira-docs/ to prevent the
+	// documented exfiltration vector where a client requests
+	// `folder_path: /etc/ssh` to upload host secrets to a Jira ticket.
+	// [DS-AUDIT 3.4 Finding 2]
+	folderPath, err := validateSafeFolderPath(strFromArgs(args, "folder_path"), ticketID)
+	if err != nil {
+		return rpcErr(id, -32602, err.Error())
 	}
 
 	autoRender, _ := args["auto_render"].(bool)
@@ -776,6 +782,18 @@ func (s *state) callAttachArtifact(id any, args map[string]any, _ callCtx) map[s
 // agent's context.
 func (s *state) callPrepareDocPack(id any, args map[string]any, _ callCtx) map[string]any {
 	in := buildPrepareDocPackInput(args)
+	// Validate ticket_id and repo_root at the dispatch boundary —
+	// repo_root must be an existing absolute directory (no traversal,
+	// no /etc/passwd because not-a-dir is rejected).
+	// [DS-AUDIT 3.4 Findings 2 + 3]
+	if err := validateTicketID(in.TicketID); err != nil {
+		return rpcErr(id, -32602, err.Error())
+	}
+	cleanRoot, err := validateSafeRepoRoot(in.RepoRoot)
+	if err != nil {
+		return rpcErr(id, -32602, err.Error())
+	}
+	in.RepoRoot = cleanRoot
 	timeout := 120 * time.Second
 	if in.AutoRender {
 		timeout = 240 * time.Second

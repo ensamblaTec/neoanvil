@@ -90,11 +90,14 @@ func TestPluginJiraIntegration_GetContextNotFound(t *testing.T) {
 	defer stop()
 
 	mustRPC(t, rpc, 1, "initialize", nil)
+	// Use a syntactically-valid but absent ticket so the request
+	// reaches the mock (and gets a 404), rather than tripping the
+	// dispatch-time format validator. [Phase E]
 	resp := mustRPC(t, rpc, 2, "tools/call", map[string]any{
 		"name": "jira",
 		"arguments": map[string]any{
 			"action":    "get_context",
-			"ticket_id": "DOES-NOT-EXIST",
+			"ticket_id": "NOPE-9999",
 		},
 	})
 	if errObj, ok := resp["error"].(map[string]any); !ok {
