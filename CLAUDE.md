@@ -221,3 +221,8 @@ PILAR XXIII (cerrado 2026-04-28) entrega plugin Jira completo + skills doctrinal
 **Master plan IDs ≠ Jira ticket IDs:** `134.A.1` (master_plan checkbox) y `MCPI-52` (Jira issue) son espacios diferentes. `[EPIC-FINAL MCPI-N]` SIEMPRE referencia el ticket Jira real, nunca el ID del master plan. Helper: `pkg/jira.ResolveMasterPlanID(epicID)` o skill `/jira-id <epic_id>`. Detalle en [`.claude/skills/jira-workflow/SKILL.md` Regla #8](./.claude/skills/jira-workflow/SKILL.md).
 
 **Hooks parsean solo subject:** los git hooks (`scripts/git-hooks/post-commit`, `commit-msg`) extraen IDs Jira únicamente del subject (primera línea) del commit message + validan vía `jira/get_context` antes de fire. Body es free-form prose donde refs como `ADR-009` o `Z0-9` o `MCPI-9999` no disparan `prepare_doc_pack`. Implementación en `scripts/git-hooks/lib-jira-tickets.sh` (Épica 139). Ver Regla #12 en jira-workflow SKILL.md.
+
+## Sesión 2026-05-09 — nuevas docs
+
+- **GitHub plugin (Area 2):** [`docs/plugins/github-integration-guide.md`](./docs/plugins/github-integration-guide.md) — 13 actions, multi-tenant, cross-ref Jira ↔ GitHub patrón, audit hash-chain. Directiva canónica `[GITHUB-PLUGIN-WORKFLOW]` en `.claude/rules/neo-synced-directives.md`.
+- **Observability pipeline (Areas 4 + 5 + 6):** [`docs/general/observability.md`](./docs/general/observability.md) — `pkg/notify` (Slack/Discord webhook dispatcher) + `pkg/otelx` (W3C traceparent + noopTracer + RecordingTracer) + `pkg/openapi` (auto-generated `/openapi.json` + `/docs` Swagger UI). ASCII pipeline diagram, threat model, test patterns.
