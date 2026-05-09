@@ -47,7 +47,15 @@ const (
 )
 
 type state struct {
-	client *github.Client
+	client *github.Client // single-tenant fallback (nil in multi-tenant mode)
+
+	// Multi-tenant config (nil when GITHUB_TOKEN env var is the
+	// authoritative source). [Area 2.1.A + 2.1.C]
+	pluginCfg *PluginConfig
+	pool      *clientPool
+
+	// auditPath is ~/.neo/audit-github.log when set. [Area 2.2.F]
+	auditPath string
 
 	// Health counters consumed by __health__ — atomic so the Nexus
 	// health poll is lock-free + sub-10ms (per PLUGIN-HEALTH-CONTRACT).
@@ -85,14 +93,31 @@ func main() {
 	}
 }
 
-// buildState reads required env vars and constructs the GitHub client.
-// Mirrors plugin-jira's buildState shape (config-first then legacy
-// env vars) but without the multi-tenant Project map — GitHub PAT is
-// global per token so a single Client is sufficient for v1.
+// buildState picks the best available auth path:
+// 1. ~/.neo/plugins/github.json (multi-tenant) → clientPool
+// 2. GITHUB_TOKEN env var (legacy single-tenant) → single client
+// Audit log path defaults to ~/.neo/audit-github.log; create it lazy
+// so first-boot doesn't fail on a missing dir.
 func buildState() (*state, error) {
+	auditPath := defaultAuditLogPath()
+	// Multi-tenant config takes priority.
+	if githubConfigFileExists() {
+		cfg, err := loadGithubPluginConfig(defaultGithubConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("plugin-github config: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "plugin-github: loaded config (active=%s, %d project(s), %d api_key(s))\n",
+			cfg.ActiveProject, len(cfg.Projects), len(cfg.APIKeys))
+		return &state{
+			pluginCfg: cfg,
+			pool:      newClientPool(cfg),
+			auditPath: auditPath,
+		}, nil
+	}
+	// Legacy single-tenant fallback.
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	if token == "" {
-		return nil, errors.New("GITHUB_TOKEN env var is required")
+		return nil, errors.New("GITHUB_TOKEN env var is required (or set up ~/.neo/plugins/github.json)")
 	}
 	c, err := github.NewClient(github.Config{
 		BaseURL: os.Getenv("GITHUB_BASE_URL"),
@@ -101,7 +126,50 @@ func buildState() (*state, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &state{client: c}, nil
+	return &state{client: c, auditPath: auditPath}, nil
+}
+
+// resolveClient picks the right client per request. Multi-tenant
+// callers can pass an explicit project name in args["project"];
+// legacy callers fall through to the single-tenant client.
+func (s *state) resolveClient(args map[string]any) (*github.Client, *Project, error) {
+	if s.pool != nil {
+		projName := strFromArgs(args, "project")
+		return s.pool.clientFor(projName)
+	}
+	if s.client != nil {
+		return s.client, nil, nil
+	}
+	return nil, nil, errors.New("no GitHub client configured")
+}
+
+// auditCall writes one ledger entry for an action's outcome. Errors
+// are logged to stderr but never abort dispatch — audit MUST be
+// best-effort to avoid turning a chat-channel issue into a 500.
+// [Area 2.2.F]
+func (s *state) auditCall(proj *Project, action, result string, details map[string]any) {
+	if s.auditPath == "" {
+		return
+	}
+	tenant, owner, repo, projName := "", "", "", ""
+	if proj != nil {
+		tenant = proj.APIKeyRef
+		owner, repo = proj.Owner, proj.Repo
+	}
+	if s.pluginCfg != nil {
+		projName = s.pluginCfg.ActiveProject
+	}
+	if err := appendAuditEvent(s.auditPath, auditEvent{
+		Tenant:  tenant,
+		Project: projName,
+		Owner:   owner,
+		Repo:    repo,
+		Action:  action,
+		Result:  result,
+		Details: details,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "plugin-github: AUDIT WRITE FAILED for %s: %v\n", action, err)
+	}
 }
 
 // handle is the JSON-RPC dispatch entrypoint. Mirrors plugin-jira's
@@ -535,13 +603,22 @@ func (s *state) callListPRs(id any, args map[string]any) map[string]any {
 	if owner == "" || repo == "" {
 		return rpcErr(id, -32602, "owner and repo are required")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	prs, err := s.client.ListPRs(ctx, owner, repo, state)
+	// Multi-tenant: resolve the right client (and project context for
+	// audit). Single-tenant: returns s.client + nil project.
+	client, proj, err := s.resolveClient(args)
 	if err != nil {
 		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	prs, err := client.ListPRs(ctx, owner, repo, state)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "list_prs", "error", map[string]any{"owner": owner, "repo": repo, "err": err.Error()})
 		return rpcErr(id, -32603, fmt.Sprintf("list_prs %s/%s: %v", owner, repo, err))
 	}
+	s.auditCall(proj, "list_prs", "ok", map[string]any{"owner": owner, "repo": repo, "count": len(prs)})
 	return ok(id, textContent(formatPRs(owner, repo, state, prs)))
 }
 

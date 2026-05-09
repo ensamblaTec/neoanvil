@@ -106,3 +106,4 @@ cmd/neo/neo
 docs/session/report*.md
 docs/session/SESSION-*.md
 plugin-jira
+plugin-github

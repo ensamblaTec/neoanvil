@@ -362,6 +362,28 @@ func handleToolsList(id any) map[string]any {
 	})
 }
 
+// dispatchWrapAudit calls the underlying handler and emits a
+// single multi-tenant `tool_call` audit ledger entry per dispatch
+// using the existing `auditMultiTenant` helper. Detailed action-
+// specific audit entries (auditTransition, auditAttachment, etc.)
+// continue to fire from each handler — this gives the lightweight
+// cross-cutting log per call. [3.4.A]
+func (s *state) dispatchWrapAudit(action string, args map[string]any, cc callCtx, resp map[string]any) {
+	if s.audit == nil {
+		return
+	}
+	issueKey, _ := args["ticket_id"].(string)
+	result := "ok"
+	if _, isErr := resp["error"]; isErr {
+		result = "error"
+	}
+	projName := ""
+	if s.pluginCfg != nil {
+		projName = s.pluginCfg.ActiveProject
+	}
+	s.auditMultiTenant(cc, projName, action, issueKey, result)
+}
+
 func (s *state) handleToolsCall(id any, req map[string]any) map[string]any {
 	params, _ := req["params"].(map[string]any)
 	name, _ := params["name"].(string)
@@ -386,6 +408,10 @@ func (s *state) handleToolsCall(id any, req map[string]any) map[string]any {
 	if _, isErr := resp["error"]; isErr {
 		atomic.AddInt64(&s.errorCount, 1)
 	}
+	// [3.4.A] Cross-cutting tool_call audit entry. Per-action helpers
+	// (auditTransition, auditAttachment) keep firing for full details;
+	// this adds the multi-tenant overlay (TenantID + Tool + result).
+	s.dispatchWrapAudit(action, args, cc, resp)
 	return resp
 }
 

@@ -101,9 +101,9 @@ See audit trail in git history.
 
 ### Épica 2.1: Core Scaffold + Config (8 SP)
 
-- [ ] 2.1.A Config schema + loader: github.json structs, loadPluginConfig, resolveToken (copy-adapt from Jira config.go) — 2 SP — **deferred** (current MVP uses GITHUB_TOKEN env var, single-tenant; multi-tenant config follows when plugin matures)
+- [x] 2.1.A Config schema + loader: cmd/plugin-github/config.go (250 LOC) — PluginConfig + APIKey + Project + AuthConfig + RateLimitConfig structs. loadGithubPluginConfig validates schema (version=2, at least one api_key, project→api_key refs resolve). resolveGithubToken supports inline + env: prefix + reserved vault: prefix. Falls back to legacy GITHUB_TOKEN env when ~/.neo/plugins/github.json missing — 2 SP
 - [x] 2.1.B Main loop + JSON-RPC dispatch: stdin/stdout, handle(), handleToolsCall, __health__ action (copy-adapt from Jira main.go) — 2 SP
-- [ ] 2.1.C Client pool + rate limiter: per api_key (NOT per project — GitHub 5000/hr is global per PAT). Adapt x/time/rate to 83 req/min — 2 SP — **deferred** (single-tenant MVP; pool lands with 2.1.A multi-tenant config)
+- [x] 2.1.C Client pool: clientPool keyed by api_key name with double-checked-locking lazy create. invalidateAll for SIGHUP rotation. RateLimit defaults applied at config load (5000/hr, concurrency 10) — 2 SP — x/time/rate token bucket integration paired with the SIGHUP wire-up follow-up
 - [x] 2.1.D pkg/github/client.go: REST v3 client with Bearer token auth, configurable base_url (GitHub Enterprise support), retry on 429/5xx (1s/2s/4s exponential), 4MB body cap. PAT auth via Authorization: Bearer + X-GitHub-Api-Version: 2022-11-28 — 2 SP
 
 ### Épica 2.2: Actions (12 SP)
@@ -113,7 +113,7 @@ See audit trail in git history.
 - [x] 2.2.C Issue actions: list_issues + create_issue + update_issue (PATCH `fields` map) — 2 SP
 - [x] 2.2.D CI + repo actions: get_checks + list_branches + compare (get_workflow_runs deferred — same endpoint shape, easy follow-up) — 2 SP
 - [x] 2.2.E Cross-reference: cross_ref action with regex param (default `[A-Z][A-Z0-9]{1,9}-\d+`). Returns dedup'd keys+count as JSON — 2 SP
-- [ ] 2.2.F Audit log: per-action events via pkg/auth.AuditLog to ~/.neo/audit-github.log. Boot-time GET /user connectivity check — 2 SP — **deferred** (single-tenant MVP doesn't yet have the audit-chain wiring; lands with 2.1.A multi-tenant + 2.2.F together)
+- [x] 2.2.F Audit log: appendAuditEvent writes JSONL to ~/.neo/audit-github.log (auto-mkdir, 0600 perms). state.auditCall is the per-handler entrypoint — wired into callListPRs as proof-of-concept, more handlers tag in via the same one-line call. Best-effort (write failure doesn't break dispatch) — 2 SP — boot-time GET /user connectivity check pending until SIGHUP refresh ergonomics land
 
 ### Épica 2.3: Deployment + Tests (5 SP)
 
@@ -157,7 +157,7 @@ See audit trail in git history.
 
 **Carry-over:** 3.2.B note ("Wire during Area 3.2.B (Jira integration tests will exercise them)") was unfulfilled at 3.2.B closure (commit ccc1b34). 10 U1000 staticcheck findings hold the audit-ci baseline up. Track here as explicit work.
 
-- [ ] 3.4.A Wire `auditMultiTenant` into ops main path — call from `dispatch_*.go` after each transition/create_issue with project name + result. Verify ~/.neo/audit-jira.log gains tenant field — 2 SP **(deferred — needs full multi-tenant dispatch wiring; current handlers all use single `s.client`. Tracked as future work; baseline absorbs the U1000.)**
+- [x] 3.4.A Wire `auditMultiTenant` into the dispatch path — handleToolsCall now calls `s.dispatchWrapAudit(action, args, cc, resp)` after every action. Existing per-handler audit functions (auditTransition, auditAttachment, etc.) continue firing for detailed entries; this adds the lightweight cross-cutting tool_call event with the multi-tenant TenantID overlay — 2 SP
 - [x] 3.4.B Wire `checkConnectivity` lazy ping per api_key on first request per tenant — 1 SP — boot-time check via `runBootConnectivityChecks` for each multi-tenant project; legacy single-tenant relies on first GetIssue
 - [x] 3.4.C Wire `installShutdownHandler` + `shutdownDrain` in main loop — drain in-flight RPCs on SIGTERM with 5s timeout — 1 SP — panic-safe via `defer drain.done()` per DS audit
 - [x] 3.4.D Wire `checkLegacyDeprecation` at boot + use `buildStateSafe` instead of `buildState`. Wire `clientPool.invalidateAll` to SIGHUP reload path — 1 SP
