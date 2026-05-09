@@ -65,6 +65,15 @@ seed_if_absent() {
     if [ ! -f "$src" ]; then
         return 0  # source absent (e.g., host config not present) — silent skip
     fi
+    # Treat an empty source as absent. `make docker-up` `touch`es empty
+    # placeholders for credentials.json + plugins.yaml when the host
+    # operator hasn't run `neo login` yet — those empty files satisfy
+    # docker-compose's bind-mount-must-exist rule but should NOT be
+    # propagated into the named volume (they would shadow real configs
+    # later AND make Nexus fail to parse on first boot).
+    if [ ! -s "$src" ]; then
+        return 0  # source empty — same UX as absent
+    fi
     # Refuse to seed when the SOURCE is a symlink — host operator (or
     # attacker with write access to ~/.neo) could redirect through a
     # symlink to e.g. ~/.ssh/id_rsa, leaking host secrets into the

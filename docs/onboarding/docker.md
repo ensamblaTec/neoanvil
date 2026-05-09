@@ -66,7 +66,7 @@ canonical ones.
 | GPU not detected | `nvidia-container-toolkit` not installed | install it OR comment out `deploy:` blocks (CPU fallback) |
 | BoltDB hangs | host-native + container both opening the same `<repo>/.neo/db/*` | stop one before starting the other |
 | First boot slow | HNSW cold-rebuilds from `<repo>/.neo/db/hnsw.db` | wait ~5 min, subsequent boots use the fast-boot snapshot |
-| `make docker-up` fails on bind mount | `~/.neo/credentials.json` doesn't exist on host | create it: `neo login` (native) OR touch + edit manually |
+| `make docker-up` fails on bind mount | (rare) `~/.neo/` is unreadable | `make docker-up` auto-touches empty `credentials.json` + `plugins.yaml`. If it still fails, check `~/.neo/` permissions |
 | Auth tokens stale after rotating on host | seeded copy in volume drifts | re-seed: edit + `make docker-down -v && make docker-up` (destructive — wipes ALL volumes) OR `docker exec` to edit in place |
 
 ---

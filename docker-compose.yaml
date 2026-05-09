@@ -82,14 +82,20 @@ services:
       # Read-write so neoanvil can certify files + write to <repo>/.neo/.
       - ${REPO_PATH:-${PWD}}:/home/neo/work/repo
 
-      # Host config staging — bind the WHOLE ~/.neo/ directory read-only.
-      # We bind the directory (always exists) instead of individual files,
-      # because docker-compose treats a missing bind-source as fatal. The
-      # entrypoint cherry-picks credentials.json + plugins.yaml from this
-      # tree and seeds them into the named volume above on first boot
-      # only when present (silent skip when absent, e.g., fresh host).
-      # [Self-audit BUG #2]
-      - ${HOME}/.neo:/home/neo/.neo-host:ro
+      # Host config staging — bind ONLY credentials.json + plugins.yaml
+      # individually, read-only. Mounting the whole ~/.neo/ leaks
+      # workspaces.json, audit-*.log, pki/, db/, shared/ to a
+      # potentially-malicious npm/Go dependency running inside the
+      # container (DS audit Finding 1, SEV High, CWE 200).
+      #
+      # Both source files must exist before `docker compose up` —
+      # `make docker-up` runs a preflight that touches them empty if
+      # absent (matching the original silent-skip-when-absent behaviour
+      # but without leaking the rest of $HOME/.neo). The entrypoint
+      # still seed_if_absent's into the named volume; an empty source
+      # file just means "no credentials provisioned, skip seed".
+      - ${HOME}/.neo/credentials.json:/home/neo/.neo-host/credentials.json:ro
+      - ${HOME}/.neo/plugins.yaml:/home/neo/.neo-host/plugins.yaml:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/status > /dev/null || exit 1"]
       interval: 10s

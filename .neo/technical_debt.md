@@ -39,29 +39,45 @@
 
 
 
-### [ds-audit-pending] Pattern D Docker stack — DeepSeek pro audit
+### ~~[ds-audit-pending] Pattern D Docker stack — DeepSeek pro audit~~ — RESOLVED 2026-05-09
 
-**Status:** 2026-05-09 — Nexus down during the planned DS pro audit
-(operator stopped native to test docker-up). Manual pen-and-paper
-audit performed instead, covering 8 threat surfaces (UID mismatch,
-bind-mount escape via symlinks, concurrent BoltDB, volume lifecycle,
-docker-seed race, GPU sharing, project name collision, backward
-compat). Findings 1, 2, 5, 7 applied; 3, 4, 6, 8 documented or
-already covered.
+**Re-attempt outcome (2026-05-09 23:18 UTC):** DS v4-flash high
+completed in 62s on the second attempt. Output truncated at the
+8000-token cap mid-Finding-1, but Finding 1 was complete enough
+to act on. task_id `async_faaddc77fad38633`.
 
-**Re-run when Nexus is available:**
-```bash
-mcp__neoanvil__deepseek_call \
-  action: red_team_audit \
-  model: deepseek-v4-pro \
-  reasoning_effort: high \
-  files: ["Dockerfile", "docker-compose.yaml", "scripts/docker-entrypoint.sh", "docs/onboarding/docker-architecture.md"]
-```
+**Finding 1 (SEV High, CWE 200 — Information Exposure) — APPLIED:**
 
-The pro+max audit may surface CVEs in the cgo toolchain (apk add gcc
-musl-dev pulls a compiler chain into stage 3) or scheduler-level
-issues with GPU sharing under sustained load that the pen-and-paper
-trace can't reach.
+The compose file mounted `${HOME}/.neo:/home/neo/.neo-host:ro` —
+the WHOLE `~/.neo/` directory — to make `seed_if_absent` work
+without compose dying on a missing bind-source. But that exposed
+the host operator's `workspaces.json`, `audit-jira.log`,
+`audit-github.log`, `pki/` (mTLS SCADA certs), `db/` (HNSW + BoltDB
+including memex_buffer with operator's lessons), and `shared/db/`
+(cross-tier knowledge store) to any container process — including
+a malicious Go module or npm dependency.
+
+**Fix applied:**
+- `docker-compose.yaml` — replaced the directory bind with two
+  per-file binds: `~/.neo/credentials.json` + `~/.neo/plugins.yaml`
+  only.
+- `Makefile::docker-up` — preflight `touch` of both files (mode 600
+  on credentials.json) so compose's "bind source must exist" rule
+  doesn't break for fresh hosts. Empty placeholders trigger the
+  silent-skip path in the entrypoint.
+- `scripts/docker-entrypoint.sh::seed_if_absent` — added
+  empty-file (`! -s`) check so a touched empty placeholder is
+  treated as "no config provided" (same UX as fully absent), instead
+  of seeding an empty file into the named volume where it would
+  shadow later real configs and make Nexus fail to parse on boot.
+- `docs/onboarding/docker.md` — gotchas table updated.
+
+**Remaining items (the audit truncated before reaching them but
+the manual pen-and-paper trace covered them):** UID/GID mismatch
+(addressed via Dockerfile build-args USER_ID/USER_GID matching host),
+TOCTOU in seed_if_absent (mitigated via lstat-then-cp + symlink
+refusal at lines 73-79), GPU passthrough sandbox (no `/dev/nvidia*`
+mount unless `runtime: nvidia` opts in — operator-controlled).
 
 ---
 

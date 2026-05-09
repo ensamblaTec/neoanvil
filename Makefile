@@ -870,6 +870,15 @@ docker-up:
 	@if [ ! -f docker-compose.yaml ] && [ ! -f docker-compose.yml ]; then \
 		printf "\033[33m[docker]\033[0m no docker-compose.yaml yet — Area 1.1.B not landed\n"; exit 1; \
 	fi
+	@# Preflight — compose binds $$HOME/.neo/credentials.json + plugins.yaml
+	@# specifically (not the whole .neo dir, to avoid leaking workspaces.json
+	@# / audit logs / pki / db / shared to in-container deps — DS audit
+	@# Finding 1). Compose treats a missing bind-source as fatal, so we
+	@# touch empty placeholders if absent. Empty file = entrypoint silently
+	@# skips seeding, same UX as before.
+	@mkdir -p $${HOME}/.neo
+	@touch $${HOME}/.neo/credentials.json $${HOME}/.neo/plugins.yaml
+	@chmod 600 $${HOME}/.neo/credentials.json
 	$(COMPOSE) up -d
 
 # docker-down: stops the stack and removes containers. Volumes survive
