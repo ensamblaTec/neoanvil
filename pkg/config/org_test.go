@@ -86,10 +86,10 @@ func TestFindNeoOrgDir_WalkUp(t *testing.T) {
 // TestIsCoordinatorProject_Matches verifies exact + basename matching. [354.A]
 func TestIsCoordinatorProject_Matches(t *testing.T) {
 	org := &OrgConfig{CoordinatorProject: "strategos-project"}
-	if !IsCoordinatorProject("/home/user/projects/my-project", org) {
+	if !IsCoordinatorProject("/home/user/projects/strategos-project", org) {
 		t.Error("basename match failed")
 	}
-	if IsCoordinatorProject("/path/to/project-project", org) {
+	if IsCoordinatorProject("/path/to/some-other-project", org) {
 		t.Error("non-match should return false")
 	}
 

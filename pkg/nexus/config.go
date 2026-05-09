@@ -306,7 +306,30 @@ func LoadNexusConfig() (*NexusConfig, error) {
 
 	cfg.applyBackfill()
 	cfg.expandPaths()
+	cfg.applyEnvOverrides()
 	return cfg, nil
+}
+
+// applyEnvOverrides applies post-load env-var overrides for fields that
+// must change between native and Docker deployments WITHOUT persisting
+// to nexus.yaml. Symmetric with pkg/config.LoadConfig's OLLAMA_HOST /
+// OLLAMA_EMBED_HOST treatment. [Area 1.1.C]
+//
+// Recognised vars:
+//   NEO_BIND_ADDR                       → nexus.bind_addr
+//                                         (typical Docker value: 0.0.0.0)
+//   NEO_NEXUS_OLLAMA_LIFECYCLE=disabled → forces both ollama services
+//                                         enabled:false. In Docker mode,
+//                                         compose owns Ollama; Nexus
+//                                         must NOT spawn its own.
+func (c *NexusConfig) applyEnvOverrides() {
+	if bind := os.Getenv("NEO_BIND_ADDR"); bind != "" {
+		c.Nexus.BindAddr = bind
+	}
+	if os.Getenv("NEO_NEXUS_OLLAMA_LIFECYCLE") == "disabled" {
+		c.Nexus.Services.OllamaLLM.Enabled = false
+		c.Nexus.Services.OllamaEmbed.Enabled = false
+	}
 }
 
 // resolveConfigPath returns the first existing config path in resolution order.

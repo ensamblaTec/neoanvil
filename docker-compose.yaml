@@ -46,11 +46,15 @@ services:
       ollama-embed:
         condition: service_healthy
     environment:
-      # 1.1.C will wire these into neo-nexus config; for now they document
-      # the contract the container expects.
+      # 1.1.C wired these into neo-nexus / neo-mcp config:
+      #   NEO_BIND_ADDR                       → pkg/nexus/config.go::applyEnvOverrides
+      #   OLLAMA_HOST / OLLAMA_EMBED_HOST     → pkg/config/config.go::LoadConfig
+      #   NEO_NEXUS_OLLAMA_LIFECYCLE=disabled → forces Nexus services.ollama_*.enabled=false
+      #                                         (compose manages those services here)
       NEO_BIND_ADDR: "0.0.0.0"
       OLLAMA_HOST:       "http://ollama:11434"
       OLLAMA_EMBED_HOST: "http://ollama-embed:11434"
+      NEO_NEXUS_OLLAMA_LIFECYCLE: "disabled"
     ports:
       - "${NEXUS_PORT:-9000}:9000"      # MCP dispatcher
       - "${HUD_PORT:-8087}:8087"        # Operator HUD dashboard

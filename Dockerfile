@@ -76,9 +76,19 @@ FROM golang:${GO_VERSION}-alpine AS go-builder
 ARG GOAMD64
 WORKDIR /app
 
-# Reuse the populated module cache from stage 1.
+# CGO toolchain — tree-sitter (pkg/astx/compressor.go imports
+# github.com/smacker/go-tree-sitter and its language grammars) is
+# C-backed and needs gcc + musl-dev to compile its parser cores.
+# The README's "Pure Go, Zero-CGO" tag refers to the project's OWN
+# packages; transitive deps (tree-sitter) still require CGO=1.
+RUN apk add --no-cache gcc musl-dev
+
+# Reuse the populated MODULE cache from stage 1. We don't try to copy
+# /root/.cache/go-build — that's the BUILD cache, populated only when
+# `go build` actually runs, and stage 1 only runs `go mod download`.
+# Stage 3 builds from scratch on first run; the module cache hit alone
+# saves the slow network step.
 COPY --from=deps /go/pkg/mod /go/pkg/mod
-COPY --from=deps /root/.cache/go-build /root/.cache/go-build
 
 # Bring in the source tree (the repo is intentionally lean; .dockerignore
 # strips bin/, .neo/db/, web/node_modules/, etc.).
@@ -88,13 +98,17 @@ COPY . .
 # in cmd/neo-nexus/dashboard.go picks up the runtime-built version.
 COPY --from=hud-builder /staged/static/ ./cmd/neo-nexus/static/
 
-ENV CGO_ENABLED=0 \
+# CGO_ENABLED=1: required by tree-sitter. Binaries link dynamically
+# against alpine's musl libc, which is also present in the runtime
+# stage 4 (alpine:${ALPINE_VERSION}) — same libc, same ABI, no static
+# linking gymnastics required.
+ENV CGO_ENABLED=1 \
     GOOS=linux \
     GOARCH=amd64 \
     GOAMD64=${GOAMD64} \
     GOWORK=/app/go.work
 
-# One pure-Go binary per cmd/. Plugin-echo is the test fixture and is
+# One binary per cmd/. Plugin-echo is the test fixture and is
 # excluded just like the Makefile's build-plugins target does.
 RUN mkdir -p /out \
  && go build -trimpath -ldflags="-s -w" -o /out/neo-mcp           ./cmd/neo-mcp \

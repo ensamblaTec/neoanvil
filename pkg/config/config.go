@@ -1497,6 +1497,15 @@ func LoadConfig(path string) (*NeoConfig, error) {
 		cfg.AI.EmbedBaseURL = embedHost
 	}
 
+	// [Area 1.1.C] OLLAMA_HOST env override — symmetric with OLLAMA_EMBED_HOST.
+	// Set by docker-compose so the container talks to `http://ollama:11434`
+	// (compose-managed instance) instead of the default localhost:11434
+	// (which would point to itself inside the container). Same Zero-Hardcoding
+	// rule: never persisted to disk.
+	if llmHost := os.Getenv("OLLAMA_HOST"); llmHost != "" {
+		cfg.AI.BaseURL = llmHost
+	}
+
 	// Auto-sync .neo/.env.example with any ${VAR} references found in the YAML template.
 	dotEnvDir := filepath.Join(filepath.Dir(path), ".neo")
 	syncDotEnvExample(dotEnvDir, rawTemplate)
