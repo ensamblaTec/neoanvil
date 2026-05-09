@@ -21,6 +21,14 @@ ARG NODE_VERSION=22
 ARG ALPINE_VERSION=3.20
 ARG GOAMD64=v3
 
+# UID/GID for the runtime `neo` user. Default 1000 matches the typical
+# Linux desktop UID, so bind-mounted host files (Pattern D — Area 1.4)
+# stay readable by the host operator. Override at build time:
+#   USER_ID=$(id -u) USER_GID=$(id -g) make docker-build
+# [Self-audit BUG #1]
+ARG USER_ID=1000
+ARG USER_GID=1000
+
 # ─────────────────────────── Stage 1: deps ────────────────────────────
 FROM golang:${GO_VERSION}-alpine AS deps
 WORKDIR /app
@@ -123,10 +131,19 @@ FROM alpine:${ALPINE_VERSION} AS runtime
 # `su-exec` is a ~10KB static helper (alpine-native gosu equivalent)
 # used by docker-entrypoint.sh to drop from root → neo without forking.
 # `wget` is BusyBox built-in (used by the compose healthcheck).
-RUN apk add --no-cache ca-certificates tzdata su-exec \
- && addgroup -S neo \
- && adduser  -S -G neo -h /home/neo neo \
- && mkdir -p /home/neo/.neo /home/neo/.neo-seed /home/neo/work \
+ARG USER_ID
+ARG USER_GID
+# Refuse USER_ID=0 — that would either alias to existing root (bypassing
+# privilege drop entirely) or fail with "UID exists". Both are bad.
+# [Manual-audit Finding #1, SEV 5]
+RUN if [ "${USER_ID}" = "0" ] || [ "${USER_GID}" = "0" ]; then \
+        echo "ERROR: USER_ID/USER_GID=0 not allowed (defeats privilege drop)"; \
+        exit 2; \
+    fi \
+ && apk add --no-cache ca-certificates tzdata su-exec \
+ && addgroup -g "${USER_GID}" neo \
+ && adduser -D -u "${USER_ID}" -G neo -h /home/neo neo \
+ && mkdir -p /home/neo/.neo /home/neo/.neo-seed /home/neo/.neo-host /home/neo/work \
  && chown -R neo:neo /home/neo
 
 COPY --from=go-builder /out/neo-mcp             /usr/local/bin/neo-mcp

@@ -41,26 +41,92 @@ if [ -d "$NEO_HOME/work" ]; then
     chown -h "$NEO_USER:$NEO_USER" "$NEO_HOME/work" || true
 fi
 
-# ---- 2. Seed nexus.yaml on first boot ------------------------------------
-# Docker propagates image content into a fresh named volume on first
-# mount, so the seed file from the Dockerfile (/home/neo/.neo-seed/)
-# becomes available here. We only copy if the destination is missing
-# — never overwrite an operator's edits.
+# ---- 2. Seed configs on first boot ---------------------------------------
+# Three sources, three destinations, identical first-boot semantics:
 #
-# Defense against TOCTOU symlink-redirect attack: if the destination
-# path exists OR is a dangling symlink, refuse to copy. cp dereferences
-# symlinks by default, so a malicious symlink at the destination could
-# cause cp (running as root) to overwrite an arbitrary host-mounted
-# file. The dual `[ ! -e ]` + `[ ! -L ]` guard rejects both real files
-# and symlinks (broken or not). [DS-AUDIT 1.1.B Finding 2, SEV 5]
-if [ -f "$NEO_HOME/.neo-seed/nexus.yaml" ] \
-        && [ ! -e "$NEO_HOME/.neo/nexus.yaml" ] \
-        && [ ! -L "$NEO_HOME/.neo/nexus.yaml" ]; then
-    cp "$NEO_HOME/.neo-seed/nexus.yaml" "$NEO_HOME/.neo/nexus.yaml"
-    chown -h "$NEO_USER:$NEO_USER" "$NEO_HOME/.neo/nexus.yaml"
-    echo "[entrypoint] seeded $NEO_HOME/.neo/nexus.yaml from bundled template"
-elif [ -L "$NEO_HOME/.neo/nexus.yaml" ]; then
-    echo "[entrypoint] WARNING: $NEO_HOME/.neo/nexus.yaml is a symlink — refusing to overwrite (possible attack)"
+#   IMAGE-bundled (Dockerfile COPY):
+#     /home/neo/.neo-seed/nexus.yaml  →  $NEO_HOME/.neo/nexus.yaml
+#
+#   HOST-bind RO (compose volumes, Pattern D — Area 1.4):
+#     /home/neo/.neo-host/credentials.json  →  $NEO_HOME/.neo/credentials.json
+#     /home/neo/.neo-host/plugins.yaml       →  $NEO_HOME/.neo/plugins.yaml
+#
+# All three are gated on `[ ! -e ] && [ ! -L ]` of the destination so:
+#   (a) operator edits inside the volume never get overwritten on
+#       subsequent boots
+#   (b) a malicious symlink at the destination cannot redirect the cp
+#       to an arbitrary host file (cp dereferences by default; the
+#       guard refuses to copy through symlinks too).
+# [DS-AUDIT 1.1.B Finding 2, SEV 5]
+seed_if_absent() {
+    src="$1"
+    dst="$2"
+    label="$3"
+    if [ ! -f "$src" ]; then
+        return 0  # source absent (e.g., host config not present) — silent skip
+    fi
+    # Refuse to seed when the SOURCE is a symlink — host operator (or
+    # attacker with write access to ~/.neo) could redirect through a
+    # symlink to e.g. ~/.ssh/id_rsa, leaking host secrets into the
+    # container's writable volume where neo-mcp could exfiltrate them
+    # through plugin calls. [Manual-audit Finding #2, SEV 7]
+    if [ -L "$src" ]; then
+        echo "[entrypoint] WARNING: $src is a symlink — refusing to seed (potential secret-leak vector)"
+        return 0
+    fi
+    if [ -L "$dst" ]; then
+        echo "[entrypoint] WARNING: $dst is a symlink — refusing to overwrite ($label)"
+        return 0
+    fi
+    if [ -e "$dst" ]; then
+        return 0  # already populated; preserve operator edits
+    fi
+    cp "$src" "$dst"
+    chown -h "$NEO_USER:$NEO_USER" "$dst"
+    chmod 600 "$dst"  # tighter perms for credential-class files
+    echo "[entrypoint] seeded $dst from $label"
+}
+
+# Image-bundled defaults (always available — copied from Dockerfile)
+seed_if_absent "$NEO_HOME/.neo-seed/nexus.yaml"      "$NEO_HOME/.neo/nexus.yaml"      "image template"
+
+# Host-bind seeds (Pattern D — only present if compose mounted them)
+seed_if_absent "$NEO_HOME/.neo-host/credentials.json" "$NEO_HOME/.neo/credentials.json" "host bind (read-only)"
+seed_if_absent "$NEO_HOME/.neo-host/plugins.yaml"     "$NEO_HOME/.neo/plugins.yaml"     "host bind (read-only)"
+
+# ---- 2b. Auto-register the bind-mounted repo as a workspace --------------
+# Without this, a fresh `make docker-up` brings up Nexus with an empty
+# registry — no dispatch targets, MCP clients see "workspace not found".
+# We register /home/neo/work/repo (the operator's bind-mounted source)
+# only on first boot (when the registry is missing); subsequent boots
+# preserve any operator-modified registry. [Final-flow audit Gap D]
+WORKSPACES_JSON="$NEO_HOME/.neo/workspaces.json"
+REPO_DIR="$NEO_HOME/work/repo"
+if [ -d "$REPO_DIR" ] && [ ! -e "$WORKSPACES_JSON" ] && [ ! -L "$WORKSPACES_JSON" ]; then
+    repo_basename=$(basename "$REPO_DIR")
+    # 4-byte random suffix to match the convention `<name>-<8hex>` from
+    # the native `neo space use` CLI. /dev/urandom + od is portable
+    # across BusyBox and full coreutils.
+    repo_suffix=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    cat > "$WORKSPACES_JSON" <<JSON_EOF
+{
+  "workspaces": [
+    {
+      "id": "${repo_basename}-${repo_suffix}",
+      "path": "${REPO_DIR}",
+      "name": "${repo_basename}",
+      "dominant_lang": "",
+      "health": "unknown",
+      "added_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "transport": "sse"
+    }
+  ],
+  "active_id": "${repo_basename}-${repo_suffix}"
+}
+JSON_EOF
+    chown -h "$NEO_USER:$NEO_USER" "$WORKSPACES_JSON"
+    chmod 644 "$WORKSPACES_JSON"
+    echo "[entrypoint] auto-registered $REPO_DIR as workspace ${repo_basename}-${repo_suffix}"
 fi
 
 # ---- 3. Drop privileges and exec neo-nexus -------------------------------

@@ -30,6 +30,11 @@ services:
       dockerfile: Dockerfile
       args:
         GOAMD64: ${GOAMD64:-v3}
+        # Pattern D — UID/GID alignment with host operator so bind-
+        # mounted repo files stay readable on the host. Override via
+        # `USER_ID=$(id -u) USER_GID=$(id -g) make docker-build`.
+        USER_ID: ${USER_ID:-1000}
+        USER_GID: ${USER_GID:-1000}
     image: neoanvil:${NEOANVIL_TAG:-local}
     container_name: neoanvil
     restart: unless-stopped
@@ -59,8 +64,32 @@ services:
       - "${NEXUS_PORT:-9000}:9000"      # MCP dispatcher
       - "${HUD_PORT:-8087}:8087"        # Operator HUD dashboard
     volumes:
-      - neoanvil-state:/home/neo/.neo   # nexus.yaml + workspaces.json + credentials.json + db/
-      - neoanvil-work:/home/neo/work    # workspace source (operator binds their repo here at use-time)
+      # Pattern D — Hybrid layout (Area 1.4):
+      # State lives in named volumes (BoltDB-safe, survives `down`).
+      # Source code is bind-mounted from the host so the operator edits
+      # in their IDE while neoanvil reads/writes inside the container.
+      # Host-side auth + plugin manifests are bind-mounted READ-ONLY
+      # into a staging dir; entrypoint copies them into the named volume
+      # only on first boot so the container has a writable copy without
+      # contaminating the operator's host config.
+
+      # State (named volumes — BoltDB flock works on host filesystem driver)
+      - neoanvil-state:/home/neo/.neo
+      - neoanvil-work:/home/neo/work    # additional workspaces operator can `neo setup` inside
+
+      # Source code bind — REPO_PATH defaults to the directory `docker compose`
+      # was invoked from. Operator can override to mount a different repo.
+      # Read-write so neoanvil can certify files + write to <repo>/.neo/.
+      - ${REPO_PATH:-${PWD}}:/home/neo/work/repo
+
+      # Host config staging — bind the WHOLE ~/.neo/ directory read-only.
+      # We bind the directory (always exists) instead of individual files,
+      # because docker-compose treats a missing bind-source as fatal. The
+      # entrypoint cherry-picks credentials.json + plugins.yaml from this
+      # tree and seeds them into the named volume above on first boot
+      # only when present (silent skip when absent, e.g., fresh host).
+      # [Self-audit BUG #2]
+      - ${HOME}/.neo:/home/neo/.neo-host:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/status > /dev/null || exit 1"]
       interval: 10s

@@ -26,6 +26,18 @@ See audit trail in git history.
 - [x] 1.1.D .dockerignore + Makefile targets (docker-build, docker-up, docker-down, docker-logs) — 2 SP
 - [ ] 1.1.E Documentation: docs/onboarding/docker.md with gotchas (no host+container simultaneous, named volumes only, port conflicts) — 2 SP
 
+### Épica 1.4: Pattern D — Hybrid host-bind workflow (15 SP)
+
+**Goal:** edit code in the host IDE, run neoanvil inside Docker, share auth + plugin manifests via read-only host binds, keep BoltDB safe (named volumes for global state, bind-mount for repo `.neo/`). Operator never has to choose between native and Docker — one source of truth for code, isolated state per execution mode.
+
+**Architecture doc:** [`docs/onboarding/docker-architecture.md`](../docs/onboarding/docker-architecture.md)
+
+- [x] 1.4.A docker-compose.yaml — bind mounts: `${REPO_PATH:-${PWD}}:/home/neo/work/repo:rw` + `${HOME}/.neo/credentials.json:/home/neo/.neo-host/credentials.json:ro` + `${HOME}/.neo/plugins.yaml:/home/neo/.neo-host/plugins.yaml:ro`. REPO_PATH env documented in `.env.example` — 4 SP
+- [x] 1.4.B scripts/docker-entrypoint.sh — `seed_if_absent` helper that copies host-bind RO sources into the named volume only when destination is missing AND not a symlink (TOCTOU defense from DS audit). Three sources: image template (nexus.yaml) + host bind credentials.json + host bind plugins.yaml. `chmod 600` on credential-class files — 3 SP
+- [x] 1.4.C Makefile — `docker-seed` (one-time copy of master_plan / audit-baseline / technical_debt into the running container) + `docker-status` (health + named volume sizes summary) — 2 SP
+- [x] 1.4.D Architecture doc — `docs/onboarding/docker-architecture.md`. Layered ascii diagram, persistence matrix, memory model table, lifecycle commands, migration paths (native↔Docker bidirectional), troubleshooting table, scalability notes — 3 SP
+- [ ] 1.4.E Smoke test — end-to-end `make docker-up && curl /status`, GPU passthrough check, side-by-side mode validation, BoltDB lock-conflict test — 3 SP
+
 ### Épica 1.2: `neo setup` CLI Command (12 SP)
 
 **Note:** `neo init` already exists for project federation. New workspace scaffolding uses `neo setup`.

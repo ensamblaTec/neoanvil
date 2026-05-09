@@ -836,10 +836,16 @@ freshness:
 # Docker (Area 1.1.D)
 # ═════════════════════════════════════════════════════════════════════
 
-DOCKER_IMAGE      ?= neoanvil
-DOCKER_TAG        ?= local
-DOCKER_GOAMD64    ?= v3
-COMPOSE           ?= docker compose
+DOCKER_IMAGE         ?= neoanvil
+DOCKER_TAG           ?= local
+DOCKER_GOAMD64       ?= v3
+# COMPOSE_PROJECT_NAME defaults to ${USER}_neoanvil so two operators on
+# the same host get isolated volume namespaces (their volumes are named
+# `<user>_neoanvil_neoanvil-state` etc). Override per-stack if needed.
+# [Manual-audit Finding #7, SEV 6]
+COMPOSE_PROJECT_NAME ?= $(shell whoami)_neoanvil
+export COMPOSE_PROJECT_NAME
+COMPOSE              ?= docker compose
 
 .PHONY: docker-build docker-up docker-down docker-logs
 
@@ -867,3 +873,41 @@ docker-down:
 # docker-logs: tails Nexus + Ollama logs.
 docker-logs:
 	$(COMPOSE) logs -f --tail=100
+
+# docker-seed: one-time copy of host workspace state (master_plan,
+# audit-baseline, technical_debt) into the running container's named
+# volume so the container starts with the operator's existing plan and
+# baseline rather than empty defaults. [Area 1.4 — Pattern D]
+#
+# BoltDB databases are intentionally NOT seeded — seeding live BoltDB
+# files via `docker cp` while the container is running would corrupt
+# them. Run `make docker-seed` only when the container is up but
+# Nexus has not yet bound those DBs (i.e., right after `docker-up`
+# before workspaces start), or stop the workload temporarily.
+.PHONY: docker-seed
+docker-seed:
+	@if ! $(COMPOSE) ps neoanvil --quiet 2>/dev/null | grep -q .; then \
+		printf "\033[31m[docker-seed]\033[0m container neoanvil is not running — start with \`make docker-up\` first\n"; exit 1; \
+	fi
+	@printf "\033[36m[docker-seed]\033[0m copying workspace state into container (atomic rename)\n"
+	@for f in .neo/master_plan.md .neo/audit-baseline.txt .neo/technical_debt.md; do \
+		if [ -f $$f ]; then \
+			docker cp $$f neoanvil:/home/neo/work/repo/$$f.seeding; \
+			docker exec -u root neoanvil mv /home/neo/work/repo/$$f.seeding /home/neo/work/repo/$$f; \
+			printf "  ✓ %s\n" "$$f"; \
+		fi; \
+	done
+	@docker exec -u root neoanvil chown -R neo:neo /home/neo/work/repo/.neo 2>/dev/null || true
+	@printf "\033[32m[docker-seed]\033[0m done\n"
+
+# docker-status: shows container health + named volume sizes for a
+# quick "is everything alive and persisting" summary.
+.PHONY: docker-status
+docker-status:
+	@printf "\033[36m[docker-status]\033[0m containers:\n"
+	@$(COMPOSE) ps 2>&1
+	@printf "\n\033[36m[docker-status]\033[0m named volumes:\n"
+	@for v in neoanvil_neoanvil-state neoanvil_neoanvil-work neoanvil_ollama-models neoanvil_ollama-embed-models; do \
+		size=$$(docker run --rm -v $$v:/v alpine sh -c 'du -sh /v 2>/dev/null | cut -f1' 2>/dev/null); \
+		[ -n "$$size" ] && printf "  %-35s %s\n" "$$v" "$$size" || printf "  %-35s (not present)\n" "$$v"; \
+	done
