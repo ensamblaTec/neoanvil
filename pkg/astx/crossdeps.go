@@ -173,13 +173,29 @@ func packageOf(filename string) string {
 //
 // Match strategy: parse imports-only, accept any import path that ends
 // with the relative dir of target ("pkg/auth"). This handles:
-//   "github.com/ensamblatec/neoanvil/pkg/auth"  → match
-//   "github.com/other/pkg/auth"                  → match (rare; same name)
+//
+//	"github.com/ensamblatec/neoanvil/pkg/auth"  → match
+//	"github.com/other/pkg/auth"                  → match (rare; same name)
+//
 // We err on the side of inclusion since BLAST_RADIUS is operator-facing
 // and false-positives are easier to dismiss than false-negatives.
 //
+// Known limitation: in a workspace that imports a third-party module with
+// the same relative path (e.g. local `pkg/auth` AND vendored
+// `github.com/foo/pkg/auth`), files importing the third-party package
+// will appear in the result. To make this strict we'd need to read
+// go.mod and require the import path starts with the local module
+// path. The trade-off (extra IO + multi-module edge cases) isn't worth
+// it for the operator-facing UX — false positives are visible in the
+// output and dismissible. [Sprint package-level fix + audit follow-up]
+//
 // Skips: vendor/, .neo/, the target file itself, files in the same
-// package directory as target. [Sprint package-level fix]
+// package directory as target.
+//
+// Inputs are validated only for type (target must end in .go); a
+// path-traversal target like `../../../etc/passwd.go` is bounded by
+// filepath.WalkDir(workspace, ...) and produces 0 results without
+// panic or filesystem leak. [Pen-and-paper audit 2026-05-10]
 func PackageImporters(workspace, target string) ([]string, error) {
 	if !strings.HasSuffix(target, ".go") {
 		return nil, nil
