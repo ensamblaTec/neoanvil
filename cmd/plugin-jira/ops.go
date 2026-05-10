@@ -67,16 +67,6 @@ func (c *statusCache) invalidate(issueKey string) {
 
 // ── 5.A Audit log multi-tenant field ────────────────────────────────────────
 
-type auditEntry struct {
-	Timestamp   string `json:"ts"`
-	Tenant      string `json:"tenant"`
-	Project     string `json:"project"`
-	WorkspaceID string `json:"workspace_id"`
-	Action      string `json:"action"`
-	IssueKey    string `json:"issue_key,omitempty"`
-	Result      string `json:"result"`
-}
-
 func (s *state) auditMultiTenant(cc callCtx, projName, action, issueKey, result string) {
 	if s.audit == nil {
 		return
