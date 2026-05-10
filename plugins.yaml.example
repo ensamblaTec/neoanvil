@@ -159,14 +159,21 @@ plugins:
   #     - neoanvil-XXXXX         # restringe a workspaces específicos (recomendado)
 
   # --------------------------------------------------------------------------
-  # GitHub plugin (Area 2 — MVP delivered via cmd/plugin-github).
-  # 13 actions: list_prs, create_pr, merge_pr, close_pr, pr_comments,
-  # create_review, list_issues, create_issue, update_issue, get_checks,
-  # list_branches, compare, cross_ref (extract Jira keys from text).
-  # Plus mandatory __health__.
+  # GitHub plugin (Area 2 — sesión 2026-05-09 / 2026-05-10).
+  # 13 actions + __health__: list_prs, get_pr, create_pr, merge_pr, close_pr,
+  # pr_comments, create_review, list_issues, create_issue, update_issue,
+  # get_checks, list_branches, compare, cross_ref (extract Jira keys from text).
   #
-  # Auth: PAT only (OAuth deferred to a follow-up). Single-tenant in v1
-  # — multi-tenant per-repo config arrives with Area 2.1.A.
+  # Auth: PAT classic. Multi-tenant out-of-the-box via the heredado
+  # ~/.neo/credentials.json::github.<tenant> schema (same as plugin-jira).
+  # Switch active org with `neo space use --provider github --tenant <name>`.
+  # PAT scopes mínimos: repo + read:org (+ workflow para create_review en
+  # repos con required reviews). OAuth + GitHub App deferred (ver ADR-011).
+  #
+  # Audit log: ~/.neo/audit-github.log (hash-chain, perms 0600).
+  # Guía operativa: docs/plugins/github-integration-guide.md
+  # ADR: docs/adr/ADR-011-github-plugin-design.md
+  # Skill: .claude/skills/github-workflow/SKILL.md (auto-load)
   # --------------------------------------------------------------------------
   # - name: github
   #   description: "GitHub REST v3: PRs, issues, reviews, CI, branches, cross-ref."

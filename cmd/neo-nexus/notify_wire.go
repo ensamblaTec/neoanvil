@@ -20,13 +20,46 @@ import (
 	"github.com/ensamblatec/neoanvil/pkg/notify"
 )
 
-// notifyConfigFromNexus extracts a NotificationsConfig from the
-// nexus config. Today nexus.yaml has no notifications block — this
-// returns a disabled config so the rest of the wire-up is a no-op
-// until the YAML field lands. When that field is added, this is the
-// only function that needs to change.
-func notifyConfigFromNexus(_ *nexus.NexusConfig) notify.NotificationsConfig {
-	return notify.NotificationsConfig{Enabled: false}
+// notifyConfigFromNexus extracts a notify.NotificationsConfig from
+// the parsed nexus.yaml. The two structs intentionally live in
+// different packages (pkg/nexus.NotificationsSection mirrors
+// pkg/notify.NotificationsConfig 1:1) to avoid pkg/nexus depending
+// on pkg/notify's HTTP/retry stack — see the comment on
+// NotificationsSection in pkg/nexus/config.go.
+//
+// When the pkg/notify schema evolves, update this translator AND
+// the mirror struct in pkg/nexus/config.go in the same commit.
+func notifyConfigFromNexus(cfg *nexus.NexusConfig) notify.NotificationsConfig {
+	if cfg == nil || !cfg.Nexus.Notifications.Enabled {
+		return notify.NotificationsConfig{Enabled: false}
+	}
+	src := cfg.Nexus.Notifications
+	hooks := make([]notify.WebhookConfig, len(src.Webhooks))
+	for i, h := range src.Webhooks {
+		hooks[i] = notify.WebhookConfig{
+			Name:     h.Name,
+			Provider: notify.ProviderKind(h.Provider),
+			URL:      h.URL,
+		}
+	}
+	routes := make([]notify.Route, len(src.Routes))
+	for i, r := range src.Routes {
+		routes[i] = notify.Route{
+			EventKind:   r.EventKind,
+			Webhooks:    r.Webhooks,
+			MinSeverity: r.MinSeverity,
+		}
+	}
+	return notify.NotificationsConfig{
+		Enabled:   true,
+		Webhooks:  hooks,
+		Routes:    routes,
+		RateLimit: notify.RateLimit{
+			BurstPerMinute: src.RateLimit.BurstPerMinute,
+			DedupWindowSec: src.RateLimit.DedupWindowSec,
+		},
+		AllowHTTP: src.AllowHTTP,
+	}
 }
 
 // notifier is the package-level dispatcher initialised by

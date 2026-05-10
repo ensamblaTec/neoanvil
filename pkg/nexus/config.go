@@ -93,6 +93,16 @@ type NexusSection struct {
 	// PluginSpec via PluginPool. Default disabled (opt-in).
 	Plugins PluginsConfig `yaml:"plugins"`
 
+	// Notifications wires the per-child SSE event subscriber that fans
+	// out critical events to Slack/Discord webhooks via pkg/notify.
+	// Default disabled (opt-in). When Enabled:true, cmd/neo-nexus reads
+	// the webhook + route definitions and starts one subscriber goroutine
+	// per managed workspace. See docs/general/observability.md for the
+	// full pipeline (SSE bus → notify dispatcher → otelx span). The shape
+	// is a YAML-friendly mirror of pkg/notify.NotificationsConfig — the
+	// wiring layer in cmd/neo-nexus/notify_wire.go converts. [Area 5.2]
+	Notifications NotificationsSection `yaml:"notifications"`
+
 	// SSE session limits (PILAR XXVIII 145.B — DoS defense).
 	// MaxSSESessions caps total concurrent SSE connections across all clients.
 	// MaxSSESessionsPerIP caps connections from a single remote IP.
@@ -108,6 +118,46 @@ type NexusSection struct {
 // global aggregator timeout) will land here without breaking compatibility.
 type PluginsConfig struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// NotificationsSection mirrors pkg/notify.NotificationsConfig 1:1
+// (same yaml shape) but lives here so pkg/nexus doesn't import
+// pkg/notify — pkg/notify pulls in HTTP retry logic via pkg/sre, and
+// pkg/nexus is consumed by the child neo-mcp which has no business
+// linking webhook code. The wiring layer in
+// cmd/neo-nexus/notify_wire.go translates this struct to the real
+// notify.NotificationsConfig at boot via field-by-field copy. If the
+// pkg/notify schema evolves, update both this struct AND the translator
+// in lockstep. [Area 5.2]
+type NotificationsSection struct {
+	Enabled   bool                 `yaml:"enabled"`
+	Webhooks  []NotifyWebhookSpec  `yaml:"webhooks"`
+	Routes    []NotifyRouteSpec    `yaml:"routes"`
+	RateLimit NotifyRateLimitSpec  `yaml:"rate_limit"`
+	AllowHTTP bool                 `yaml:"allow_http"` // override the no-HTTPS-in-prod guard
+}
+
+// NotifyWebhookSpec — one Slack or Discord webhook destination.
+// Mirror of pkg/notify.WebhookConfig.
+type NotifyWebhookSpec struct {
+	Name     string `yaml:"name"`     // operator-friendly label, referenced by routes
+	Provider string `yaml:"provider"` // "slack" | "discord"
+	URL      string `yaml:"url"`      // resolved with os.ExpandEnv at translate time
+}
+
+// NotifyRouteSpec — bind an event kind to one or more webhooks.
+// Mirror of pkg/notify.Route.
+type NotifyRouteSpec struct {
+	EventKind   string   `yaml:"event_kind"`   // e.g. "chaos_drill_fail", "policy_veto"
+	Webhooks    []string `yaml:"webhooks"`     // references NotifyWebhookSpec.Name entries
+	MinSeverity int      `yaml:"min_severity"` // 0 = all; route fires only on event.Severity ≥ this
+}
+
+// NotifyRateLimitSpec — cap webhook QPS so flapping doesn't burn quota.
+// Mirror of pkg/notify.RateLimit.
+type NotifyRateLimitSpec struct {
+	BurstPerMinute int `yaml:"burst_per_minute"` // default 10 in pkg/notify
+	DedupWindowSec int `yaml:"dedup_window_sec"` // default 60 in pkg/notify
 }
 
 // NexusShadowConfig controls shadow traffic mirroring at the Nexus dispatcher level.

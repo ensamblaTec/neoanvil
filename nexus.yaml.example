@@ -171,6 +171,40 @@ nexus:
   plugins:
     enabled: false
 
+  # --- Notifications (pkg/notify webhook dispatcher) -----------------------
+  # Per-child SSE subscriber → allowlist filter → Slack/Discord webhook
+  # with retry+backoff. Disabled by default; enable + define webhooks +
+  # routes to start receiving alerts. See docs/general/observability.md
+  # for the full pipeline (SSE bus → notify → otelx → openapi).
+  #
+  # Threat model: webhook URLs are operator-controlled (live in this file
+  # or expanded via $VAR), not user-influenced. Even so, dispatch goes
+  # through sre.SafeHTTPClient — anti-SSRF guard for the third-party
+  # destination domain.
+  notifications:
+    enabled: false                   # opt-in
+    # webhooks:
+    #   - name:     ops-channel
+    #     provider: slack             # slack | discord
+    #     url:      ${SLACK_OPS_URL}  # resolved at boot via os.ExpandEnv
+    #   - name:     incidents
+    #     provider: discord
+    #     url:      ${DISCORD_INCIDENTS_URL}
+    # routes:
+    #   - event_kind: chaos_drill_fail
+    #     webhooks:   [ops-channel]
+    #     min_severity: 7              # 0=all; events below skip the route
+    #   - event_kind: policy_veto
+    #     webhooks:   [ops-channel, incidents]
+    #     min_severity: 9
+    #   - event_kind: thermal_rollback
+    #     webhooks:   [incidents]
+    #     min_severity: 8
+    # rate_limit:
+    #   burst_per_minute: 10           # cap webhook QPS per destination
+    #   dedup_window_sec: 60           # drop duplicate (kind+title) within window
+    # allow_http: false                # require HTTPS webhook URLs (default)
+
   # --- Servicios del sistema (Ollama) ---------------------------------------
   # Nexus puede gestionar instancias Ollama como dependencias del sistema,
   # arrancándolas antes que cualquier child y monitoreándolas con el mismo
