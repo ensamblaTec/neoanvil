@@ -362,3 +362,14 @@ Closing as zombie / false positive.
 
 ---
 
+## [2026-05-10 06:18] AST COMPLEXITY in embedder.go:256
+
+**Prioridad:** alta
+
+File: pkg/rag/embedder.go
+Line: 256
+Kind: COMPLEXITY
+Detail: func EmbedBatch: CC=23 (limit 15)
+
+---
+

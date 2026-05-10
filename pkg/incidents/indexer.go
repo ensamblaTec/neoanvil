@@ -252,20 +252,20 @@ func chunkedEmbed(ctx context.Context, embedder rag.Embedder, text string) ([]fl
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("chunkedEmbed: empty input after split")
 	}
-	var sum []float32
-	for i, chunk := range chunks {
-		vec, err := embedder.Embed(ctx, chunk)
-		if err != nil {
-			return nil, fmt.Errorf("chunk %d/%d: %w", i+1, len(chunks), err)
-		}
-		if sum == nil {
-			sum = make([]float32, len(vec))
-		}
-		for j, v := range vec {
-			sum[j] += v
+	vecs, err := rag.EmbedMany(ctx, embedder, chunks)
+	if err != nil {
+		return nil, err
+	}
+	if len(vecs) == 0 {
+		return nil, fmt.Errorf("chunkedEmbed: embedder returned 0 vectors for %d chunks", len(chunks))
+	}
+	sum := make([]float32, len(vecs[0]))
+	for _, v := range vecs {
+		for j, f := range v {
+			sum[j] += f
 		}
 	}
-	inv := float32(1) / float32(len(chunks))
+	inv := float32(1) / float32(len(vecs))
 	for i := range sum {
 		sum[i] *= inv
 	}

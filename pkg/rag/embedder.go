@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,39 @@ func errorsAs(err error, target any) bool { return errors.As(err, target) }
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 	Dimension() int
+}
+
+// BatchEmbedder is an optional capability — embedders that can serve a batch
+// of texts in a single round-trip (Ollama /api/embed, vLLM, TEI, etc.) should
+// implement it so hot-path callers can avoid the per-call HTTP overhead.
+//
+// Callers should type-assert and fall back to a sequential Embed loop when
+// the embedder does not implement BatchEmbedder. EmbedBatch returns vectors
+// in the same order as input. An empty input returns an empty slice and nil.
+type BatchEmbedder interface {
+	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+// EmbedMany is the canonical helper for callers who want batch behaviour
+// without writing the type-assertion boilerplate at every site. It uses
+// EmbedBatch when the embedder supports it, otherwise falls back to N
+// sequential Embed calls. An empty input returns nil, nil.
+func EmbedMany(ctx context.Context, embedder Embedder, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	if be, ok := embedder.(BatchEmbedder); ok {
+		return be.EmbedBatch(ctx, texts)
+	}
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		v, err := embedder.Embed(ctx, t)
+		if err != nil {
+			return nil, fmt.Errorf("embed %d/%d: %w", i+1, len(texts), err)
+		}
+		out[i] = v
+	}
+	return out, nil
 }
 
 // EmbedHTTPError wraps a non-2xx response from the embedder server.
@@ -201,6 +235,164 @@ type ollamaReq struct {
 
 type ollamaResp struct {
 	Embedding []float64 `json:"embedding"`
+}
+
+// ollamaBatchReq is the schema for /api/embed (plural) — Ollama v0.3+. The
+// `input` field accepts either a string or []string; we always send []string.
+type ollamaBatchReq struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
+type ollamaBatchResp struct {
+	Embeddings [][]float64 `json:"embeddings"`
+}
+
+// EmbedBatch sends N texts in a single /api/embed (plural) round-trip and
+// returns the vectors in the same order. Falls back to N sequential Embed
+// calls if Ollama returns 404 (older Ollama without /api/embed). The whole
+// batch shares one semaphore slot — Ollama's runner already parallelises
+// internally, so client-side fan-out would just add HTTP overhead.
+func (o *OllamaEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	if len(texts) == 1 {
+		v, err := o.Embed(ctx, texts[0])
+		if err != nil {
+			return nil, err
+		}
+		return [][]float32{v}, nil
+	}
+	texts = truncateTexts(texts, o.maxChars)
+	release, err := o.acquireBatchSlots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	batchTimeout := o.embedTimeout + time.Duration(len(texts))*200*time.Millisecond
+	embedCtx, cancel := context.WithTimeout(ctx, batchTimeout)
+	defer cancel()
+
+	resp, err := o.dispatchBatchHTTP(embedCtx, texts)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		// Ollama < 0.3 has no /api/embed (plural).
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return o.embedSequentialFallback(ctx, texts)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &EmbedHTTPError{StatusCode: resp.StatusCode}
+	}
+	return decodeBatchEmbeddings(resp.Body, len(texts))
+}
+
+// truncateTexts mirrors the per-call guard in Embed(): cap each input to
+// maxChars so nomic-embed-text doesn't 500 on context-window overflow.
+// Returns the input unchanged when maxChars <= 0 (no truncation configured).
+func truncateTexts(texts []string, maxChars int) []string {
+	if maxChars <= 0 {
+		return texts
+	}
+	out := make([]string, len(texts))
+	for i, t := range texts {
+		if len(t) > maxChars {
+			out[i] = t[:maxChars]
+		} else {
+			out[i] = t
+		}
+	}
+	return out
+}
+
+// acquireBatchSlots takes one slot from the per-embedder + global semaphores.
+// Returns a release func that the caller must defer. The whole batch shares
+// one slot — Ollama parallelises server-side, so client-side fan-out would
+// just add HTTP overhead.
+func (o *OllamaEmbedder) acquireBatchSlots(ctx context.Context) (func(), error) {
+	select {
+	case o.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case o.globalSem <- struct{}{}:
+	case <-ctx.Done():
+		<-o.sem
+		return nil, ctx.Err()
+	}
+	return func() {
+		<-o.globalSem
+		<-o.sem
+	}, nil
+}
+
+// dispatchBatchHTTP encodes + POSTs the batch request. The body buffer is
+// returned to the pool before this function returns regardless of outcome.
+func (o *OllamaEmbedder) dispatchBatchHTTP(ctx context.Context, texts []string) (*http.Response, error) {
+	reqBody := ollamaBatchReq{Model: o.Model, Input: texts}
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	if err := json.NewEncoder(buf).Encode(reqBody); err != nil {
+		bufPool.Put(buf)
+		return nil, fmt.Errorf("failed to marshal ollama batch request: %w", err)
+	}
+	endpoint := fmt.Sprintf("%s/api/embed", o.nextURL())
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, buf)
+	if err != nil {
+		bufPool.Put(buf)
+		return nil, fmt.Errorf("failed to create http request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.client.Do(req)
+	bufPool.Put(buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to contact ollama batch endpoint: %w", err)
+	}
+	return resp, nil
+}
+
+// embedSequentialFallback is the per-text path used when /api/embed (plural)
+// returns 404 — Ollama < 0.3 only has /api/embeddings (singular).
+func (o *OllamaEmbedder) embedSequentialFallback(ctx context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		v, err := o.Embed(ctx, t)
+		if err != nil {
+			return nil, fmt.Errorf("batch fallback %d/%d: %w", i+1, len(texts), err)
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// decodeBatchEmbeddings parses an Ollama /api/embed response and converts
+// every []float64 row to []float32. Errors out on count mismatch (server
+// returned fewer/more embeddings than inputs) or any empty row.
+func decodeBatchEmbeddings(body io.Reader, expected int) ([][]float32, error) {
+	var parsed ollamaBatchResp
+	if err := json.NewDecoder(body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("failed to decode ollama batch response: %w", err)
+	}
+	if len(parsed.Embeddings) != expected {
+		return nil, fmt.Errorf("ollama batch returned %d embeddings for %d texts", len(parsed.Embeddings), expected)
+	}
+	out := make([][]float32, len(parsed.Embeddings))
+	for i, emb := range parsed.Embeddings {
+		if len(emb) == 0 {
+			return nil, fmt.Errorf("ollama batch returned empty embedding at index %d", i)
+		}
+		v := make([]float32, len(emb))
+		for j, f := range emb {
+			v[j] = float32(f)
+		}
+		out[i] = v
+	}
+	return out, nil
 }
 
 func (o *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
