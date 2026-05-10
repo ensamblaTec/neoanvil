@@ -350,6 +350,40 @@ with `⚠️ CACHED(TTL:30m)` so the operator sees the freshness window.
 `bypass_cache:true` arg forces a fresh recompute. Concurrency-safe
 via sync.RWMutex; verified by `TestTechDebtMapCache_RaceFreeUnderConcurrentReadWrite`.
 
+## ~~[option-D-CPG-parallelization] CPG SSA walk parallelization~~ — REJECTED 2026-05-10 (low ROI)
+
+Earlier session recommended parallelizing the per-package walk loop in
+`pkg/cpg/builder.go::Build()` claiming "4-8× cold-boot speedup". A
+phase-instrumented benchmark against the production scope
+(`cfg.CPG.PackagePath = "./cmd/neo-mcp"`) showed the claim was wrong:
+
+| Phase | Time | Share |
+|-------|------|-------|
+| packages.Load (Go parser, already parallel) | 330ms | 81.6% |
+| ssautil.AllPackages + prog.Build (Go-parallel) | 68ms | 16.9% |
+| Walk packages (sequential — D's target)        | **6ms** | **1.5%** |
+| TOTAL cold-build                                | 405ms | |
+
+Parallelizing the 6ms walk yields ~3-4ms in absolute terms. Not worth
+the mutex/synchronization complexity. The phase bench lives at
+`pkg/cpg/builder_phases_test.go` (build tag `cpg_phases`) so future
+hypotheses can be revalidated in seconds:
+
+```bash
+go test -tags cpg_phases -v ./pkg/cpg/ -run TestPhases -timeout 2m
+```
+
+**Where the real cold-boot win actually was:** the HNSW cold rebuild
+path (5-6 min per CLAUDE.md, runs through `workspace_utils.go`) already
+benefits from option-B batch embedding migrated in commit `c4c3b1a` —
+the per-file embed pipeline shows 3.3× at batch=16. So cold HNSW
+rebuild now runs in ~1.5-2 minutes for the same data.
+
+D should not be attempted again unless `packages.Load` drops below 30%
+of cold-build time, which would require either (a) Go shipping a
+faster loader, or (b) us memoising packages.Load output across
+rebuilds. Neither is on the horizon.
+
 ## ~~[2026-05-10 04:26] AST INFINITE_LOOP in bridge.go:328~~ — RESOLVED 2026-05-10 (false positive)
 
 `walkRouterChain` uses `for range 32 { switch ... { case ...: return } }`

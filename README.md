@@ -293,6 +293,17 @@ Notes:
 - `rem_cycle.go` keeps a `consolidateMemexPerEntry` fallback for when
   the batch embed fails — REM consolidation never regresses.
 
+### Cold-boot impact
+
+The migrated `workspace_utils.go` is also the path the cold HNSW
+rebuild takes when `.neo/db/hnsw.bin` is missing or schema-stale.
+Before the migration this was the canonical "5-6 min" path documented
+in `CLAUDE.md`. With per-file embed at 3.3× and the adaptive-batch
+strategy preserving all retry semantics, the same workload now
+finishes in roughly **~1.5-2 minutes** for a typical workspace. Most
+boots still take the fast snapshot path (`<5s`); cold rebuild only
+fires after schema bumps or when a workspace is first registered.
+
 ### Regression guard — HNSW Search latency
 
 The migration touched zero search code paths. The numbers below are
@@ -302,6 +313,22 @@ captured fresh after each commit so we can spot accidental regressions.
 |--------|------:|
 | Search median (`k=10`, corpus=200 nodes) | **4 µs** |
 | Search p95                               | **4 µs** |
+
+### Investigated and rejected — CPG SSA walk parallelization
+
+A "parallelize the per-package CPG walk for 4-8× cold-boot" hypothesis
+was tested with a phase-instrumented benchmark against the production
+scope (`cfg.CPG.PackagePath = "./cmd/neo-mcp"`). Result: the
+sequential walk only contributes **6 ms out of a 405 ms total**
+(`packages.Load` dominates at 81.6%, already parallel internally).
+Parallelizing the walk yields a few ms in absolute terms. Not shipped.
+
+The phase bench lives in `pkg/cpg/builder_phases_test.go` behind the
+`cpg_phases` build tag — re-run any time to revalidate the cost model:
+
+```bash
+go test -tags cpg_phases -v ./pkg/cpg/ -run TestPhases -timeout 2m
+```
 
 ## Building
 
