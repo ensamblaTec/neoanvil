@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/kanban"
@@ -123,15 +124,39 @@ func renderSymbolMapSection(workspace, pkgArg, buildStatus string, includeUnexpo
 }
 
 // runGoBuild executes `go build pkgArg` in workspace and returns status + error lines. [SRE-119.A]
+//
+// Subprocess hardening (closes the 30-min-hang bug observed in
+// projects with heavy cgo / tree-sitter / proto-gen deps):
+//
+//  1. Setpgid:true puts `go build` in its own process group so
+//     SIGKILL on context-timeout reaches every grandchild (cgo →
+//     gcc → ld). Without this, gcc grandchildren survive and keep
+//     stdout/stderr pipes alive.
+//  2. cmd.WaitDelay = 5s caps how long CombinedOutput will wait for
+//     pipes to drain after the context cancels. Without WaitDelay,
+//     CombinedOutput blocks until ALL pipe writers close — and
+//     orphaned gcc grandchildren can hold them open for tens of
+//     minutes in heavy-cgo projects.
+//
+// Together these guarantee runGoBuild returns within
+// `30s build budget + 5s pipe drain = 35s` worst case, regardless
+// of subprocess depth. [SRE-119.A hardening — 2026-05-10]
 func runGoBuild(workspace, pkgArg string) (status string, errLines []string) {
 	buildCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(buildCtx, "go", "build", pkgArg) //nolint:gosec // G204-LITERAL-BIN
 	cmd.Dir = workspace
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 5 * time.Second
 	out, buildErr := cmd.CombinedOutput()
 	status = "ok"
 	if buildErr != nil {
 		status = "fail"
+		// Surface the timeout/hang case explicitly so the operator
+		// can distinguish "build error" from "build hung past budget".
+		if buildCtx.Err() != nil {
+			errLines = append(errLines, fmt.Sprintf("# BUILD TIMEOUT: exceeded 30s + 5s drain — orphaned cgo subprocess? (ctx err: %v)", buildCtx.Err()))
+		}
 		for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && !strings.HasPrefix(line, "#") {

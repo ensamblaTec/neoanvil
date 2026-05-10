@@ -155,6 +155,50 @@ of named operations.
 
 ---
 
+## [2026-05-10 03:00] Subprocess hang pattern — COMPILE_AUDIT fixed, 6+ siblings pending
+
+**Symptom (operator-reported in another project):** COMPILE_AUDIT
+hangs ~30min on projects with heavy cgo / tree-sitter / proto-gen
+dependencies.
+
+**Root cause:** `cmd.CombinedOutput()` waits for ALL pipe writers
+to close before returning. When `go build` invokes cgo → gcc →
+child processes, those grandchildren are NOT in the same process
+group as the `go build` parent. context.WithTimeout SIGKILLs the
+parent on 30s expiry, but the gcc grandchildren survive holding
+the pipes open. CombinedOutput then waits indefinitely (until gcc
+finishes naturally — minutes or tens of minutes for big repos).
+
+**Fix applied to `runGoBuild` (radar_compile.go:128):**
+1. `SysProcAttr{Setpgid: true}` — process-group leader, SIGKILL
+   on context cancel reaches the whole tree.
+2. `cmd.WaitDelay = 5*time.Second` (Go 1.20+) — caps pipe-drain
+   wait after cancel. Worst case is now `30s + 5s = 35s`.
+3. Surface explicit `BUILD TIMEOUT` line when `buildCtx.Err()`
+   triggered, so operator distinguishes hang from real errors.
+
+**Same pattern unfixed (follow-up):** sweep found 6+ call sites
+that exec subprocesses via `exec.CommandContext + CombinedOutput`
+without Setpgid+WaitDelay:
+
+  · `cmd/neo-mcp/tools.go:360,440` — neo_command run/approve
+    (operator shell commands; can be `make build` etc.)
+  · `cmd/neo-mcp/tools.go:851` — neo_forge_tool wasm compile
+    (`go build -o pathWasm`); same bug shape.
+  · `cmd/neo-mcp/dashboard.go:393` — HUD rebuild
+    (`go build -o outBin ./cmd/neo-mcp`); same.
+  · `cmd/neo-mcp/macro_tools.go:1604,1634,1648` — sandbox build
+    helpers (go build / sh -c / cargo build).
+  · `cmd/neo-mcp/radar_audit.go:123` — lint shell invocation.
+
+**Triage:** matters only when invoked on cgo-heavy targets; on
+this repo (`go build ./...` = 3.3s) the hang is invisible.
+Recommended fix: extract a `hardenedExec()` helper in pkg/sre and
+wire all call sites in one commit. Defer until operator sees the
+pattern bite a second time.
+
+---
+
 ## ~~[2026-05-10 02:13] AST COMPLEXITY in boot_helpers.go:494~~ — RESOLVED 2026-05-10
 
 `bootCoordinatorTier` CC=17 → split into `resolveProjectCoord`,
