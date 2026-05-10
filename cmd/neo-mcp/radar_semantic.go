@@ -480,7 +480,7 @@ func semanticFetchResults(ctx context.Context, t *RadarTool, sb *strings.Builder
 			t.embCache.PutAnnotated(embCacheKey, queryVec, t.graph.Gen.Load(), target)
 		}
 	}
-	results, searchErr := t.graph.Search(ctx, queryVec, topKDefault, t.cpu)
+	results, searchErr := t.graph.SearchAuto(ctx, queryVec, topKDefault, t.cpu, t.cfg.RAG.VectorQuant)
 	if searchErr != nil {
 		return nil, false, fmt.Errorf("vector search failed: %w", searchErr)
 	}

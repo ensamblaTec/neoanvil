@@ -152,7 +152,10 @@ rag:
     drift_threshold: 0.45
     gc_pressure_threshold: 5
     arena_miss_rate_threshold: 0.2
-    vector_quant: float32
+    # [Épica 170.C-hybrid] hybrid = binary candidate filter + float32 rerank.
+    # Recall 1.000 measured on this corpus (25k vectors, 50 queries top-10).
+    # +3% RAM, ~5µs vs 9µs float32 search. See pkg/rag/recall_measure_live_test.go.
+    vector_quant: hybrid
     query_cache_capacity: 256
     embedding_cache_capacity: 128
     max_embed_chars: 4000

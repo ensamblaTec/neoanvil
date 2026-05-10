@@ -1,6 +1,6 @@
 # DOCTRINA SRE: TOOLS V10.6 (OUROBOROS)
 
-Esquema y uso de las **15 herramientas MCP** que exponen 60+ operations. Inventario: 7 macro-tools + 8 specialists (incluyendo `neo_local_llm` ADR-013). **master_plan.md vacío (todo archivado en master_done.md, 72 entries) · 3 plugins MCP (jira, deepseek, github) + 1 testmock (echo) · 9 ADRs activos (005-013). Estado GREEN.**
+Esquema y uso de las **15 herramientas MCP** que exponen 60+ operations. Inventario: 7 macro-tools + 8 specialists (incluyendo `neo_local_llm` ADR-013). **master_plan.md vacío (todo archivado en master_done.md, 72 entries) · 3 plugins MCP (jira, deepseek, github) + 1 testmock (echo) · 10 ADRs activos (005-014). Estado GREEN.**
 Cualquier tool fuera de este set es deuda técnica erradicada.
 
 **PROHIBIDO:** usar `Agent(subagent_type="Explore")` para auditar este repositorio — cuesta 31.5k tokens vs ~2k con neo_radar. Usar siempre AST_AUDIT/COMPILE_AUDIT/TECH_DEBT_MAP directamente.

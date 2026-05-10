@@ -1565,7 +1565,7 @@ func appendBriefingArchMem(ctx context.Context, t *RadarTool, args map[string]an
 	if embedErr != nil {
 		return
 	}
-	results, searchErr := t.graph.Search(ctx, queryVec, 3, t.cpu)
+	results, searchErr := t.graph.SearchAuto(ctx, queryVec, 3, t.cpu, t.cfg.RAG.VectorQuant)
 	if searchErr != nil || len(results) == 0 {
 		return
 	}

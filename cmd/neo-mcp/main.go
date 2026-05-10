@@ -247,10 +247,18 @@ func populateQuantCompanion(g *rag.Graph, mode string) {
 		g.PopulateBinary()
 		log.Printf("[BOOT] binary companion populated: %d nodes, +%d KB RAM overhead",
 			len(g.Nodes), len(g.BinaryVectors)*8/1024)
+	case "hybrid":
+		// Hybrid uses binary as candidate filter + float32 rerank — only the
+		// binary side needs population. Float32 stays authoritative by design.
+		// Empirical recall on the operator's own corpus: 1.000 across 50 queries
+		// at top-10 (recall_measure_live_test.go). [Épica 170.C-hybrid]
+		g.PopulateBinary()
+		log.Printf("[BOOT] hybrid companion populated: %d nodes, +%d KB RAM overhead (binary candidate filter + float32 rerank)",
+			len(g.Nodes), len(g.BinaryVectors)*8/1024)
 	case "", "float32":
 		// default — no companion storage
 	default:
-		log.Printf("[BOOT-WARN] unknown rag.vector_quant=%q — defaulting to float32 (valid: float32|int8|binary)", mode)
+		log.Printf("[BOOT-WARN] unknown rag.vector_quant=%q — defaulting to float32 (valid: float32|int8|binary|hybrid)", mode)
 	}
 }
 
@@ -263,7 +271,7 @@ func startGossipIfEnabled(ctx context.Context, cfg *config.NeoConfig, workspace 
 		if err != nil {
 			return nil
 		}
-		idxs, err := hnswGraph.Search(gCtx, queryVec, 3, cpuEngine)
+		idxs, err := hnswGraph.SearchAuto(gCtx, queryVec, 3, cpuEngine, cfg.RAG.VectorQuant)
 		if err != nil {
 			return nil
 		}
@@ -816,7 +824,7 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 			if vecErr != nil {
 				return nil
 			}
-			idxs, searchErr := hnswGraph.Search(recallCtx, queryVec, 5, cpuEngine)
+			idxs, searchErr := hnswGraph.SearchAuto(recallCtx, queryVec, 5, cpuEngine, cfg.RAG.VectorQuant)
 			if searchErr != nil {
 				return nil
 			}

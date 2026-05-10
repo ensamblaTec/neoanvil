@@ -205,6 +205,42 @@ func (graph *Graph) Neighbors(nodeID uint32) iter.Seq[uint32] {
 }
 
 // Search finds the topK nearest neighbors of queryVector in the graph.
+// SearchAuto dispatches to the appropriate backend based on which companion
+// arrays are populated, in priority order:
+//
+//   - hybrid (PopulateBinary done, quant=="hybrid"): binary candidate
+//     selection + float32 rerank → fastest at scale, no recall hit.
+//   - binary (PopulateBinary done, quant=="binary"):  binary popcount only,
+//     ~2.5× faster than float32. Recall depends on corpus structure.
+//   - int8 (PopulateInt8 done, quant=="int8"): int8 distance, ~2× slower
+//     than float32 in pure Go (no VPMADDUBSW).
+//   - default: float32 Search.
+//
+// Falls back to float32 Search if the requested companion is not populated
+// (e.g. graph just created, populate failed). Caller passes the operator's
+// configured quant mode (cfg.RAG.VectorQuant); empty string == float32.
+//
+// Empirical recall on production corpus (25k-vector neoanvil hnsw.bin,
+// 50 random queries top-10): all four backends scored 1.000 median.
+// See pkg/rag/recall_measure_live_test.go.
+func (graph *Graph) SearchAuto(ctx context.Context, queryVector []float32, topK int, cpu tensorx.ComputeDevice, quant string) ([]uint32, error) {
+	switch quant {
+	case "hybrid":
+		if graph.BinaryPopulated() && len(graph.Vectors) == len(graph.Nodes)*graph.VecDim {
+			return graph.SearchHybridBinary(ctx, queryVector, topK, cpu)
+		}
+	case "binary":
+		if graph.BinaryPopulated() {
+			return graph.SearchBinary(ctx, queryVector, topK)
+		}
+	case "int8":
+		if graph.Int8Populated() {
+			return graph.SearchInt8(ctx, queryVector, topK)
+		}
+	}
+	return graph.Search(ctx, queryVector, topK, cpu)
+}
+
 // If a QueryBatcher is active (367.C), the request is coalesced with other
 // concurrent queries and executed on the batcher's pinned goroutine.
 // If CPU affinity is enabled (367.A) and no batcher is active, the calling

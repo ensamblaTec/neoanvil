@@ -148,10 +148,18 @@ rag:
   gc_pressure_threshold: 5.0
   # [SRE-36] Tasa de miss del Arena Pool: EventArenaThresh si missRate > threshold (0.20 = 20%).
   arena_miss_rate_threshold: 0.20
-  # [PILAR-XXV/170.A] Quantización de vectores HNSW en RAM:
-  #   "float32" (default): full precision, 3 KB por vector de 768 dim.
-  #   "int8": 4× menos RAM con <1% recall loss, pero ~2.5× más lento en
-  #     Go puro sin VPMADDUBSW (RAM-only optimization).
+  # [Épica 170.C] Quantización HNSW en RAM. Las companion arrays son
+  # ADITIVAS al float32 (NO reemplazan) — el float32 es siempre source of truth.
+  # Recall medido en producción (25k vectores, 50 queries top-10): TODOS 1.000.
+  # Ver pkg/rag/recall_measure_live_test.go.
+  #
+  #   "float32" (default): baseline. 3 KB/vec, ~9 µs/query.
+  #   "binary":  +3% RAM (companion). ~4 µs/query (popcount). Max speed,
+  #              recall depende del corpus (medido 1.000 aquí; vary).
+  #   "hybrid":  +3% RAM (binary companion). ~5 µs/query (binary candidate
+  #              filter + float32 rerank). Best balance — speed con recall garantizado.
+  #   "int8":    +25% RAM (companion). ~10 µs/query. NO ahorra RAM (companion).
+  #              Reservado para futuro cuando VPMADDUBSW esté disponible.
   vector_quant: "float32"
   # [PILAR-XXV/175] Capacidad LRU del cache de queries semánticas.
   # 0 desactiva el cache. Default 256 cubre típicas sesiones SRE.
