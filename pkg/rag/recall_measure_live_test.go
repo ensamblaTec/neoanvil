@@ -26,7 +26,10 @@ import (
 // Skips the test if the file is absent (CI-friendly).
 func loadProductionGraph(t *testing.T) *Graph {
 	t.Helper()
-	path := "/home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/.neo/db/hnsw.bin"
+	path := os.Getenv("HNSW_BIN_PATH")
+	if path == "" {
+		path = "/home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/.neo/db/hnsw.bin"
+	}
 	if _, err := os.Stat(path); err != nil {
 		t.Skipf("no hnsw.bin at %s: %v", path, err)
 	}

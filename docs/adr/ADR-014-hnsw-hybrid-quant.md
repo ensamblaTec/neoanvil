@@ -120,16 +120,38 @@ Acceptance criteria for promoting `hybrid` to default in next release:
 - `recall_measure_live_test.go` on neoanvil hnsw.bin: int8/binary/hybrid all 1.000 recall
 - Bench numbers reproducible: `go test -tags hnsw_live -v ./pkg/rag/ -run TestRecall_Live -timeout 5m`
 
-## Follow-ups
+## Cross-workspace validation (2026-05-10 follow-up)
 
-1. Run recall measurement on strategosia + strategosia_frontend HNSW snapshots
-   (different language corpus) before flipping their `vector_quant` to hybrid.
-2. Real-world UX validation (1 week) of BLAST_RADIUS / SEMANTIC_CODE on this
-   workspace with hybrid enabled.
-3. If recall holds across all 3 workspaces → promote `hybrid` to default in
-   `defaultNeoConfig()`.
+Bench harness extended via `HNSW_BIN_PATH` env var so any workspace's
+hnsw.bin can be measured. Run for each of the 3 production workspaces:
+
+| Workspace | Lang | Nodes | Float32 RAM | hybrid recall | hybrid lat | binary RAM extra |
+|-----------|------|------:|------------:|:-------------:|----------:|-----------------:|
+| neoanvil | Go (mixed) | 25,342 | 74.2 MB | **1.000** | 5 µs | 2.3 MB (3.1%) |
+| strategosia | Go monolith | **44,469** | 130.3 MB | **1.000** | 5 µs | 4.1 MB (3.1%) |
+| **strategosia_frontend** | TypeScript | **124,642** | 365.2 MB | **1.000** | 5 µs | 11.4 MB (3.1%) |
+
+**Cross-corpus generalisation confirmed.** Latency stays at ~5µs across the
+3-5× scale jump (25k → 44k → 124k), exactly the O(log N) profile HNSW promises.
+RAM overhead holds at 3.1% across all sizes. Population time scales linearly
+with N (89ms / 134ms / 402ms for binary at 25k / 44k / 124k = ~3.2 µs/vector).
+
+`vector_quant: hybrid` activated in `neo.yaml` for both strategosia
+workspaces alongside neoanvil. Operator-facing impact: identical search
+quality at minimal RAM cost across the entire 195k-vector fleet.
+
+## Remaining Follow-ups
+
+1. ~~Run recall measurement on strategosia + strategosia_frontend~~ ✅ DONE
+2. Real-world UX validation (1 week) — observe BLAST_RADIUS / SEMANTIC_CODE
+   warm-cache UX in daemon mode across all 3 workspaces.
+3. If 1-week observation clean → promote `hybrid` to default in
+   `defaultNeoConfig()`. With recall 1.000 + minimal RAM cost confirmed
+   on 3 workspaces with very different language profiles, this is now
+   defensible.
 4. (Long-term) Replacement-mode refactor for actual RAM savings — gated on
-   real RAM pressure (current 372 MB total = 1.2% of 32 GB).
+   real RAM pressure (current 569 MB total float32 vectors across 3
+   workspaces = 1.8% of 32 GB box). Not justified yet.
 
 ## Referencias
 
