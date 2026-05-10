@@ -266,14 +266,15 @@ with `⚠️ CACHED(TTL:30m)` so the operator sees the freshness window.
 `bypass_cache:true` arg forces a fresh recompute. Concurrency-safe
 via sync.RWMutex; verified by `TestTechDebtMapCache_RaceFreeUnderConcurrentReadWrite`.
 
-## [2026-05-10 04:26] AST INFINITE_LOOP in bridge.go:328
+## ~~[2026-05-10 04:26] AST INFINITE_LOOP in bridge.go:328~~ — RESOLVED 2026-05-10 (false positive)
 
-**Prioridad:** alta
-
-File: pkg/cpg/bridge.go
-Line: 328
-Kind: INFINITE_LOOP
-Detail: for{} with no break/return/goto/panic — potential livelock
+`walkRouterChain` uses `for range 32 { switch ... { case ...: return } }`
+to walk a Go AST chain. The linter regex doesn't recognize `return`
+inside switch cases, so it flagged the loop. Fixed at refactor time
+by replacing `for {}` with bounded `for range 32` — the loop is now
+mechanically guaranteed to terminate. The recording tool re-fired
+because it scanned a stale snapshot before the refactor landed.
+Closing as zombie / false positive.
 
 ---
 
