@@ -148,10 +148,10 @@ rag:
   gc_pressure_threshold: 5.0
   # [SRE-36] Tasa de miss del Arena Pool: EventArenaThresh si missRate > threshold (0.20 = 20%).
   arena_miss_rate_threshold: 0.20
-  # [Épica 170.C] Quantización HNSW en RAM. Las companion arrays son
+  # [Épica 170.C / ADR-014] Quantización HNSW en RAM. Companion arrays son
   # ADITIVAS al float32 (NO reemplazan) — el float32 es siempre source of truth.
-  # Recall medido en producción (25k vectores, 50 queries top-10): TODOS 1.000.
-  # Ver pkg/rag/recall_measure_live_test.go.
+  # Recall 1.000 medido en 3 production workspaces (25k → 65k → 133k vectors,
+  # 50 queries top-10 c/u). Ver pkg/rag/recall_measure_live_test.go.
   #
   #   "float32" (default): baseline. 3 KB/vec, ~9 µs/query.
   #   "binary":  +3% RAM (companion). ~4 µs/query (popcount). Max speed,
@@ -160,6 +160,12 @@ rag:
   #              filter + float32 rerank). Best balance — speed con recall garantizado.
   #   "int8":    +25% RAM (companion). ~10 µs/query. NO ahorra RAM (companion).
   #              Reservado para futuro cuando VPMADDUBSW esté disponible.
+  #
+  # IMPORTANTE: Insert post-boot invalida companion → SearchAuto auto-repopulea
+  # de forma lazy en la primera búsqueda. Cost amortizado: ~3.2 µs/vector × N
+  # paid una vez por ingest cycle (e.g. 425 ms para 133k vectors), después
+  # warm. Verificar dispatch real via neo_cache stats include:[search_paths]
+  # → hybrid_count > 0. Boot log "populated" NO es suficiente prueba.
   vector_quant: "float32"
   # [PILAR-XXV/175] Capacidad LRU del cache de queries semánticas.
   # 0 desactiva el cache. Default 256 cubre típicas sesiones SRE.

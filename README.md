@@ -351,6 +351,76 @@ Recommended routing rule (codified in ADR-013, not enforced server-side):
 | Daemon-mode triage / yes-no questions  | Architectural decisions             |
 | Translation, summarisation             | Anything that becomes ground truth  |
 
+### HNSW hybrid quantization — `vector_quant: hybrid` (ADR-014)
+
+PILAR XXV/170 shipped int8/binary/hybrid HNSW search primitives years
+ago, with a `cfg.RAG.VectorQuant` config field and a boot hook that
+calls `populateQuantCompanion()`. During the 2026-05-10 audit we found
+the **search dispatch was never wired** — the four production
+`Graph.Search()` call sites always used the float32 path regardless of
+the quant config. The companion arrays were getting populated at boot
+but never queried.
+
+ADR-014 ships:
+
+1. New `Graph.SearchAuto(ctx, q, topK, cpu, quant)` dispatcher in
+   `pkg/rag/hsnw.go` that routes to `SearchHybridBinary` /
+   `SearchBinary` / `SearchInt8` based on quant + populated state.
+2. The 4 production call sites (radar_semantic, radar_briefing, main×2)
+   now use `SearchAuto` with `cfg.RAG.VectorQuant`.
+3. `populateQuantCompanion` extended with the `hybrid` case (populates
+   binary companion since hybrid uses binary candidate filter +
+   float32 rerank).
+4. Lazy re-populate (commit 338b945) — `ensureBinaryPopulated()` /
+   `ensureInt8Populated()` re-run the populate when Insert post-boot
+   invalidated the companion. Without this fix, the first Insert after
+   boot caused silent fallback to float32 — invisible regression.
+
+Empirical recall measurement on **3 production workspaces** (the bench
+harness lives in `pkg/rag/recall_measure_live_test.go` behind the
+`hnsw_live` build tag, so CI stays offline-clean):
+
+| Workspace | Lang | Nodes | hybrid recall | hybrid lat | RAM extra |
+|-----------|------|------:|:-------------:|----------:|----------:|
+| neoanvil | Go (mixed) | 25,406 | **1.000** | 5 µs | 2.3 MB (3.1%) |
+| strategosia | Go monolith | 64,939 | **1.000** | 5 µs | 6.1 MB (3.1%) |
+| **strategosia_frontend** | TypeScript | **132,866** | **1.000** | 5 µs | 12.5 MB (3.1%) |
+
+Latency stays at ~5 µs across the 5× scale jump (25k → 132k), exactly
+the O(log N) profile HNSW promises. RAM overhead holds at 3.1% across
+all sizes. **strategosia_frontend confirmed at 132k vectors — the
+"platillo fuerte" — with zero recall loss.**
+
+Reproduce any time:
+
+```bash
+HNSW_BIN_PATH=/path/to/.neo/db/hnsw.bin \
+  go test -tags hnsw_live -v ./pkg/rag/ -run TestRecall_Live -timeout 5m
+```
+
+#### Lazy re-populate cost model
+
+When workspace ingest grows the graph post-boot, the binary companion
+goes stale. `SearchAuto` detects this and re-populates inline on the
+next search — paid ONCE per ingest cycle, not per query.
+
+| Workspace | First query (cold, includes re-populate) | Warm queries |
+|-----------|----------------------------------------:|-------------:|
+| strategosia (65k) | 192 ms | 20-31 ms |
+| strategosia_frontend (133k) | **525 ms** | 125-129 ms |
+
+For 100 daemon-mode queries with 1 ingest in between:
+`1 × 425 ms + 99 × 5 µs ≈ 425.5 ms total` — still beats the steady-state
+even on the largest workspace.
+
+Validation rule (codified as Directive #55 [HNSW-QUANT-WIRING]): boot
+logs proving "hybrid companion populated" are NOT sufficient evidence
+the dispatch works. Always verify via the runtime counter:
+
+```bash
+neo_cache stats include:["search_paths"] → must show hybrid_count > 0
+```
+
 ### Investigated and rejected — CPG SSA walk parallelization
 
 A "parallelize the per-package CPG walk for 4-8× cold-boot" hypothesis

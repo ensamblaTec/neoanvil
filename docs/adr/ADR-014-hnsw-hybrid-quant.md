@@ -120,6 +120,79 @@ Acceptance criteria for promoting `hybrid` to default in next release:
 - `recall_measure_live_test.go` on neoanvil hnsw.bin: int8/binary/hybrid all 1.000 recall
 - Bench numbers reproducible: `go test -tags hnsw_live -v ./pkg/rag/ -run TestRecall_Live -timeout 5m`
 
+## Silent fallback bug + lazy re-populate fix (2026-05-10, commit 338b945)
+
+Initial implementation shipped a critical regression that the first
+"validation" missed because neoanvil was idle during the bench window.
+Cross-workspace validation against the live strategosia + strategosia_frontend
+children surfaced it: boot logs confirmed `hybrid companion populated:
+N nodes, +K KB`, yet `search_paths` counter stayed at `binary=0 hybrid=0`
+after real SEMANTIC_CODE queries. Every search silently fell back to
+float32. Quality and recall were unaffected (float32 still works), but the
+operator was paying the RAM cost of the binary companion without getting
+any of the speed benefit.
+
+**Root cause.** `PopulateBinary` builds `BinaryVectors` with `len = len(Nodes)
+* BinaryWords` at the moment it runs. `Graph.Insert` / `InsertBatch` grow
+`Vectors[]` and `Nodes[]` but never touch `BinaryVectors[]`. After even ONE
+Insert post-boot, `BinaryPopulated()` returns false because the count check
+fails. `SearchAuto`'s switch falls through to `Search(float32)` silently —
+no log line, no metric, no test signal. Strategosia / strategosia_frontend
+ingest continuously (file watcher + workspace_utils worker pool), so the
+binary companion was always stale by the time a search ran.
+
+**Empirical evidence (pre-fix):**
+
+| Workspace | Boot populated | Counter post-search | Verdict |
+|-----------|---------------|--------------------:|---------|
+| neoanvil | 25k nodes | hybrid=122 ✓ | works (workspace was idle) |
+| strategosia | 65k nodes | **hybrid=0** ❌ | silent fallback |
+| strategosia_frontend | 133k nodes | **hybrid=0** ❌ | silent fallback |
+
+**Fix.** Two new helpers in `pkg/rag/hsnw.go`:
+
+- `ensureBinaryPopulated()`: when `BinaryWords > 0` (operator opted in) AND
+  companion is stale → re-populate under `snapshotMu`. No-op when up-to-date.
+- `ensureInt8Populated()`: same shape for int8 companion.
+
+`SearchAuto` now calls these before the population check. Re-populate cost
+is amortised: paid once per ingest cycle, not per search. Concurrency-safe
+via the existing `snapshotMu` (reused from snapshot Save coordination).
+
+**Empirical evidence (post-fix):**
+
+| Workspace | Query 1 (cold, includes re-populate) | Queries 2-3 (warm) | Counter |
+|-----------|-------------------------------------:|-------------------:|---------|
+| neoanvil (25k) | n/a | warm | hybrid=1 ✓ |
+| strategosia (65k) | 192 ms | 20-31 ms | hybrid=3 ✓ |
+| strategosia_frontend (133k) | **525 ms** | 125-129 ms | hybrid=3 ✓ |
+
+The 525 ms first-query cost on strategosia_frontend matches the predicted
+cost model: `3.2 µs/vector × 132,866 vectors = 425 ms` plus search overhead.
+After that single payment, search latency drops to the ~125 ms regime
+which is dominated by Ollama embed (HNSW search itself is ~5 µs warm).
+
+**Why this fix is right (vs. alternatives):**
+
+- *Incremental update inside `Insert`* — cleanest but invasive; touches the
+  hot Insert path and requires careful concurrency. Adds complexity to the
+  ingestion code that's already complicated. Lazy re-populate is a drop-in.
+- *Background goroutine re-populate after each Insert* — adds complexity;
+  lazy on demand has the right cost model for our workload (sparse search,
+  sparse ingest).
+- *Re-populate after every InsertBatch synchronously* — adds 400ms to every
+  ingest batch, hurts ingestion throughput. Lazy amortises better.
+
+The fix only kicks in when the operator opted into a quant mode at boot
+(BinaryWords > 0 / Int8Scales != nil). Workspaces on `vector_quant: float32`
+never pay any cost — `ensureBinaryPopulated` returns early.
+
+**Lesson learned.** Boot logs prove population happened. They DO NOT prove
+search dispatch is using the populated companion. The dispatch counter
+(`search_paths` field in HUD_STATE / neo_cache stats) is the only honest
+runtime signal. Future quant work should always validate via the counter,
+not via boot logs alone.
+
 ## Cross-workspace validation (2026-05-10 follow-up)
 
 Bench harness extended via `HNSW_BIN_PATH` env var so any workspace's
