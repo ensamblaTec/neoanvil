@@ -219,3 +219,14 @@ Detail: func mapReduceRefactor: CC=19 (limit 15)
 
 ---
 
+## [2026-05-10 03:02] AST COMPLEXITY in main.go:256
+
+**Prioridad:** alta
+
+File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/plugin-github/main.go
+Line: 256
+Kind: COMPLEXITY
+Detail: func handleToolsCall: CC=22 (limit 15)
+
+---
+

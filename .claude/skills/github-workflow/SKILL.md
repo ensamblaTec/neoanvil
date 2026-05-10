@@ -9,13 +9,15 @@ description: Doctrina operativa del plugin GitHub (mcp__neoanvil__github_github)
 > Cargada cuando el usuario menciona GitHub, PRs, issues, o cuando Claude
 > detecta llamadas al plugin.
 
-Plugin: `cmd/plugin-github/` (1480 LOC, 13 actions + `__health__`).
+Plugin: `cmd/plugin-github/` (20 actions + `__health__`).
 Guía completa: [`docs/plugins/github-integration-guide.md`](../../../docs/plugins/github-integration-guide.md).
 Decisión arquitectónica: [`docs/adr/ADR-011-github-plugin-design.md`](../../../docs/adr/ADR-011-github-plugin-design.md).
 
 ---
 
 ## Regla #1 — Selecciona la action correcta
+
+### PR surface (7)
 
 | Quiero... | Action | Notas |
 |---|---|---|
@@ -24,15 +26,42 @@ Decisión arquitectónica: [`docs/adr/ADR-011-github-plugin-design.md`](../../..
 | Crear un PR | `create_pr` con `title, body, head, base` | `head` puede ser `branch` o `org:branch` para forks |
 | Mergear un PR | `merge_pr` con `merge_method` | `merge_method`: `merge` (default), `squash`, `rebase` |
 | Cerrar PR sin mergear | `close_pr` con `number` | NO usa fields, solo cierra |
+| Listar comentarios review-side | `pr_comments` con `number` | Comentarios del review pane — diferente a comentarios del issue |
 | Crear review | `create_review` con `event: APPROVE\|REQUEST_CHANGES\|COMMENT` | Necesita scope `workflow` en el PAT si el repo tiene required reviews |
-| Listar comentarios review-side | `pr_comments` con `number` | Diferente a issue comments — son los review comments |
+
+### Issue surface (4)
+
+| Quiero... | Action | Notas |
+|---|---|---|
 | Listar issues | `list_issues` con `state` | Mismo shape que list_prs |
+| Ver detalle de un issue | `get_issue` con `number` | Mirror simétrico de get_pr |
 | Crear issue | `create_issue` con `title, body, labels` | `labels` es array de strings (deben existir en el repo) |
 | PATCH parcial issue | `update_issue` con `fields: {...}` | `fields` es objeto: state, title, body, labels |
+| Comentar un issue (no review) | `add_issue_comment` con `body` | Diferente a `pr_comments` (read-only) y `create_review` (review pane) |
+
+### Repo state (4)
+
+| Quiero... | Action | Notas |
+|---|---|---|
 | Estado CI de un commit | `get_checks` con `ref` | `ref` puede ser SHA, branch, o tag |
 | Listar branches | `list_branches` | Sin paginación visible — devuelve todo |
 | Diff entre dos refs | `compare` con `base, head` | Devuelve commits + files changed |
+| Histórico de commits en branch | `list_commits` con `branch` | Cuando branch es vacío usa default branch |
+
+### Code surface — review remote sin clone (3)
+
+| Quiero... | Action | Notas |
+|---|---|---|
+| Navegar el árbol de archivos | `list_files` con `path, ref` | path vacío = repo root; ref vacío = default branch |
+| Leer contenido de un archivo | `get_file` con `path, ref` | ≤1MB inline (base64-decoded). >1MB error: usa download_url |
+| Search code cross-repo | `search_code` con `query` | GitHub q= grammar; rate-limit estricto: 30 req/min authenticated |
+
+### Helpers
+
+| Quiero... | Action | Notas |
+|---|---|---|
 | Extraer keys Jira de texto | `cross_ref` con `text, jira_pattern` | LOCAL — no llama API |
+| Liveness probe | `__health__` | <10ms, mandatory |
 
 ---
 

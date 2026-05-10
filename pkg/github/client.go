@@ -14,6 +14,7 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,17 @@ import (
 
 	"github.com/ensamblatec/neoanvil/pkg/sre"
 )
+
+// base64Decode tries the standard alphabet first, falling back to the
+// URL-safe one. Both ignore bytes outside the alphabet via *_DECODE,
+// matching GitHub's content encoding loosely.
+func base64Decode(s string) ([]byte, error) {
+	out, err := base64.StdEncoding.DecodeString(s)
+	if err == nil {
+		return out, nil
+	}
+	return base64.URLEncoding.DecodeString(s)
+}
 
 // Client is the per-PAT GitHub REST v3 client. Construct via
 // NewClient. Goroutine-safe; reuse across requests.
@@ -480,4 +492,261 @@ func (c *Client) CompareCommits(ctx context.Context, owner, repo, base, head str
 		return nil, err
 	}
 	return out, nil
+}
+
+// ── Read endpoints (Area 2.2.E — close doc-promised gaps) ────────────
+
+// GetPR returns the full detail of one PR — title, body, head, base,
+// mergeable state, requested reviewers. Use this when an operator
+// needs a single PR's snapshot without parsing list_prs.
+func (c *Client) GetPR(ctx context.Context, owner, repo string, number int) (map[string]any, error) {
+	if owner == "" || repo == "" {
+		return nil, errors.New("owner and repo are required")
+	}
+	if number <= 0 {
+		return nil, errors.New("number must be > 0")
+	}
+	var out map[string]any
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetIssue returns the full detail of one issue. Mirror of GetPR for
+// the issue surface.
+func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	if owner == "" || repo == "" {
+		return nil, errors.New("owner and repo are required")
+	}
+	if number <= 0 {
+		return nil, errors.New("number must be > 0")
+	}
+	var out Issue
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	if err := c.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// AddIssueComment posts a comment on an issue (or PR — same endpoint).
+// Returns the created comment's id + body for audit-log purposes.
+// Different from CreateReview which is the PR-review surface.
+func (c *Client) AddIssueComment(ctx context.Context, owner, repo string, number int, body string) (*PRComment, error) {
+	if owner == "" || repo == "" {
+		return nil, errors.New("owner and repo are required")
+	}
+	if number <= 0 {
+		return nil, errors.New("number must be > 0")
+	}
+	if body == "" {
+		return nil, errors.New("comment body is required")
+	}
+	payload := map[string]any{"body": body}
+	var out PRComment
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	if err := c.Do(ctx, http.MethodPost, path, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// FileEntry describes one item from a directory listing — a file or
+// a sub-directory. The DownloadURL is set only for files.
+type FileEntry struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Type        string `json:"type"` // "file" | "dir" | "symlink" | "submodule"
+	Size        int64  `json:"size"`
+	SHA         string `json:"sha"`
+	HTMLURL     string `json:"html_url"`
+	DownloadURL string `json:"download_url"`
+}
+
+// ListFiles returns the contents of a path inside owner/repo at ref.
+// When path is "" it lists the repo root. ref can be a branch name,
+// tag, or commit SHA — empty defaults to the repo's default branch.
+//
+// Use case: code review without cloning. Operator can navigate the
+// remote repo tree and pick files to read with GetFile.
+func (c *Client) ListFiles(ctx context.Context, owner, repo, path, ref string) ([]FileEntry, error) {
+	if owner == "" || repo == "" {
+		return nil, errors.New("owner and repo are required")
+	}
+	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s",
+		url.PathEscape(owner), url.PathEscape(repo), encodeContentPath(path))
+	if ref != "" {
+		apiPath += "?ref=" + url.QueryEscape(ref)
+	}
+	// /contents returns either a single object (for a file) or an array
+	// (for a dir). We care about the dir case here; route file requests
+	// through GetFile.
+	var raw json.RawMessage
+	if err := c.Do(ctx, http.MethodGet, apiPath, nil, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) > 0 && raw[0] == '[' {
+		var entries []FileEntry
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, fmt.Errorf("decode file list: %w", err)
+		}
+		return entries, nil
+	}
+	// Single file response — wrap as one-element list so the caller
+	// gets a uniform shape.
+	var single FileEntry
+	if err := json.Unmarshal(raw, &single); err != nil {
+		return nil, fmt.Errorf("decode single entry: %w", err)
+	}
+	return []FileEntry{single}, nil
+}
+
+// GetFile returns the decoded content of one file at path@ref. Bounded
+// to 1MB by GitHub server-side; LFS-tracked files return their pointer
+// data, not the resolved content.
+//
+// This is the keystone of "review code without cloning" — pair with
+// ListFiles to walk the tree and GetFile to read.
+func (c *Client) GetFile(ctx context.Context, owner, repo, path, ref string) (string, error) {
+	if owner == "" || repo == "" || path == "" {
+		return "", errors.New("owner, repo, path are required")
+	}
+	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s",
+		url.PathEscape(owner), url.PathEscape(repo), encodeContentPath(path))
+	if ref != "" {
+		apiPath += "?ref=" + url.QueryEscape(ref)
+	}
+	var entry struct {
+		Content  string `json:"content"`  // base64-encoded
+		Encoding string `json:"encoding"` // "base64" | "none" (large files)
+		Type     string `json:"type"`
+		Size     int64  `json:"size"`
+	}
+	if err := c.Do(ctx, http.MethodGet, apiPath, nil, &entry); err != nil {
+		return "", err
+	}
+	if entry.Type != "file" {
+		return "", fmt.Errorf("path %q is a %s, not a file", path, entry.Type)
+	}
+	if entry.Encoding != "base64" {
+		// "none" indicates the file exceeds the 1MB inline limit. Operator
+		// should switch to git clone or use GitHub's download_url.
+		return "", fmt.Errorf("file %q too large for inline (encoding=%q size=%d) — use download_url",
+			path, entry.Encoding, entry.Size)
+	}
+	decoded, err := decodeBase64Content(entry.Content)
+	if err != nil {
+		return "", fmt.Errorf("decode base64 content: %w", err)
+	}
+	return decoded, nil
+}
+
+// SearchResult is one hit returned by SearchCode.
+type SearchResult struct {
+	Path       string `json:"path"`
+	Name       string `json:"name"`
+	HTMLURL    string `json:"html_url"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	Score float64 `json:"score"`
+}
+
+// SearchCode runs GitHub's code search. Query syntax follows GitHub's
+// q= grammar (e.g. `auth.Load language:go repo:foo/bar`). Returns up
+// to listPagesCap×100 hits, ranked by relevance.
+//
+// Note: GitHub's code search authenticated rate limit is 30 req/min
+// (vs 5K/h for general REST) — caller should batch judiciously.
+func (c *Client) SearchCode(ctx context.Context, query string) ([]SearchResult, error) {
+	if query == "" {
+		return nil, errors.New("query is required")
+	}
+	var out []SearchResult
+	for page := 1; page <= listPagesCap; page++ {
+		var raw struct {
+			TotalCount int            `json:"total_count"`
+			Items      []SearchResult `json:"items"`
+		}
+		path := fmt.Sprintf("/search/code?q=%s&per_page=100&page=%d",
+			url.QueryEscape(query), page)
+		if err := c.Do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+			return nil, err
+		}
+		out = append(out, raw.Items...)
+		if len(raw.Items) < 100 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// CommitSummary is the subset of /commits we surface for ListCommits.
+type CommitSummary struct {
+	SHA     string `json:"sha"`
+	HTMLURL string `json:"html_url"`
+	Commit  struct {
+		Message string `json:"message"`
+		Author  struct {
+			Name  string `json:"name"`
+			Email string `json:"email"`
+			Date  string `json:"date"`
+		} `json:"author"`
+	} `json:"commit"`
+}
+
+// ListCommits returns commits on a branch (or default branch when
+// branch is empty). Paginates per the standard cap.
+func (c *Client) ListCommits(ctx context.Context, owner, repo, branch string) ([]CommitSummary, error) {
+	if owner == "" || repo == "" {
+		return nil, errors.New("owner and repo are required")
+	}
+	var out []CommitSummary
+	for page := 1; page <= listPagesCap; page++ {
+		var batch []CommitSummary
+		path := fmt.Sprintf("/repos/%s/%s/commits?per_page=100&page=%d",
+			url.PathEscape(owner), url.PathEscape(repo), page)
+		if branch != "" {
+			path += "&sha=" + url.QueryEscape(branch)
+		}
+		if err := c.Do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// encodeContentPath escapes each path segment but preserves the
+// /-delimited structure GitHub's /contents/ endpoint requires.
+func encodeContentPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	parts := strings.Split(p, "/")
+	for i, s := range parts {
+		parts[i] = url.PathEscape(s)
+	}
+	return strings.Join(parts, "/")
+}
+
+// decodeBase64Content unwraps the base64-with-newlines encoding GitHub
+// uses for /contents file responses. Tolerates standard + URL-safe
+// alphabets to be defensive against API-side variation.
+func decodeBase64Content(s string) (string, error) {
+	cleaned := strings.ReplaceAll(s, "\n", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+	decoded, err := base64Decode(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
 }

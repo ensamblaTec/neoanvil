@@ -27,7 +27,9 @@ curl -s http://127.0.0.1:9000/api/v1/plugins | jq '.plugins[] | select(.name=="g
 
 ---
 
-## 13 actions disponibles
+## 20 actions disponibles
+
+### PR surface (7)
 
 | Action | Propósito | Args principales |
 |---|---|---|
@@ -38,16 +40,44 @@ curl -s http://127.0.0.1:9000/api/v1/plugins | jq '.plugins[] | select(.name=="g
 | `close_pr` | Cierra PR sin merge | `owner`, `repo`, `number` |
 | `pr_comments` | Lista comentarios review-side | `owner`, `repo`, `number` |
 | `create_review` | Crea review (APPROVE / REQUEST_CHANGES / COMMENT) | `owner`, `repo`, `number`, `event`, `body` |
+
+### Issue surface (4)
+
+| Action | Propósito | Args principales |
+|---|---|---|
 | `list_issues` | Lista issues | `owner`, `repo`, `state` |
+| `get_issue` | Snapshot de un issue individual | `owner`, `repo`, `number` |
 | `create_issue` | Crea issue | `owner`, `repo`, `title`, `body`, `labels` |
 | `update_issue` | PATCH parcial sobre issue | `owner`, `repo`, `number`, `fields` (state/title/body/labels) |
+| `add_issue_comment` | Comentar un issue (no review-side) | `owner`, `repo`, `number`, `body` |
+
+### Repo state (5)
+
+| Action | Propósito | Args principales |
+|---|---|---|
 | `get_checks` | Estado CI de un commit/branch | `owner`, `repo`, `ref` |
 | `list_branches` | Lista branches del repo | `owner`, `repo` |
 | `compare` | Diff entre dos refs | `owner`, `repo`, `base`, `head` |
-| `cross_ref` | Extrae claves Jira de texto libre | `text`, `jira_pattern` (default `[A-Z][A-Z0-9]{1,9}-\d+`) |
-| `__health__` | Liveness probe local (no API) | — |
+| `list_commits` | Histórico de commits en branch | `owner`, `repo`, `branch` (default repo's default branch) |
+
+### Code surface — review remote without clone (3)
+
+| Action | Propósito | Args principales |
+|---|---|---|
+| `list_files` | Lista contenido de un dir en owner/repo @ ref | `owner`, `repo`, `path` (default root), `ref` |
+| `get_file` | Lee contenido de un archivo (≤1MB inline) | `owner`, `repo`, `path`, `ref` |
+| `search_code` | GitHub code search (q= grammar) | `query` (e.g. `auth.Load language:go repo:foo/bar`) |
+
+### Helpers (2)
+
+| Action | Propósito | Args principales |
+|---|---|---|
+| `cross_ref` | Extrae claves Jira de texto libre (PURE — no API call) | `text`, `jira_pattern` (default `[A-Z][A-Z0-9]{1,9}-\d+`) |
+| `__health__` | Liveness probe local (mandatory) | — |
 
 > **Cross-ref con plugin-jira:** `cross_ref` parsea el body de un PR (o cualquier texto) buscando `MCPI-N`, `ABC-123`, etc. Útil para auto-link en CI: el hook de pre-merge corre `cross_ref` sobre el PR body, luego el plugin-jira hace `link_issue` con los keys encontrados.
+
+> **Code review remote sin clonar:** combina `list_files` (navega el árbol) + `get_file` (lee contenido) + `search_code` (búsqueda cross-repo). El uso típico para PR review sin tener el repo localmente.
 
 ---
 

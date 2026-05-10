@@ -9,7 +9,7 @@
 
 ## Contexto
 
-Area 2 entrega `cmd/plugin-github` (1480 LOC) con 13 actions REST v3. Las decisiones arquitectónicas heredadas (subprocess MCP, multi-tenant credentials.json) están en ADR-005/006. Este documento captura las decisiones **específicas de GitHub** que NO se derivan de los anteriores: elección de auth flow, audit-log shape, cross-ref pattern con Jira.
+Area 2 entrega `cmd/plugin-github` con **20 actions** REST v3 (Area 2.2.A-E + 2.2.E delivered 2026-05-10). Las decisiones arquitectónicas heredadas (subprocess MCP, multi-tenant credentials.json) están en ADR-005/006. Este documento captura las decisiones **específicas de GitHub** que NO se derivan de los anteriores: elección de auth flow, audit-log shape, cross-ref pattern con Jira, code-review-without-clone surface.
 
 ## Decisiones específicas de GitHub
 
@@ -76,7 +76,7 @@ Action `cross_ref` es **PURA**: recibe texto + regex, retorna keys. NO llama Jir
 
 ### 4. Sin GraphQL
 
-REST v3 covers 100% de los 13 actions. GraphQL vale la pena cuando necesitas agregaciones imposibles en REST (PR + reviews + checks en una llamada). Defer hasta que el operator pida explícitamente.
+REST v3 cubre 100% de las 20 actions actuales. GraphQL vale la pena cuando necesitas agregaciones imposibles en REST (PR + reviews + checks + workflow runs en una llamada). Defer hasta que el operator pida explícitamente.
 
 Workaround documentado: `Bash + gh api graphql` autorizado por operator vía `neo_command(action:"run")`.
 
@@ -96,7 +96,8 @@ Para CI ↔ NeoAnvil, polea `get_checks(ref)`. Polling cost = bajo (PAT 5K/h alc
 
 ## Implementación
 
-- `cmd/plugin-github/main.go` — dispatch (13 actions + __health__)
+- `cmd/plugin-github/main.go` — map-dispatch (20 actions + `__health__`)
+- `pkg/github/client.go` — REST client + 20 endpoint wrappers + base64 file decoder
 - `cmd/plugin-github/config.go` — credentials.json reader, audit log writer (hash-chain)
 - `pkg/github/client.go` — REST v3 HTTP client (rate-limit, retry, audit hook)
 - `cmd/plugin-github/integ_test.go` — 333 LOC, subprocess JSON-RPC vs testmock harness

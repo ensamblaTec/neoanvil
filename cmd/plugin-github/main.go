@@ -206,10 +206,12 @@ func handleInitialize(id any) map[string]any {
 
 func handleToolsList(id any) map[string]any {
 	allActions := []string{
-		"list_prs", "create_pr", "merge_pr", "close_pr",
+		"list_prs", "get_pr", "create_pr", "merge_pr", "close_pr",
 		"pr_comments", "create_review",
-		"list_issues", "create_issue", "update_issue",
-		"get_checks", "list_branches", "compare",
+		"list_issues", "get_issue", "create_issue", "update_issue",
+		"add_issue_comment",
+		"get_checks", "list_branches", "compare", "list_commits",
+		"list_files", "get_file", "search_code",
 		"cross_ref", "__health__",
 	}
 	return ok(id, map[string]any{
@@ -230,15 +232,18 @@ func handleToolsList(id any) map[string]any {
 						"state":         map[string]any{"type": "string", "description": "[list_prs/issues] open|closed|all (default open)."},
 						"number":        map[string]any{"type": "integer", "description": "[merge_pr/close_pr/pr_comments/create_review/update_issue] PR or issue number."},
 						"title":         map[string]any{"type": "string", "description": "[create_pr/create_issue] Title."},
-						"body":          map[string]any{"type": "string", "description": "[create_pr/create_issue/create_review] Body / description."},
 						"head":          map[string]any{"type": "string", "description": "[create_pr] Source branch."},
 						"base":          map[string]any{"type": "string", "description": "[create_pr/compare] Target branch."},
 						"merge_method":  map[string]any{"type": "string", "description": "[merge_pr] merge|squash|rebase (default merge)."},
 						"event":         map[string]any{"type": "string", "description": "[create_review] APPROVE|REQUEST_CHANGES|COMMENT."},
 						"labels":        map[string]any{"type": "array", "description": "[create_issue] Optional label names."},
 						"fields":        map[string]any{"type": "object", "description": "[update_issue] Patch fields (state/title/body/labels)."},
-						"ref":           map[string]any{"type": "string", "description": "[get_checks] Commit SHA or branch name."},
-						"text":          map[string]any{"type": "string", "description": "[cross_ref] Free text to scan for Jira ticket keys."},
+						"ref":           map[string]any{"type": "string", "description": "[get_checks/list_files/get_file] Commit SHA, branch, or tag (default: repo's default branch)."},
+						"path":          map[string]any{"type": "string", "description": "[list_files/get_file] Repo-relative path inside owner/repo."},
+						"branch":        map[string]any{"type": "string", "description": "[list_commits] Branch name (default: repo's default branch)."},
+						"query":         map[string]any{"type": "string", "description": "[search_code] GitHub q= grammar, e.g. 'foo language:go repo:bar/baz'."},
+						"text":          map[string]any{"type": "string", "description": "[cross_ref/add_issue_comment] Body text — free-form for cross_ref scan, comment body for add_issue_comment."},
+						"body":          map[string]any{"type": "string", "description": "[create_pr/create_issue/create_review/add_issue_comment] Body / description."},
 						"jira_pattern":  map[string]any{"type": "string", "description": "[cross_ref] Regex (default `[A-Z][A-Z0-9]{1,9}-\\d+`)."},
 					},
 					"required": []string{"action"},
@@ -248,40 +253,44 @@ func handleToolsList(id any) map[string]any {
 	})
 }
 
+// actionHandler is the signature every callXxx method satisfies.
+// Used by actionDispatch to convert the cascading switch into a
+// single map lookup, keeping handleToolsCall at CC ≤ 5.
+type actionHandler func(s *state, id any, args map[string]any) map[string]any
+
+// actionDispatch maps every supported MCP action to its handler.
+// Keep in lockstep with handleToolsList::allActions. [CC refactor]
+var actionDispatch = map[string]actionHandler{
+	"list_prs":         func(s *state, id any, a map[string]any) map[string]any { return s.callListPRs(id, a) },
+	"create_pr":        func(s *state, id any, a map[string]any) map[string]any { return s.callCreatePR(id, a) },
+	"merge_pr":         func(s *state, id any, a map[string]any) map[string]any { return s.callMergePR(id, a) },
+	"close_pr":         func(s *state, id any, a map[string]any) map[string]any { return s.callClosePR(id, a) },
+	"pr_comments":      func(s *state, id any, a map[string]any) map[string]any { return s.callPRComments(id, a) },
+	"create_review":    func(s *state, id any, a map[string]any) map[string]any { return s.callCreateReview(id, a) },
+	"list_issues":      func(s *state, id any, a map[string]any) map[string]any { return s.callListIssues(id, a) },
+	"create_issue":     func(s *state, id any, a map[string]any) map[string]any { return s.callCreateIssue(id, a) },
+	"update_issue":     func(s *state, id any, a map[string]any) map[string]any { return s.callUpdateIssue(id, a) },
+	"get_checks":       func(s *state, id any, a map[string]any) map[string]any { return s.callGetChecks(id, a) },
+	"list_branches":    func(s *state, id any, a map[string]any) map[string]any { return s.callListBranches(id, a) },
+	"compare":          func(s *state, id any, a map[string]any) map[string]any { return s.callCompare(id, a) },
+	"cross_ref":        func(s *state, id any, a map[string]any) map[string]any { return s.callCrossRef(id, a) },
+	"get_pr":           func(s *state, id any, a map[string]any) map[string]any { return s.callGetPR(id, a) },
+	"get_issue":        func(s *state, id any, a map[string]any) map[string]any { return s.callGetIssue(id, a) },
+	"add_issue_comment": func(s *state, id any, a map[string]any) map[string]any { return s.callAddIssueComment(id, a) },
+	"list_files":       func(s *state, id any, a map[string]any) map[string]any { return s.callListFiles(id, a) },
+	"get_file":         func(s *state, id any, a map[string]any) map[string]any { return s.callGetFile(id, a) },
+	"search_code":      func(s *state, id any, a map[string]any) map[string]any { return s.callSearchCode(id, a) },
+	"list_commits":     func(s *state, id any, a map[string]any) map[string]any { return s.callListCommits(id, a) },
+	"__health__":       func(s *state, id any, _ map[string]any) map[string]any { return s.callHealth(id) },
+}
+
 func (s *state) handleToolsCall(id any, req map[string]any) map[string]any {
 	atomic.StoreInt64(&s.lastDispatchUnix, time.Now().Unix())
 	params, _ := req["params"].(map[string]any)
 	args, _ := params["arguments"].(map[string]any)
 	action, _ := args["action"].(string)
-	switch action {
-	case "list_prs":
-		return s.callListPRs(id, args)
-	case "create_pr":
-		return s.callCreatePR(id, args)
-	case "merge_pr":
-		return s.callMergePR(id, args)
-	case "close_pr":
-		return s.callClosePR(id, args)
-	case "pr_comments":
-		return s.callPRComments(id, args)
-	case "create_review":
-		return s.callCreateReview(id, args)
-	case "list_issues":
-		return s.callListIssues(id, args)
-	case "create_issue":
-		return s.callCreateIssue(id, args)
-	case "update_issue":
-		return s.callUpdateIssue(id, args)
-	case "get_checks":
-		return s.callGetChecks(id, args)
-	case "list_branches":
-		return s.callListBranches(id, args)
-	case "compare":
-		return s.callCompare(id, args)
-	case "cross_ref":
-		return s.callCrossRef(id, args)
-	case "__health__":
-		return s.callHealth(id)
+	if h, ok := actionDispatch[action]; ok {
+		return h(s, id, args)
 	}
 	atomic.AddInt64(&s.errorCount, 1)
 	return rpcErr(id, -32602, "unknown action: "+action)
@@ -639,6 +648,181 @@ func (s *state) callListIssues(id any, args map[string]any) map[string]any {
 	return ok(id, textContent(formatIssues(owner, repo, state, issues)))
 }
 
+// ── Read-side handlers (Area 2.2.E — close doc-promised gaps) ──────
+
+func (s *state) callGetPR(id any, args map[string]any) map[string]any {
+	owner := strings.TrimSpace(strFromArgs(args, "owner"))
+	repo := strings.TrimSpace(strFromArgs(args, "repo"))
+	number := intFromArgs(args, "number")
+	if owner == "" || repo == "" || number <= 0 {
+		return rpcErr(id, -32602, "owner, repo and number (>0) are required")
+	}
+	client, proj, err := s.resolveClient(args)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pr, err := client.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "get_pr", "error", map[string]any{"owner": owner, "repo": repo, "number": number, "err": err.Error()})
+		return rpcErr(id, -32603, fmt.Sprintf("get_pr %s/%s#%d: %v", owner, repo, number, err))
+	}
+	s.auditCall(proj, "get_pr", "ok", map[string]any{"owner": owner, "repo": repo, "number": number})
+	return ok(id, textContent(formatGetPR(owner, repo, number, pr)))
+}
+
+func (s *state) callGetIssue(id any, args map[string]any) map[string]any {
+	owner := strings.TrimSpace(strFromArgs(args, "owner"))
+	repo := strings.TrimSpace(strFromArgs(args, "repo"))
+	number := intFromArgs(args, "number")
+	if owner == "" || repo == "" || number <= 0 {
+		return rpcErr(id, -32602, "owner, repo and number (>0) are required")
+	}
+	client, proj, err := s.resolveClient(args)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	iss, err := client.GetIssue(ctx, owner, repo, number)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "get_issue", "error", map[string]any{"owner": owner, "repo": repo, "number": number, "err": err.Error()})
+		return rpcErr(id, -32603, fmt.Sprintf("get_issue %s/%s#%d: %v", owner, repo, number, err))
+	}
+	s.auditCall(proj, "get_issue", "ok", map[string]any{"owner": owner, "repo": repo, "number": number})
+	return ok(id, textContent(formatIssueDetail(owner, repo, iss)))
+}
+
+func (s *state) callAddIssueComment(id any, args map[string]any) map[string]any {
+	owner := strings.TrimSpace(strFromArgs(args, "owner"))
+	repo := strings.TrimSpace(strFromArgs(args, "repo"))
+	number := intFromArgs(args, "number")
+	body := strFromArgs(args, "body")
+	if owner == "" || repo == "" || number <= 0 || body == "" {
+		return rpcErr(id, -32602, "owner, repo, number (>0), body are required")
+	}
+	client, proj, err := s.resolveClient(args)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	comment, err := client.AddIssueComment(ctx, owner, repo, number, body)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "add_issue_comment", "error", map[string]any{"owner": owner, "repo": repo, "number": number, "err": err.Error()})
+		return rpcErr(id, -32603, fmt.Sprintf("add_issue_comment %s/%s#%d: %v", owner, repo, number, err))
+	}
+	s.auditCall(proj, "add_issue_comment", "ok", map[string]any{"owner": owner, "repo": repo, "number": number, "comment_id": comment.ID})
+	return ok(id, textContent(fmt.Sprintf("✅ comment posted on %s/%s#%d (id=%d)\n%s", owner, repo, number, comment.ID, comment.HTMLURL)))
+}
+
+func (s *state) callListFiles(id any, args map[string]any) map[string]any {
+	owner := strings.TrimSpace(strFromArgs(args, "owner"))
+	repo := strings.TrimSpace(strFromArgs(args, "repo"))
+	path := strFromArgs(args, "path")
+	ref := strFromArgs(args, "ref")
+	if owner == "" || repo == "" {
+		return rpcErr(id, -32602, "owner and repo are required (path defaults to repo root)")
+	}
+	client, proj, err := s.resolveClient(args)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	entries, err := client.ListFiles(ctx, owner, repo, path, ref)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "list_files", "error", map[string]any{"owner": owner, "repo": repo, "path": path, "err": err.Error()})
+		return rpcErr(id, -32603, fmt.Sprintf("list_files %s/%s/%s: %v", owner, repo, path, err))
+	}
+	s.auditCall(proj, "list_files", "ok", map[string]any{"owner": owner, "repo": repo, "path": path, "count": len(entries)})
+	return ok(id, textContent(formatFileList(owner, repo, path, ref, entries)))
+}
+
+func (s *state) callGetFile(id any, args map[string]any) map[string]any {
+	owner := strings.TrimSpace(strFromArgs(args, "owner"))
+	repo := strings.TrimSpace(strFromArgs(args, "repo"))
+	path := strFromArgs(args, "path")
+	ref := strFromArgs(args, "ref")
+	if owner == "" || repo == "" || path == "" {
+		return rpcErr(id, -32602, "owner, repo and path are required")
+	}
+	client, proj, err := s.resolveClient(args)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	content, err := client.GetFile(ctx, owner, repo, path, ref)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "get_file", "error", map[string]any{"owner": owner, "repo": repo, "path": path, "err": err.Error()})
+		return rpcErr(id, -32603, fmt.Sprintf("get_file %s/%s/%s: %v", owner, repo, path, err))
+	}
+	s.auditCall(proj, "get_file", "ok", map[string]any{"owner": owner, "repo": repo, "path": path, "size": len(content)})
+	header := fmt.Sprintf("## %s/%s/%s", owner, repo, path)
+	if ref != "" {
+		header += " @ " + ref
+	}
+	return ok(id, textContent(header+"\n\n```\n"+content+"\n```\n"))
+}
+
+func (s *state) callSearchCode(id any, args map[string]any) map[string]any {
+	query := strings.TrimSpace(strFromArgs(args, "query"))
+	if query == "" {
+		return rpcErr(id, -32602, "query is required (GitHub q= grammar)")
+	}
+	client, proj, err := s.resolveClient(args)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	hits, err := client.SearchCode(ctx, query)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "search_code", "error", map[string]any{"query": query, "err": err.Error()})
+		return rpcErr(id, -32603, fmt.Sprintf("search_code %q: %v", query, err))
+	}
+	s.auditCall(proj, "search_code", "ok", map[string]any{"query": query, "count": len(hits)})
+	return ok(id, textContent(formatSearchResults(query, hits)))
+}
+
+func (s *state) callListCommits(id any, args map[string]any) map[string]any {
+	owner := strings.TrimSpace(strFromArgs(args, "owner"))
+	repo := strings.TrimSpace(strFromArgs(args, "repo"))
+	branch := strFromArgs(args, "branch")
+	if owner == "" || repo == "" {
+		return rpcErr(id, -32602, "owner and repo are required")
+	}
+	client, proj, err := s.resolveClient(args)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		return rpcErr(id, -32603, fmt.Sprintf("resolve client: %v", err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	commits, err := client.ListCommits(ctx, owner, repo, branch)
+	if err != nil {
+		atomic.AddInt64(&s.errorCount, 1)
+		s.auditCall(proj, "list_commits", "error", map[string]any{"owner": owner, "repo": repo, "branch": branch, "err": err.Error()})
+		return rpcErr(id, -32603, fmt.Sprintf("list_commits %s/%s@%s: %v", owner, repo, branch, err))
+	}
+	s.auditCall(proj, "list_commits", "ok", map[string]any{"owner": owner, "repo": repo, "branch": branch, "count": len(commits)})
+	return ok(id, textContent(formatCommits(owner, repo, branch, commits)))
+}
+
 // callHealth implements the PLUGIN-HEALTH-CONTRACT __health__ action.
 // MUST be local-only — never call upstream GitHub API from here.
 // Target latency <10ms. Counters are atomic so the read path is
@@ -716,3 +900,88 @@ func textContent(text string) map[string]any {
 		},
 	}
 }
+
+// ── Formatters for read-side handlers ──────────────────────────────
+
+func formatGetPR(owner, repo string, number int, pr map[string]any) string {
+	title, _ := pr["title"].(string)
+	state, _ := pr["state"].(string)
+	body, _ := pr["body"].(string)
+	htmlURL, _ := pr["html_url"].(string)
+	mergeable := "unknown"
+	if v, ok := pr["mergeable"].(bool); ok {
+		if v {
+			mergeable = "yes"
+		} else {
+			mergeable = "no"
+		}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "## %s/%s#%d — [%s] %s\n", owner, repo, number, state, title)
+	fmt.Fprintf(&sb, "%s\n\nmergeable: %s\n\n", htmlURL, mergeable)
+	if body != "" {
+		sb.WriteString("---\n")
+		sb.WriteString(body)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func formatIssueDetail(owner, repo string, iss *github.Issue) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "## %s/%s#%d — [%s] %s\n", owner, repo, iss.Number, iss.State, iss.Title)
+	fmt.Fprintf(&sb, "%s\nby %s\n\n", iss.HTMLURL, iss.User.Login)
+	if iss.Body != "" {
+		sb.WriteString("---\n")
+		sb.WriteString(iss.Body)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func formatFileList(owner, repo, path, ref string, entries []github.FileEntry) string {
+	var sb strings.Builder
+	header := fmt.Sprintf("%s/%s/%s", owner, repo, path)
+	if ref != "" {
+		header += " @ " + ref
+	}
+	fmt.Fprintf(&sb, "## %s — %d entries\n\n", header, len(entries))
+	for _, e := range entries {
+		marker := "📄"
+		if e.Type == "dir" {
+			marker = "📁"
+		}
+		fmt.Fprintf(&sb, "- %s %s (%s, %d bytes)\n", marker, e.Path, e.Type, e.Size)
+	}
+	return sb.String()
+}
+
+func formatSearchResults(query string, hits []github.SearchResult) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "## search_code: %q — %d hit(s)\n\n", query, len(hits))
+	for _, h := range hits {
+		fmt.Fprintf(&sb, "- %s/%s — score=%.2f\n  %s\n",
+			h.Repository.FullName, h.Path, h.Score, h.HTMLURL)
+	}
+	return sb.String()
+}
+
+func formatCommits(owner, repo, branch string, commits []github.CommitSummary) string {
+	var sb strings.Builder
+	branchLabel := branch
+	if branchLabel == "" {
+		branchLabel = "(default)"
+	}
+	fmt.Fprintf(&sb, "## %s/%s @ %s — %d commit(s)\n\n", owner, repo, branchLabel, len(commits))
+	for _, c := range commits {
+		short := c.SHA
+		if len(short) > 7 {
+			short = short[:7]
+		}
+		firstLine := strings.SplitN(c.Commit.Message, "\n", 2)[0]
+		fmt.Fprintf(&sb, "- %s · %s · %s\n  %s\n",
+			short, c.Commit.Author.Name, firstLine, c.HTMLURL)
+	}
+	return sb.String()
+}
+

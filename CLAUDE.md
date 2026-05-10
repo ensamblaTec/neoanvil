@@ -182,7 +182,7 @@ Binario separado `cmd/neo-nexus` que orquesta múltiples instancias de `neo-mcp`
 |-------|-----------|-----|
 | `sre-doctrine` | auto-load | Flujo Ouroboros, modos pair/fast/daemon, leyes |
 | `jira-workflow` | auto-load | Ciclo vida Jira, naming, transitions, doc-pack |
-| `github-workflow` | auto-load | 13 actions plugin-github, multi-tenant PAT, cross-ref Jira ↔ GitHub |
+| `github-workflow` | auto-load | 20 actions plugin-github, multi-tenant PAT, cross-ref Jira ↔ GitHub |
 | `sre-tools` | auto-load | Inventario 14 tools MCP, 23 intents, degradación |
 | `sre-quality` | auto-load | Zero-Alloc, SafeHTTP, certify TTL, gosec, deadcode |
 | `sre-federation` | auto-load | Tier ownership, federation walk-up, CPG, auth, debt |
@@ -225,5 +225,5 @@ PILAR XXIII (cerrado 2026-04-28) entrega plugin Jira completo + skills doctrinal
 
 ## Sesión 2026-05-09 — nuevas docs
 
-- **GitHub plugin (Area 2):** [`docs/plugins/github-integration-guide.md`](./docs/plugins/github-integration-guide.md) — 13 actions, multi-tenant, cross-ref Jira ↔ GitHub patrón, audit hash-chain. Directiva canónica `[GITHUB-PLUGIN-WORKFLOW]` en `.claude/rules/neo-synced-directives.md`. ADR de diseño: [`docs/adr/ADR-011-github-plugin-design.md`](./docs/adr/ADR-011-github-plugin-design.md). Skill operacional: `/github-workflow` ([`.claude/skills/github-workflow/SKILL.md`](./.claude/skills/github-workflow/SKILL.md)).
+- **GitHub plugin (Area 2):** [`docs/plugins/github-integration-guide.md`](./docs/plugins/github-integration-guide.md) — **20 actions** (PRs:7, Issues:4, Repo:4, Code:3 con `list_files/get_file/search_code` para review remoto sin clone, Helpers:2), multi-tenant, cross-ref Jira ↔ GitHub patrón, audit hash-chain. Directiva canónica `[GITHUB-PLUGIN-WORKFLOW]` en `.claude/rules/neo-synced-directives.md`. ADR de diseño: [`docs/adr/ADR-011-github-plugin-design.md`](./docs/adr/ADR-011-github-plugin-design.md). Skill operacional: `/github-workflow` ([`.claude/skills/github-workflow/SKILL.md`](./.claude/skills/github-workflow/SKILL.md)).
 - **Observability pipeline (Areas 4 + 5 + 6):** [`docs/general/observability.md`](./docs/general/observability.md) — `pkg/notify` (Slack/Discord webhook dispatcher) + `pkg/otelx` (W3C traceparent + noopTracer + RecordingTracer) + `pkg/openapi` (auto-generated `/openapi.json` + `/docs` Swagger UI). ASCII pipeline diagram, threat model, test patterns.
