@@ -145,6 +145,37 @@ func (s *sseSessionStore) Broadcast(workspaceID string, event sseEvent) int {
 	return sent
 }
 
+// rebindSessionToNewChild looks up a still-running child for sess.workspaceID
+// and updates sess.childPort if a different port is now serving it.
+//
+// Returns the resolved port (== sess.childPort on success, 0 if no running
+// child can be found). Caller uses the return value to decide whether to keep
+// the SSE stream alive (success) or tear it down (failure).
+//
+// [T006 nexus / 2026-05-10] This is the heart of the auto-rebind that lets a
+// session survive `make rebuild-restart`: instead of closing the SSE on
+// child_died and forcing the operator to manually `/mcp` reconnect, we
+// silently retarget POSTs to the new child port. The handler reads
+// sess.childPort fresh on every POST, so rebinding the session struct alone
+// is sufficient — no client-visible reset.
+//
+// The lookup is injected as a callback so unit tests can drive the logic
+// without standing up a real ProcessPool. Production callers pass
+// `lookupWorkspacePort(...)` partially applied.
+func rebindSessionToNewChild(sess *sseSession, lookup func(workspaceID string) int) int {
+	if sess.workspaceID == "" {
+		return 0 // session was opened without workspace pinning; can't rebind
+	}
+	newPort := lookup(sess.workspaceID)
+	if newPort == 0 || newPort == sess.childPort {
+		return newPort
+	}
+	log.Printf("[NEXUS-SSE] session %s rebind: workspace=%s old_port=%d → new_port=%d",
+		sess.id, sess.workspaceID, sess.childPort, newPort)
+	sess.childPort = newPort
+	return newPort
+}
+
 func handleSSEConnect(store *sseSessionStore, registry *workspace.Registry, pool *nexus.ProcessPool, baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -251,11 +282,25 @@ func handleSSEConnect(store *sseSessionStore, registry *workspace.Registry, pool
 					flusher.Flush()
 					return
 				}
-				// Check child is still alive — close session if it died or was restarted.
+				// [T006 nexus] Child still alive on the original port? If yes,
+				// just continue. If not, attempt to rebind to a new child of
+				// the same workspace before tearing down the SSE stream — the
+				// common case is `make rebuild-restart` rotating the child
+				// port, and silently retargeting saves the operator from a
+				// manual `/mcp` reconnect.
 				if !isChildPortAlive(pool, sess.childPort) {
-					_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":\"child_died\"}\n\n")
-					flusher.Flush()
-					return
+					rebindLookup := func(wsID string) int { return lookupWorkspacePort(wsID, registry, pool) }
+					if rebindSessionToNewChild(sess, rebindLookup) > 0 && isChildPortAlive(pool, sess.childPort) {
+						// Optional informative event so SDK consumers can log
+						// the rebind. The MCP spec doesn't define this event
+						// type, so a generic "data" frame is the safest shape.
+						_, _ = fmt.Fprintf(w, "event: rebind\ndata: {\"new_port\":%d}\n\n", sess.childPort)
+						flusher.Flush()
+					} else {
+						_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":\"child_died\"}\n\n")
+						flusher.Flush()
+						return
+					}
 				}
 				// SSE keep-alive comment to prevent proxy/LB timeouts.
 				if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
