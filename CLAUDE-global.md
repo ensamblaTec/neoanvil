@@ -4,7 +4,7 @@
 
 Este archivo NO depende del código interno de NeoAnvil. Solo describe el contrato operativo con el orquestador.
 
-**Versión contrato: V10.6 — 14 tools MCP / 60+ operations / 23 intents radar.**
+**Versión contrato: V10.6 — 15 tools MCP / 60+ operations / 23 intents radar.**
 
 ---
 
@@ -110,7 +110,7 @@ Daemon mode se **suspende automáticamente** cuando RAPL > 60W (`STABILIZING`). 
 
 ---
 
-## 5. Las 14 tools MCP (contrato V10.6)
+## 5. Las 15 tools MCP (contrato V10.6)
 
 ### 7 Macro-Tools
 

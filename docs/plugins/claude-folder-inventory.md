@@ -33,7 +33,7 @@ cuando hace falta ampliar la configuración sin reinventar la estructura.
 │   ├── sre-doctrine/       Ouroboros workflow (auto-load)
 │   ├── sre-federation/     tier ownership + federation (auto-load)
 │   ├── sre-quality/        15 leyes path-scoped (auto-load)
-│   ├── sre-tools/          14+ tools reference (auto-load)
+│   ├── sre-tools/          15 tools reference (auto-load)
 │   └── sre-troubleshooting/ recovery patterns (auto-load)
 ├── plugins/                (no presente)
 ├── projects/               (auto-generado por Claude Code, no editar)

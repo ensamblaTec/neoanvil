@@ -1,6 +1,6 @@
 # NeoAnvil MCP Orchestrator
 
-Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.md vacío (todo archivado en `master_done.md`) · 14 tools MCP / 60+ operations · 3 plugins MCP (Jira, DeepSeek, GitHub) · Native build = Pure Go; Docker stage 3 = CGO enabled (gcc + musl-dev) para tree-sitter parsers**. Estado: GREEN (0 linter findings, 0 CC>15, audit-ci clean). **4 tiers** activos: `workspace` → `project` → `org` → `nexus` (global). **Áreas cerradas en sesión 2026-05-09**: Area 1 Docker + Pattern D híbrido (host bind-mount source + named volumes para state, scoped per-file binds tras DS audit Finding 1), Area 2 GitHub plugin (11 actions MCP, multi-tenant), Area 3 Integration tests (jira mock + docker smoke), Area 4 OpenAPI (`GET /openapi.json` + Swagger UI), Area 5 pkg/notify (Slack/Discord webhooks), Area 6 pkg/otelx (W3C traceparent + RecordingTracer), Phase R multi-tenant (`~/.neo/credentials.json` + audit-{jira,github}.log JSONL hash-chain), Phase S RecordingTracer + AttributeRecorder. **PILAR XXIII–XXVII** entregados previamente: Jira plugin ecosystem, DeepSeek Fan-Out Engine, Daemon V2, PILAR XXVII Daemon iterativo MCP-driven con Trust scoring + Pair feedback loop (`pkg/state/daemon_audit.go` + `daemon_trust.go` + `daemon_results.go` + `pair_audit_events.go`; 5 actions: `execute_next`, `approve`, `reject`, `trust_status`, `pair_audit_emit`). **PILAR XXVI Omni-Mesh**: Brain Portable (`pkg/brain/` — crypto ChaCha20-Poly1305, R2 store, local FS driver, TsnetStore/TsnetServer via Tailscale), Android scaffold. **Lazy lifecycle**: `lazy_prewarm_seconds` + predictive topology wake `wakeProjectSiblings` (ÉPICA 150.M/N).
+Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.md vacío (todo archivado en `master_done.md`) · 15 tools MCP / 60+ operations · 3 plugins MCP (Jira, DeepSeek, GitHub) · Local LLM (Qwen 2.5-Coder 7B) via `neo_local_llm` · Native build = Pure Go; Docker stage 3 = CGO enabled (gcc + musl-dev) para tree-sitter parsers**. Estado: GREEN (0 linter findings, 0 CC>15, audit-ci clean). **4 tiers** activos: `workspace` → `project` → `org` → `nexus` (global). **Áreas cerradas en sesión 2026-05-09**: Area 1 Docker + Pattern D híbrido (host bind-mount source + named volumes para state, scoped per-file binds tras DS audit Finding 1), Area 2 GitHub plugin (11 actions MCP, multi-tenant), Area 3 Integration tests (jira mock + docker smoke), Area 4 OpenAPI (`GET /openapi.json` + Swagger UI), Area 5 pkg/notify (Slack/Discord webhooks), Area 6 pkg/otelx (W3C traceparent + RecordingTracer), Phase R multi-tenant (`~/.neo/credentials.json` + audit-{jira,github}.log JSONL hash-chain), Phase S RecordingTracer + AttributeRecorder. **PILAR XXIII–XXVII** entregados previamente: Jira plugin ecosystem, DeepSeek Fan-Out Engine, Daemon V2, PILAR XXVII Daemon iterativo MCP-driven con Trust scoring + Pair feedback loop (`pkg/state/daemon_audit.go` + `daemon_trust.go` + `daemon_results.go` + `pair_audit_events.go`; 5 actions: `execute_next`, `approve`, `reject`, `trust_status`, `pair_audit_emit`). **PILAR XXVI Omni-Mesh**: Brain Portable (`pkg/brain/` — crypto ChaCha20-Poly1305, R2 store, local FS driver, TsnetStore/TsnetServer via Tailscale), Android scaffold. **Lazy lifecycle**: `lazy_prewarm_seconds` + predictive topology wake `wakeProjectSiblings` (ÉPICA 150.M/N).
 
 > **Base universal reusable:** el ciclo operativo, las leyes de calidad y los contratos de las macro-tools están en [`CLAUDE-global.md`](./CLAUDE-global.md) y [`docs/neo-global.md`](./docs/general/neo-global.md). Este fichero solo contiene lo **específico de NeoAnvil** como proyecto.
 
@@ -26,7 +26,7 @@ Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.m
 
 ---
 
-## 14 tools MCP (60+ operations) — Épica 239 + PILAR LXVI + PILAR LXVII (org tier)
+## 15 tools MCP (60+ operations) — Épica 239 + PILAR LXVI + PILAR LXVII (org tier) + ADR-013 (local LLM)
 
 **7 Macro-Tools** (ver contrato en `CLAUDE-global.md §5` + detalle en `.claude/rules/neo-sre-doctrine.md`):
 
@@ -38,15 +38,16 @@ Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.m
 - `neo_command` — **3 actions**: run, approve, kill (consolidó 3 tools)
 - `neo_memory` — **9 actions**: commit, learn, rem_sleep, load_snapshot + store, fetch, list, drop, search (Knowledge Store — PILAR XXXIX). `learn` acepta `action_type: add|update|delete`
 
-**7 Specialist Tools:**
+**8 Specialist Tools:**
 
 - `neo_compress_context` — squash de outputs largos
 - `neo_apply_migration` — SQL via `dba.Analyzer` con guardrails ACID
-- `neo_forge_tool` — hot-compile Go→WASM en runtime
+- `neo_forge_tool` — hot-compile Go→WASM en runtime (⚠️ scaffold roto, ver technical_debt.md)
 - `neo_download_model` — stream `.wasm`/`.onnx`/`.gguf` a `.neo/models/`
 - `neo_log_analyzer` — análisis semántico de logs + correlación HNSW con INC corpus
 - `neo_tool_stats` — p50/p95/p99 + error count por tool MCP (JSON/CSV). El output incluye campo `plugin_metrics` con p50/p95/p99/calls/errors/rejections/cache_hits por (plugin, tool) — fetched desde Nexus `GET /api/v1/plugin_metrics` vía `SafeInternalHTTPClient`; `null` cuando Nexus no está alcanzable. [154.F]
 - `neo_debt` — **5 actions** (PILAR LXVI): list, record, resolve, affecting_me, fetch. 4-tier debt: workspace (technical_debt.md), project (SHARED_DEBT.md), nexus (HTTP a dispatcher), org (reservado PILAR LXVII). Usar `affecting_me` al inicio de sesión para ver issues detectados por Nexus que afectan este workspace.
+- `neo_local_llm` — **ADR-013**: routes prompts a Ollama local (default `qwen2.5-coder:7b`) en GPU del operator. **$0/call**, ~5-30s/audit en RTX 3090, complemento al plugin-deepseek para daemon mode + tareas no-frontier. Routing local-vs-DS lo decide el agent (no server-side). Schema: `prompt` + opcional `model`/`system`/`max_tokens`/`temperature`.
 
 **Cache stack** (ver detalle en `CLAUDE-global.md §5` y README § "Cache stack"):
 - `QueryCache` (SEMANTIC_CODE node IDs, 54 ns hit)
@@ -167,7 +168,7 @@ Binario separado `cmd/neo-nexus` que orquesta múltiples instancias de `neo-mcp`
 - Contrato operativo base: [`CLAUDE-global.md`](./CLAUDE-global.md)
 - Leyes universales (template para nuevos proyectos): [`docs/neo-global.md`](./docs/general/neo-global.md)
 - Workflow paso a paso: [`.claude/rules/neo-workflow.md`](./.claude/rules/neo-workflow.md)
-- Doctrina macro-tools (14 tools / 60+ ops, 23 intents): [`.claude/rules/neo-sre-doctrine.md`](./.claude/rules/neo-sre-doctrine.md)
+- Doctrina macro-tools (15 tools / 60+ ops, 23 intents): [`.claude/rules/neo-sre-doctrine.md`](./.claude/rules/neo-sre-doctrine.md)
 - Leyes de código específicas Go/MCP: [`.claude/rules/neo-code-quality.md`](./.claude/rules/neo-code-quality.md)
 - Doctrina DB/RAG/migraciones (scoped a pkg/dba, pkg/rag, migrations): [`.claude/rules/neo-db.md`](./.claude/rules/neo-db.md)
 - Directivas activas (auto-gen, autoritativas): [`.claude/rules/neo-synced-directives.md`](./.claude/rules/neo-synced-directives.md)
@@ -184,7 +185,7 @@ Binario separado `cmd/neo-nexus` que orquesta múltiples instancias de `neo-mcp`
 | `jira-workflow` | auto-load | Ciclo vida Jira, naming, transitions, doc-pack |
 | `github-workflow` | auto-load | 20 actions plugin-github, multi-tenant PAT, cross-ref Jira ↔ GitHub |
 | `deepseek-workflow` | auto-load | 4 actions plugin-deepseek, cache 50× discipline, threaded mode, triage rules |
-| `sre-tools` | auto-load | Inventario 14 tools MCP, 23 intents, degradación |
+| `sre-tools` | auto-load | Inventario 15 tools MCP, 23 intents, degradación |
 | `sre-quality` | auto-load | Zero-Alloc, SafeHTTP, certify TTL, gosec, deadcode |
 | `sre-federation` | auto-load | Tier ownership, federation walk-up, CPG, auth, debt |
 | `sre-troubleshooting` | auto-load | Recovery: MCP offline, boot fail, BLAST_RADIUS stale |

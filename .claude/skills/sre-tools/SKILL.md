@@ -1,11 +1,11 @@
 ---
 name: sre-tools
-description: Inventario de las 14 tools MCP de neoanvil (neo_radar 23 intents, neo_sre_certify_mutation, neo_chaos_drill, neo_command, neo_cache, neo_daemon, neo_memory + 7 specialists incluyendo el plugin Jira). Use when picking a tool, troubleshooting tool degradation, or learning about a specific intent.
+description: Inventario de las 15 tools MCP de neoanvil (neo_radar 23 intents, neo_sre_certify_mutation, neo_chaos_drill, neo_command, neo_cache, neo_daemon, neo_memory + 7 specialists incluyendo el plugin Jira). Use when picking a tool, troubleshooting tool degradation, or learning about a specific intent.
 ---
 
 # SRE Tools — inventario operativo
 
-> Las 14 tools MCP que expone neoanvil (más specialists). Para detalle
+> Las 15 tools MCP que expone neoanvil (más specialists). Para detalle
 > completo de schemas ver `.claude/rules/neo-sre-doctrine.md` —
 > esta skill es la guía de selección rápida.
 

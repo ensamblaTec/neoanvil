@@ -375,7 +375,7 @@ LOC      nodos estimados   max_nodes_per_workspace  sentinel.heap_threshold_mb
 - Schema JSON con `enum` + `required` se valida cliente-side.
 - SSE + JSON-RPC 2.0 soporta streaming para tool output grande.
 
-### Por qué 14 tools (no 50, no 1)
+### Por qué 15 tools (no 50, no 1)
 
 - **Demasiadas tools** (23 previas): el LLM olvida qué elegir. Fatiga de decisión.
 - **Una god-tool**: schema ambiguo, validación imposible.

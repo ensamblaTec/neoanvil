@@ -314,6 +314,37 @@ captured fresh after each commit so we can spot accidental regressions.
 | Search median (`k=10`, corpus=200 nodes) | **4 µs** |
 | Search p95                               | **4 µs** |
 
+### Local LLM tool — `neo_local_llm` (ADR-013)
+
+15th MCP tool ships a $0/call complement to the DeepSeek plugin. Routes
+prompts to the operator's existing Ollama instance running `qwen2.5-coder:7b`
+on the local GPU. Routing local-vs-remote stays in the agent prompt — the
+tool is just the local-side dispatch surface.
+
+Live measurements on this workstation (RTX 3090 24GB, Ollama 11434):
+
+| Workload | Qwen 7B (local) | DeepSeek API (estimated) |
+|----------|----------------:|-------------------------:|
+| Trivial prompt (~2 token reply) | 0.28 s | ~3-5 s + $0.001 |
+| Realistic audit (~500 token reply, 16 tok/s sustained) | 25-32 s | ~5-15 s + $0.005 |
+| Daemon mode 100 audits/night | **~$0** | $3-15 |
+| Quality on 1-shot race-condition audit | found bug correctly | found bug correctly |
+
+Tradeoff: ~2× slower per audit, but free and offline-capable. Default
+model picked for portability (4.5 GB fits any 8 GB+ GPU + 16 GB+ system
+RAM); `qwen2.5-coder:32b` would be higher quality but requires 64 GB+
+system RAM to load via Ollama. Operators with more RAM can override per
+call via `args["model"]`.
+
+Recommended routing rule (codified in ADR-013, not enforced server-side):
+
+| Use the local model for                | Keep DeepSeek for                  |
+|----------------------------------------|------------------------------------|
+| Boilerplate, refactor sketches         | New crypto/auth/storage primitives |
+| Mechanical fan-out (rename, migrate)   | SEV ≥ 9 security audits            |
+| Daemon-mode triage / yes-no questions  | Architectural decisions             |
+| Translation, summarisation             | Anything that becomes ground truth  |
+
 ### Investigated and rejected — CPG SSA walk parallelization
 
 A "parallelize the per-package CPG walk for 4-8× cold-boot" hypothesis

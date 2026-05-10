@@ -149,7 +149,7 @@ otelx.Shutdown(ctx)  // flush a backend si SetTracer no es noop
 
 ### Lo que genera
 
-- **`GET /openapi.json`**: OpenAPI 3.0.3 con `x-mcp-tools` array (custom extension) listando los 14 tools registrados con sus `inputSchema`.
+- **`GET /openapi.json`**: OpenAPI 3.0.3 con `x-mcp-tools` array (custom extension) listando los 15 tools registrados con sus `inputSchema`.
 - **`GET /docs`**: Swagger UI standalone (CDN-served swagger-ui-dist) apuntando a `/openapi.json`.
 
 ### Cómo funciona

@@ -153,7 +153,7 @@ curl -X POST http://127.0.0.1:9000/api/v1/workspaces/start/<id>
 
 ## See also
 
-- [`skills/sre-tools/SKILL.md`](../sre-tools/SKILL.md) — referencia de las 14 tools MCP
+- [`skills/sre-tools/SKILL.md`](../sre-tools/SKILL.md) — referencia de las 15 tools MCP
 - [`skills/sre-quality/SKILL.md`](../sre-quality/SKILL.md) — leyes de calidad de código
 - [`skills/sre-federation/SKILL.md`](../sre-federation/SKILL.md) — tier ownership (workspace/project/org/nexus)
 - [`skills/sre-troubleshooting/SKILL.md`](../sre-troubleshooting/SKILL.md) — recovery patterns
