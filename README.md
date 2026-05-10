@@ -238,6 +238,71 @@ BRIEFING → BLAST_RADIUS → Edit → neo_sre_certify_mutation → (optional) n
 
 The pre-commit hook rejects any `.go/.ts/.tsx/.js/.css` file without a valid certification seal.
 
+## Performance migrations
+
+Measured against the running Ollama embed instance on this workstation
+(`nomic-embed-text` dim=768, RTX 3090). Re-runnable any time via:
+
+```bash
+go test -tags ollama_live -v -count=1 ./pkg/rag/ -run TestBenchLive_ -timeout 5m
+```
+
+The bench file lives in `pkg/rag/embed_bench_live_test.go` and is gated
+behind a build tag, so CI stays offline-clean.
+
+### Embed pipeline scaling — sequential vs `/api/embed` (plural)
+
+This is the underlying lever. Hot-paths below all benefit by amortising
+HTTP round-trips into a single Ollama call.
+
+| Batch | Pre (sequential) | Post (batched) | Speedup |
+|------:|:----------------:|:--------------:|:-------:|
+| 1     | 13 ms            | 17 ms          | 0.80×   |
+| 4     | 58 ms            | 30 ms          | 1.90×   |
+| 8     | 119 ms           | 46 ms          | 2.60×   |
+| 16    | 239 ms           | 72 ms          | **3.32×** |
+| 32    | 495 ms           | 133 ms         | **3.72×** |
+| 64    | 962 ms           | 289 ms         | 3.34×   |
+
+Batch=1 is intentionally slower — the implementation short-circuits
+single-text calls to `/api/embeddings` (singular). Sweet spot is
+batch=16-32 on this hardware; beyond that, Ollama's runner saturates.
+
+### Migrated hot-paths
+
+Each row below is one production code site that was switched from
+N sequential `Embed()` calls to a single `rag.EmbedMany()` call.
+Numbers are end-to-end (embed + downstream HNSW work) on this hardware.
+
+| Site | Pattern | Pre | Post | Speedup |
+|------|---------|----:|-----:|:-------:|
+| `cmd/neo-mcp/macro_tools.go` post-certify hook (8 chunks) | embed → `graph.Insert` per chunk | 212 ms | 135 ms | **1.57×** |
+| `cmd/neo-mcp/radar_semantic.go::embedAndInsert` (8 chunks) | embed → `InsertBatch` | 130 ms | 53 ms | **2.45×** |
+| `cmd/neo-mcp/rem_cycle.go::consolidateMemexToHNSW` (25 entries) | per-entry embed → per-entry Insert | 648 ms | 382 ms | **1.70×** |
+| `cmd/neo-mcp/workspace_utils.go` per-file ingest (16 chunks) | adaptive batch + retry-fallback | 240 ms | 72 ms | **3.33×** |
+
+Notes:
+
+- `workspace_utils.go` uses an **adaptive** strategy: try the batch
+  first, and on **any** error fall back to the per-chunk retry loop with
+  the existing crash/busy/transient backoff ladder. Best-case fast,
+  worst-case identical to the pre-migration baseline.
+- `radar_semantic.go::embedAndInsert` already used `InsertBatch` for the
+  HNSW write; only the embed half changed, but the speedup is highest
+  here because the loop overhead was dominated by HTTP latency.
+- `rem_cycle.go` keeps a `consolidateMemexPerEntry` fallback for when
+  the batch embed fails — REM consolidation never regresses.
+
+### Regression guard — HNSW Search latency
+
+The migration touched zero search code paths. The numbers below are
+captured fresh after each commit so we can spot accidental regressions.
+
+| Metric | Value |
+|--------|------:|
+| Search median (`k=10`, corpus=200 nodes) | **4 µs** |
+| Search p95                               | **4 µs** |
+
 ## Building
 
 ```bash

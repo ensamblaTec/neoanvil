@@ -116,6 +116,40 @@ func runREMPruneGC(ctx context.Context, graph *rag.Graph, wal *rag.WAL) {
 }
 
 func consolidateMemexToHNSW(ctx context.Context, entries []state.MemexEntry, graph *rag.Graph, wal *rag.WAL, embedder rag.Embedder, cpu tensorx.ComputeDevice) int {
+	if len(entries) == 0 {
+		return 0
+	}
+	// Batch the embed calls — REM consolidation typically processes 5-50 entries
+	// at once (memex_buffer accumulated during the idle window). Batched embed
+	// runs ~2-3× faster than sequential at this batch size.
+	texts := make([]string, len(entries))
+	for i, entry := range entries {
+		texts[i] = entry.Topic + " " + entry.Content
+	}
+	vecs, embedErr := rag.EmbedMany(ctx, embedder, texts)
+	if embedErr != nil {
+		log.Printf("[SRE-MEMEX] batch embed error (%d entries): %v — falling back to per-entry", len(entries), embedErr)
+		return consolidateMemexPerEntry(ctx, entries, graph, wal, embedder, cpu)
+	}
+	consolidated := 0
+	for i, entry := range entries {
+		docID := docIDCounter.Add(1) + uint64(time.Now().UnixNano())
+		if insertErr := graph.Insert(ctx, docID, vecs[i], 16, cpu, wal); insertErr != nil {
+			log.Printf("[SRE-MEMEX] HNSW insert error for entry %s: %v", entry.ID, insertErr)
+			continue
+		}
+		if metaErr := wal.SaveDocMeta(docID, entry.Scope, entry.Content, 0); metaErr != nil {
+			log.Printf("[SRE-MEMEX] WAL meta error for entry %s: %v", entry.ID, metaErr)
+		}
+		consolidated++
+	}
+	return consolidated
+}
+
+// consolidateMemexPerEntry is the fallback when the batch embed fails for any
+// reason. Mirrors the legacy per-entry behaviour so REM consolidation never
+// regresses from the previous baseline when Ollama is degraded.
+func consolidateMemexPerEntry(ctx context.Context, entries []state.MemexEntry, graph *rag.Graph, wal *rag.WAL, embedder rag.Embedder, cpu tensorx.ComputeDevice) int {
 	consolidated := 0
 	for _, entry := range entries {
 		text := entry.Topic + " " + entry.Content

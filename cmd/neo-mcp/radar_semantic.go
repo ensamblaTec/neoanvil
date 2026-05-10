@@ -96,23 +96,30 @@ func computeIndexChunks(data []byte, ext string, chunkSize, overlap int) [][]byt
 }
 
 // embedAndInsert embeds each chunk via Ollama and writes vectors + doc metadata to the HNSW graph.
+// Uses rag.EmbedMany so the embedder.EmbedBatch path is taken on Ollama (single
+// /api/embed round-trip for N chunks) instead of N sequential calls.
 func embedAndInsert(ctx context.Context, t *RadarTool, absTarget, target string, chunks [][]byte) error {
-	docIDs := make([]uint64, 0, len(chunks))
-	vecs := make([][]float32, 0, len(chunks))
-	for i, chunk := range chunks {
-		vec, embedErr := t.embedder.Embed(ctx, string(chunk))
-		if embedErr != nil {
-			// [SRE-104.C] Silent abort if chunk 0 fails — embedder is globally down.
-			// Mid-stream failures (i>0) still warrant a log: indicates partial degradation.
-			if i > 0 {
-				log.Printf("[SRE-99.A] backgroundIndexFile embed chunk %d of %s: %v", i, target, embedErr)
-			}
-			return embedErr
+	if len(chunks) == 0 {
+		return nil
+	}
+	texts := make([]string, len(chunks))
+	for i, c := range chunks {
+		texts[i] = string(c)
+	}
+	vecs, embedErr := rag.EmbedMany(ctx, t.embedder, texts)
+	if embedErr != nil {
+		// [SRE-104.C] Mirror the original behaviour: silent abort on initial failure,
+		// log when the batch is mid-stream (we can't tell which chunk failed in the
+		// batch path, so log once for the whole batch when len > 1).
+		if len(chunks) > 1 {
+			log.Printf("[SRE-99.A] backgroundIndexFile batch embed (%d chunks) of %s: %v", len(chunks), target, embedErr)
 		}
-		docID := fnvHash64_Chunk(absTarget, i)
-		docIDs = append(docIDs, docID)
-		vecs = append(vecs, vec)
-		if err := t.wal.SaveDocMeta(docID, absTarget, string(chunk), 0); err != nil {
+		return embedErr
+	}
+	docIDs := make([]uint64, len(chunks))
+	for i := range chunks {
+		docIDs[i] = fnvHash64_Chunk(absTarget, i)
+		if err := t.wal.SaveDocMeta(docIDs[i], absTarget, texts[i], 0); err != nil {
 			log.Printf("[SRE-99.A] SaveDocMeta %s: %v", absTarget, err)
 		}
 	}

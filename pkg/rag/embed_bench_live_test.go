@@ -72,6 +72,169 @@ func TestBenchLive_EmbedBatchScaling(t *testing.T) {
 	fmt.Println("└────────┴──────────────┴──────────────┴──────────────┴──────────────┘")
 }
 
+// TestBenchLive_InsertBatchVsLoop covers the radar_semantic.go::embedAndInsert
+// path: N chunks → embed → InsertBatch. Pre-migration the embed half was a
+// sequential N-call loop; post-migration it's a single /api/embed round-trip
+// followed by the SAME InsertBatch.
+func TestBenchLive_InsertBatchVsLoop(t *testing.T) {
+	emb := NewOllamaEmbedder("http://127.0.0.1:11435", "nomic-embed-text", 30, 4, 4096)
+	g := NewGraph(256, 1024, 768)
+	cpu := newTestCPU()
+	wal, err := OpenWAL(filepath.Join(t.TempDir(), "insertbatch.db"))
+	if err != nil {
+		t.Fatalf("OpenWAL: %v", err)
+	}
+	defer wal.Close()
+	ctx := context.Background()
+
+	fmt.Println("\n┌──── radar_semantic.go::embedAndInsert (N chunks → InsertBatch) ────┐")
+	fmt.Printf("│ %-6s │ %-14s │ %-14s │ %-12s │\n", "chunks", "pre (loop)", "post (batch)", "speedup")
+	fmt.Println("├────────┼────────────────┼────────────────┼──────────────┤")
+
+	docIDStart := uint64(0)
+	for _, n := range []int{4, 8, 16, 32} {
+		texts := makeTexts(n)
+
+		// Pre-migration: per-chunk Embed loop, then InsertBatch
+		start := time.Now()
+		preDocIDs := make([]uint64, n)
+		preVecs := make([][]float32, n)
+		for i, txt := range texts {
+			vec, embedErr := emb.Embed(ctx, txt)
+			if embedErr != nil {
+				t.Fatalf("loop embed: %v", embedErr)
+			}
+			docIDStart++
+			preDocIDs[i] = docIDStart
+			preVecs[i] = vec
+		}
+		if insertErr := g.InsertBatch(ctx, preDocIDs, preVecs, 5, cpu, wal); insertErr != nil {
+			t.Fatalf("InsertBatch (pre): %v", insertErr)
+		}
+		preTotal := time.Since(start)
+
+		// Post-migration: EmbedMany once, then InsertBatch
+		start = time.Now()
+		postVecs, embedErr := EmbedMany(ctx, emb, texts)
+		if embedErr != nil {
+			t.Fatalf("EmbedMany: %v", embedErr)
+		}
+		postDocIDs := make([]uint64, n)
+		for i := range texts {
+			docIDStart++
+			postDocIDs[i] = docIDStart
+		}
+		if insertErr := g.InsertBatch(ctx, postDocIDs, postVecs, 5, cpu, wal); insertErr != nil {
+			t.Fatalf("InsertBatch (post): %v", insertErr)
+		}
+		postTotal := time.Since(start)
+
+		speedup := float64(preTotal) / float64(postTotal)
+		fmt.Printf("│ %-6d │ %-14v │ %-14v │ %-12.2fx │\n",
+			n, preTotal.Round(time.Millisecond), postTotal.Round(time.Millisecond), speedup)
+	}
+	fmt.Println("└────────┴────────────────┴────────────────┴──────────────┘")
+}
+
+// TestBenchLive_REMConsolidate covers the rem_cycle.go::consolidateMemexToHNSW
+// path: N memex entries → embed → per-entry graph.Insert.
+func TestBenchLive_REMConsolidate(t *testing.T) {
+	emb := NewOllamaEmbedder("http://127.0.0.1:11435", "nomic-embed-text", 30, 4, 4096)
+	g := NewGraph(256, 1024, 768)
+	cpu := newTestCPU()
+	wal, err := OpenWAL(filepath.Join(t.TempDir(), "remcycle.db"))
+	if err != nil {
+		t.Fatalf("OpenWAL: %v", err)
+	}
+	defer wal.Close()
+	ctx := context.Background()
+
+	fmt.Println("\n┌──── rem_cycle.go::consolidateMemexToHNSW (N entries) ──────────────┐")
+	fmt.Printf("│ %-7s │ %-14s │ %-14s │ %-12s │\n", "entries", "pre (per)", "post (batch)", "speedup")
+	fmt.Println("├─────────┼────────────────┼────────────────┼──────────────┤")
+
+	docID := uint64(0)
+	for _, n := range []int{5, 10, 25, 50} {
+		texts := makeTexts(n) // simulates "topic + content" strings
+
+		// Pre-migration: per-entry Embed + Insert (legacy fallback path)
+		start := time.Now()
+		for _, txt := range texts {
+			vec, embedErr := emb.Embed(ctx, txt)
+			if embedErr != nil {
+				t.Fatalf("loop embed: %v", embedErr)
+			}
+			docID++
+			if err := g.Insert(ctx, docID, vec, 16, cpu, wal); err != nil {
+				t.Fatalf("loop insert: %v", err)
+			}
+		}
+		pre := time.Since(start)
+
+		// Post-migration: EmbedMany then per-entry Insert (still per-entry because
+		// rem_cycle uses graph.Insert one-by-one for backpressure)
+		start = time.Now()
+		vecs, embedErr := EmbedMany(ctx, emb, texts)
+		if embedErr != nil {
+			t.Fatalf("EmbedMany: %v", embedErr)
+		}
+		for _, vec := range vecs {
+			docID++
+			if err := g.Insert(ctx, docID, vec, 16, cpu, wal); err != nil {
+				t.Fatalf("post insert: %v", err)
+			}
+		}
+		post := time.Since(start)
+
+		speedup := float64(pre) / float64(post)
+		fmt.Printf("│ %-7d │ %-14v │ %-14v │ %-12.2fx │\n",
+			n, pre.Round(time.Millisecond), post.Round(time.Millisecond), speedup)
+	}
+	fmt.Println("└─────────┴────────────────┴────────────────┴──────────────┘")
+}
+
+// TestBenchLive_WorkspaceUtilsAdaptive covers workspace_utils.go's adaptive
+// batch-then-fallback path. Healthy Ollama → 1 batch call (fast). Per-chunk
+// fallback path is identical to the pre-migration loop.
+func TestBenchLive_WorkspaceUtilsAdaptive(t *testing.T) {
+	emb := NewOllamaEmbedder("http://127.0.0.1:11435", "nomic-embed-text", 30, 4, 4096)
+	ctx := context.Background()
+
+	fmt.Println("\n┌──── workspace_utils.go (adaptive batch + fallback) ────────────────┐")
+	fmt.Printf("│ %-6s │ %-14s │ %-14s │ %-12s │\n", "chunks", "pre (per+retry)", "post (batch)", "speedup")
+	fmt.Println("├────────┼────────────────┼────────────────┼──────────────┤")
+
+	for _, n := range []int{4, 8, 16, 32} {
+		texts := makeTexts(n)
+
+		// Pre-migration: simulate per-chunk acquire/release of embedSem + Embed.
+		// We use the same emb.Embed path that workspace_utils.go uses today.
+		start := time.Now()
+		for _, txt := range texts {
+			if _, err := emb.Embed(ctx, txt); err != nil {
+				t.Fatalf("pre embed: %v", err)
+			}
+		}
+		pre := time.Since(start)
+
+		// Post-migration: single EmbedMany call (the new fast-path).
+		start = time.Now()
+		vecs, err := EmbedMany(ctx, emb, texts)
+		post := time.Since(start)
+		if err != nil {
+			t.Fatalf("EmbedMany: %v", err)
+		}
+		if len(vecs) != n {
+			t.Fatalf("expected %d vectors, got %d", n, len(vecs))
+		}
+
+		speedup := float64(pre) / float64(post)
+		fmt.Printf("│ %-6d │ %-14v │ %-14v │ %-12.2fx │\n",
+			n, pre.Round(time.Millisecond), post.Round(time.Millisecond), speedup)
+	}
+	fmt.Println("└────────┴────────────────┴────────────────┴──────────────┘")
+}
+
 // BenchLive_HNSWInsertPipeline measures the FULL pipeline that the
 // migrated post-certify hook now uses: N text chunks → embed → graph.Insert.
 // Sequential = the pre-migration code (one Embed per chunk, one Insert).

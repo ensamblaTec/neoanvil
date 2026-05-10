@@ -401,6 +401,41 @@ func bootstrapWorkspace(ctx context.Context, workspace string, graph *rag.Graph,
 					}
 				}
 
+				// [BATCH-EMBED-FAST-PATH] On healthy Ollama with 4+ chunks, a single
+				// /api/embed (plural) call is 1.5-3.7× faster than the per-chunk
+				// retry loop below. Try it first; on ANY error fall through to the
+				// established per-chunk path so crash/busy/transient backoff is
+				// preserved verbatim. Single-chunk files skip the batch attempt —
+				// EmbedBatch short-circuits them anyway and sequential is the same
+				// HTTP round-trip cost.
+				if len(chunks) > 1 {
+					texts := make([]string, len(chunks))
+					for i, c := range chunks {
+						texts[i] = string(c)
+					}
+					select {
+					case embedSem <- struct{}{}:
+					case <-ctx.Done():
+						return
+					}
+					vecs, batchErr := rag.EmbedMany(ctx, embedder, texts)
+					<-embedSem
+					if batchErr == nil && len(vecs) == len(chunks) {
+						for i, vec := range vecs {
+							docID := fnvHash64_Chunk(path, i)
+							select {
+							case resChan <- indexPayload{docID: docID, vec: vec, path: path, snippet: texts[i]}:
+							case <-ctx.Done():
+								return
+							}
+						}
+						continue
+					}
+					if batchErr != nil {
+						log.Printf("[SRE-INFO] Worker %d: batch embed failed for %s (%d chunks): %v — falling back to per-chunk retry path", workerID, path, len(chunks), batchErr)
+					}
+				}
+
 				for chunkIndex, chunkSlice := range chunks {
 
 					if ctx.Err() != nil {
