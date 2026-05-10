@@ -48,14 +48,14 @@ sre:
     consensus_quorum: 0.66
     context_compress_threshold_kb: 600
     oracle_alert_threshold: 0.75
-    oracle_heap_limit_mb: 1024  # 32GB box: 1GB alert ceiling, modest margin for spike detection
+    oracle_heap_limit_mb: 512
     oracle_power_limit_w: 80
     certify_ttl_minutes: 0
     session_state_ttl_hours: 24
     token_budget_session_warn: 50000
     token_budget_session_hard: 100000
     inc_archive_days: 30
-    runtime_memory_limit_mb: 6144  # 32GB box: 6GB Go runtime soft cap (debug.SetMemoryLimit). Leaves 26GB for OS + Ollama + IDE/browser
+    runtime_memory_limit_mb: 0
     inbox_quota_per_sender_per_hour: 30
     peer_session_mirror_cap: 0
     pgo_capture_interval_minutes: 0
@@ -116,13 +116,6 @@ workspace:
         - venv
         - .venv
         - env
-        - doc-prev-note
-        - static     # cmd/neo-nexus/static — HUD bundle (compiled JS/CSS, not source)
-        - bin        # compiled binaries
-        - build      # generic build output
-        - .next      # Next.js build cache
-        - target     # Rust/Java build output
-        - coverage   # coverage reports
     allowed_extensions:
         - .go
         - .ts
@@ -136,7 +129,7 @@ workspace:
     max_file_size_mb: 5
     modules:
         web: npm run build
-    dominant_lang: go
+    dominant_lang: ""
 ai:
     provider: ollama
     base_url: http://localhost:11434
@@ -145,17 +138,15 @@ ai:
     embedding_model: nomic-embed-text
     context_window: 8192
     embed_timeout_seconds: 8
-    # [ADR-013] Default for neo_local_llm. This PC: 31 GB RAM + RTX 3090 24 GB.
-    # qwen2.5-coder:7b (4.5 GB) is the only viable option here; 32b needs 44.5 GB.
-    local_model: "qwen2.5-coder:7b"
+    local_model: ""
 rag:
     db_path: .neo/db/hnsw.db
     chunk_size: 3000
     overlap: 500
     batch_size: 100
-    ingestion_workers: 6      # i5-10400 = 6 physical cores → full parallelism on cold-rebuild
+    ingestion_workers: 4
     ollama_concurrency: 3
-    embed_concurrency: 4      # RTX 3090 24GB: serves >2 parallel embeds without saturation
+    embed_concurrency: 2
     max_nodes_per_workspace: 50000
     workspace_capacity_warn_pct: 0.8
     drift_threshold: 0.45
@@ -234,7 +225,7 @@ inference:
         gemini-cli: gemini-1.5-pro
         mcp-inspector: gemini-1.5-flash
 sentinel:
-    heap_threshold_mb: 1024  # Coherent with oracle_heap_limit_mb on 32GB box
+    heap_threshold_mb: 500
     goroutine_explosion_limit: 10000
     cold_start_grace_sec: 30
     audit_log_max_size: 1000
@@ -281,7 +272,7 @@ cpg:
     page_rank_iters: 50
     page_rank_damping: 0.85
     activation_alpha: 0.5
-    max_heap_mb: 2048  # neoanvil source moderate size; 2GB keeps full SSA+CPG resident on 32GB box
+    max_heap_mb: 512
     persist_path: .neo/db/cpg.bin
     persist_interval_minutes: 15
     package_path: ./cmd/ast-cleaner

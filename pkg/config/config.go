@@ -1005,6 +1005,14 @@ func applyAIDefaults(cfg *NeoConfig, ns *bool) {
 		cfg.AI.ContextWindow = 8192
 		*ns = true
 	}
+	// [ADR-013] Backfill LocalModel so the config-watcher round-trip
+	// preserves the field — without this, an empty cfg.AI.LocalModel
+	// at boot would marshal back as `local_model: ""` and stick to
+	// disk, hiding the operator's intent.
+	if cfg.AI.LocalModel == "" {
+		cfg.AI.LocalModel = "qwen2.5-coder:7b"
+		*ns = true
+	}
 }
 
 // applyInferenceDefaults backfills Inference routing and model selection fields.
