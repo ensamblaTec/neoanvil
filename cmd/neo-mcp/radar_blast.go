@@ -145,7 +145,7 @@ func (t *RadarTool) handleBlastRadius(ctx context.Context, args map[string]any) 
 		}
 		return mcpText(text), nil
 	}
-	impacted, fallbackUsed, graphStatus, grepDepLines, err := t.resolveImpactedNodes(ctx, target)
+	impacted, fallbackUsed, graphStatus, grepDepLines, astBreakdown, err := t.resolveImpactedNodes(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (t *RadarTool) handleBlastRadius(ctx context.Context, args map[string]any) 
 		go t.backgroundIndexFile(target)
 	}
 	confidence := computeBlastConfidence(fallbackUsed, graphStatus)
-	text := formatBlastRadius(target, impacted, grepDepLines, graphStatus, fallbackUsed, confidence, indexCoverage)
+	text := formatBlastRadius(target, impacted, grepDepLines, graphStatus, fallbackUsed, confidence, indexCoverage, astBreakdown)
 	text += t.cpgEnrichBlast(target)
 	text += t.contractEnrichBlast(target)
 	// [Épica 179/190] Generation stamp captured AFTER the work completes
@@ -183,7 +183,7 @@ func (t *RadarTool) handleBlastRadiusBatch(ctx context.Context, targets []string
 			defer func() { <-sem }()
 
 			entry := blastBatchEntry{target: target}
-			impacted, fallbackUsed, graphStatus, _, runErr := t.resolveImpactedNodes(ctx, target)
+			impacted, fallbackUsed, graphStatus, _, _, runErr := t.resolveImpactedNodes(ctx, target)
 			if graphStatus == "not_indexed" {
 				go t.backgroundIndexFile(target)
 			}
@@ -485,7 +485,7 @@ func (t *RadarTool) handleBlastRadiusProjectScatter(ctx context.Context, args ma
 			if isSelf {
 				idxCov := rag.IndexCoverage(t.graph, t.workspace)
 				rows[idx].cov = fmt.Sprintf("%.0f%%", idxCov*100)
-				imp, fb, gs, _, _ := t.resolveImpactedNodes(ctx, target)
+				imp, fb, gs, _, _, _ := t.resolveImpactedNodes(ctx, target)
 				if gs != "not_indexed" {
 					rows[idx].impact = fmt.Sprintf("%d nodes", len(imp))
 					rows[idx].conf = computeBlastConfidence(fb, gs)
@@ -711,12 +711,16 @@ func formatActivationContext(g *cpg.Graph, normEnergy, ranks map[cpg.NodeID]floa
 }
 
 // resolveImpactedNodes encapsulates the RAG → AST → grep fallback chain. [SRE-55.2/74.4]
+// Returns astBreakdown when the fallback is "ast" so the formatter can
+// surface symbol-level vs package-level scope counts independently.
+// [Sprint package-level fix]
 func (t *RadarTool) resolveImpactedNodes(ctx context.Context, target string) (
-	impacted []string, fallbackUsed, graphStatus string, grepDepLines []dependentLine, err error,
+	impacted []string, fallbackUsed, graphStatus string, grepDepLines []dependentLine,
+	astBreakdown astImpactBreakdown, err error,
 ) {
 	edges, edgeErr := rag.GetAllGraphEdges(t.wal)
 	if edgeErr != nil {
-		return nil, "", "", nil, fmt.Errorf("failed to get graph edges: %w", edgeErr)
+		return nil, "", "", nil, astImpactBreakdown{}, fmt.Errorf("failed to get graph edges: %w", edgeErr)
 	}
 
 	var wg sync.WaitGroup
@@ -733,25 +737,40 @@ func (t *RadarTool) resolveImpactedNodes(ctx context.Context, target string) (
 	}()
 	wg.Wait()
 	if err1 != nil {
-		return nil, "", "", nil, err1
+		return nil, "", "", nil, astImpactBreakdown{}, err1
 	}
 	if err2 != nil {
-		return nil, "", "", nil, err2
+		return nil, "", "", nil, astImpactBreakdown{}, err2
 	}
 
-	// [SRE-60.2] Determine graph_status.
-	graphStatus = "indexed"
+	// [SRE-60.2 + sprint package-level fix] graph_status with explicit
+	// reason. The previous binary indexed/not_indexed was ambiguous —
+	// operator couldn't tell "graph never built" from "target not in
+	// graph yet" from "graph stale".
+	graphStatus = "up_to_date"
 	fallbackUsed = "none"
-	if len(pageRank) == 0 && len(edges) == 0 {
-		graphStatus = "not_indexed"
-	} else if len(pageRank) == 0 {
-		graphStatus = "stale"
+	switch {
+	case len(edges) == 0:
+		graphStatus = "empty" // RAG WAL graph never populated (cold workspace)
+	case len(pageRank) == 0:
+		graphStatus = "stale" // edges exist but PageRank didn't converge
+	case len(impacted) == 0:
+		graphStatus = "target_not_in_graph" // graph fine; target has no incoming edges yet
 	}
 
 	// [SRE-55.2] AST fallback for .go files when RAG returns nothing.
+	// Merges TWO scopes:
+	//   - symbol-level via astFallbackImpact (callers of THIS file's
+	//     exported symbols — change-of-signature blast radius)
+	//   - package-level via astx.PackageImporters (every importer of
+	//     the package — refactor-level blast radius)
+	// We dedupe and use the union. The operator gets BOTH counts in
+	// the formatted output so they can distinguish the scopes.
 	if len(impacted) == 0 {
-		if astHits := astFallbackImpact(t.workspace, target); len(astHits) > 0 {
-			impacted = astHits
+		merged, breakdown := mergedASTImpact(t.workspace, target)
+		astBreakdown = breakdown
+		if len(merged) > 0 {
+			impacted = merged
 			fallbackUsed = "ast"
 		}
 	}
@@ -767,10 +786,13 @@ func (t *RadarTool) resolveImpactedNodes(ctx context.Context, target string) (
 			fallbackUsed = "grep"
 		}
 	}
-	return impacted, fallbackUsed, graphStatus, grepDepLines, nil
+	return impacted, fallbackUsed, graphStatus, grepDepLines, astBreakdown, nil
 }
 
-// astFallbackImpact uses go/ast to find callers of a .go file when RAG returns nothing. [SRE-55.2]
+// astFallbackImpact returns symbol-level blast radius for a .go file:
+// callers that use one of the exported symbols defined in the file.
+// Narrow scope — used to detect change-of-signature breakage.
+// [SRE-55.2]
 func astFallbackImpact(workspace, target string) []string {
 	if !strings.HasSuffix(target, ".go") {
 		return nil
@@ -799,6 +821,72 @@ func astFallbackImpact(workspace, target string) []string {
 	return impacted
 }
 
+// astImpactBreakdown bundles the two scopes BLAST_RADIUS reports
+// independently. Symbol-level is the narrow change-of-signature
+// blast; package-level is the broader "any file that imports this
+// package" set. UnionAll is dedupe(symbol ∪ package). [Sprint fix]
+type astImpactBreakdown struct {
+	SymbolLevel  []string // callers of target's exported symbols
+	PackageLevel []string // importers of target's package (broader)
+	UnionAll     []string // dedupe(SymbolLevel ∪ PackageLevel)
+}
+
+// computeASTBreakdown runs both AuditSharedContract (symbol-level)
+// and PackageImporters (package-level) and dedupes into UnionAll.
+// Returns the breakdown for the formatter to surface both counts.
+func computeASTBreakdown(workspace, target string) astImpactBreakdown {
+	var b astImpactBreakdown
+	b.SymbolLevel = astFallbackImpact(workspace, target)
+	if pkgImps, err := astx.PackageImporters(workspace, target); err == nil {
+		b.PackageLevel = pkgImps
+	}
+	seen := make(map[string]struct{})
+	for _, f := range b.SymbolLevel {
+		if _, dup := seen[f]; !dup {
+			seen[f] = struct{}{}
+			b.UnionAll = append(b.UnionAll, f)
+		}
+	}
+	for _, f := range b.PackageLevel {
+		if _, dup := seen[f]; !dup {
+			seen[f] = struct{}{}
+			b.UnionAll = append(b.UnionAll, f)
+		}
+	}
+	return b
+}
+
+// mergedASTImpact returns the union of symbol-level and package-level
+// impact as a single deduped list. Used by resolveImpactedNodes when
+// the RAG WAL graph is empty/stale/missing for the target.
+func mergedASTImpact(workspace, target string) ([]string, astImpactBreakdown) {
+	b := computeASTBreakdown(workspace, target)
+	return b.UnionAll, b
+}
+
+// graphStatusReason returns a one-liner the operator can read without
+// guessing what an enum means. New states from the sprint fix are
+// explicit; legacy strings are kept for backward compat in case some
+// older test or HUD dashboard still emits them.
+func graphStatusReason(s string) string {
+	switch s {
+	case "up_to_date":
+		return "RAG dep-graph populated and PageRank converged"
+	case "stale":
+		return "RAG dep-graph has edges but PageRank empty — recently certified, not consolidated yet"
+	case "empty":
+		return "RAG dep-graph has zero edges — workspace cold or nothing certified yet"
+	case "target_not_in_graph":
+		return "RAG dep-graph fine, but this file has no incoming edges yet — never certified by a caller"
+	// legacy aliases (pre-sprint):
+	case "indexed":
+		return "RAG dep-graph populated (legacy state)"
+	case "not_indexed":
+		return "RAG dep-graph empty (legacy state)"
+	}
+	return "unknown state"
+}
+
 // computeBlastConfidence maps fallback + graph status to a confidence label. [SRE-74.1]
 func computeBlastConfidence(fallbackUsed, graphStatus string) string {
 	switch fallbackUsed {
@@ -807,7 +895,10 @@ func computeBlastConfidence(fallbackUsed, graphStatus string) string {
 	case "grep":
 		return "low"
 	default:
-		if graphStatus == "not_indexed" || graphStatus == "stale" {
+		// "none" when the dep graph cannot back the result.
+		// "high" only when PageRank actually ran on a populated graph.
+		switch graphStatus {
+		case "empty", "not_indexed", "stale", "target_not_in_graph":
 			return "none"
 		}
 		return "high"
@@ -816,16 +907,23 @@ func computeBlastConfidence(fallbackUsed, graphStatus string) string {
 
 // formatBlastRadius renders the BLAST_RADIUS markdown report. [SRE-117.B]
 func formatBlastRadius(target string, impacted []string, grepDepLines []dependentLine,
-	graphStatus, fallbackUsed, confidence string, indexCoverage float64) string {
-	pagerankUsed := fallbackUsed == "none" && graphStatus == "indexed"
+	graphStatus, fallbackUsed, confidence string, indexCoverage float64, astBreakdown astImpactBreakdown) string {
+	pagerankUsed := fallbackUsed == "none" && graphStatus == "up_to_date"
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## BLAST_RADIUS: %s\n\n", target)
-	fmt.Fprintf(&sb, "**graph_status:** `%s`  \n", graphStatus)
-	fmt.Fprintf(&sb, "**index_coverage:** `%.0f%%`  \n", indexCoverage*100)
+	fmt.Fprintf(&sb, "**graph_status:** `%s` _(%s)_  \n", graphStatus, graphStatusReason(graphStatus))
+	fmt.Fprintf(&sb, "**hnsw_coverage:** `%.0f%%` _(semantic embedding index — independent of dep graph)_  \n", indexCoverage*100)
 	fmt.Fprintf(&sb, "**pagerank_used:** `%v`  \n", pagerankUsed)
 	fmt.Fprintf(&sb, "**fallback:** `%s`  \n", fallbackUsed)
 	fmt.Fprintf(&sb, "**confidence:** `%s`  \n", confidence)
-	fmt.Fprintf(&sb, "**impacted_count:** %d  \n\n", len(impacted))
+	fmt.Fprintf(&sb, "**impacted_count:** %d  \n", len(impacted))
+	if fallbackUsed == "ast" && (len(astBreakdown.SymbolLevel) > 0 || len(astBreakdown.PackageLevel) > 0) {
+		fmt.Fprintf(&sb, "**symbol_impact_count:** %d _(callers of this file's exported symbols — change-of-signature scope)_  \n",
+			len(astBreakdown.SymbolLevel))
+		fmt.Fprintf(&sb, "**package_importers_count:** %d _(every importer of the package — refactor scope)_  \n",
+			len(astBreakdown.PackageLevel))
+	}
+	sb.WriteString("\n")
 	if len(grepDepLines) > 0 {
 		sb.WriteString("### Grep Dependents _(confidence: low — import scan, not PageRank)_\n")
 		for _, d := range grepDepLines {

@@ -156,3 +156,92 @@ func funcSignature(fn *ast.FuncDecl) string {
 func packageOf(filename string) string {
 	return filepath.Base(filepath.Dir(filename))
 }
+
+// PackageImporters returns every .go file in workspace whose import block
+// references the package containing target — regardless of which exported
+// symbol the caller uses.
+//
+// This is BROADER than AuditSharedContract (which is symbol-scoped). When
+// the operator asks "what depends on auth/keystore.go", they usually want
+// the refactor-level blast radius: every file that touches the auth
+// package, not only files calling auth.Load / auth.Save (the specific
+// symbols defined in keystore.go).
+//
+// Use case mapping:
+//   - AuditSharedContract  → "if I rename Save(), who breaks?" (signature)
+//   - PackageImporters      → "if I redesign the auth package, who's affected?"
+//
+// Match strategy: parse imports-only, accept any import path that ends
+// with the relative dir of target ("pkg/auth"). This handles:
+//   "github.com/ensamblatec/neoanvil/pkg/auth"  → match
+//   "github.com/other/pkg/auth"                  → match (rare; same name)
+// We err on the side of inclusion since BLAST_RADIUS is operator-facing
+// and false-positives are easier to dismiss than false-negatives.
+//
+// Skips: vendor/, .neo/, the target file itself, files in the same
+// package directory as target. [Sprint package-level fix]
+func PackageImporters(workspace, target string) ([]string, error) {
+	if !strings.HasSuffix(target, ".go") {
+		return nil, nil
+	}
+	absTarget := target
+	if !filepath.IsAbs(target) {
+		absTarget = filepath.Join(workspace, target)
+	}
+	rel, err := filepath.Rel(workspace, absTarget)
+	if err != nil {
+		return nil, fmt.Errorf("rel path: %w", err)
+	}
+	pkgRel := filepath.ToSlash(filepath.Dir(rel))
+	if pkgRel == "" || pkgRel == "." {
+		return nil, nil
+	}
+	suffix := "/" + pkgRel
+	targetDir := filepath.Dir(absTarget)
+	seen := make(map[string]struct{})
+	var importers []string
+	walkErr := filepath.WalkDir(workspace, func(path string, d os.DirEntry, wErr error) error {
+		if wErr != nil || d.IsDir() {
+			return wErr
+		}
+		if filepath.Ext(path) != ".go" || path == absTarget {
+			return nil
+		}
+		if strings.Contains(path, "/vendor/") || strings.Contains(path, "/.neo/") {
+			return nil
+		}
+		if filepath.Dir(path) == targetDir {
+			return nil
+		}
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		// Quick reject: import path string must appear before we pay parse cost.
+		if !strings.Contains(string(src), suffix+"\"") {
+			return nil
+		}
+		fset := token.NewFileSet()
+		f, parseErr := parser.ParseFile(fset, path, src, parser.ImportsOnly)
+		if parseErr != nil {
+			return nil
+		}
+		for _, imp := range f.Imports {
+			ip := strings.Trim(imp.Path.Value, `"`)
+			if strings.HasSuffix(ip, suffix) {
+				relCaller, _ := filepath.Rel(workspace, path)
+				relCaller = filepath.ToSlash(relCaller)
+				if _, dup := seen[relCaller]; !dup {
+					seen[relCaller] = struct{}{}
+					importers = append(importers, relCaller)
+				}
+				break
+			}
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return importers, fmt.Errorf("workspace scan: %w", walkErr)
+	}
+	return importers, nil
+}
