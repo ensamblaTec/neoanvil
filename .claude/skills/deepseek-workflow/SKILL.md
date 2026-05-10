@@ -201,6 +201,29 @@ Per directive `[DEEPSEEK-OPERATIONAL-EFFICIENCY]`:
 
 ---
 
+## Regla #11 — Cuándo NO usar DeepSeek (route a `neo_local_llm`)
+
+**ADR-013** entregó `neo_local_llm` como complemento $0/call sobre Qwen
+2.5-Coder 7B local. Para preservar el budget DS, mover los siguientes
+casos al local:
+
+| Caso | Mejor lugar | Razón |
+|------|-------------|-------|
+| Refactor mecánico (rename, format, doc-comment) | `neo_local_llm` | DS pricing es overkill; 7B local da resultado equivalente |
+| Boilerplate generation (test stubs, README skeletons) | `neo_local_llm` | Calidad suficiente, $0 |
+| Daemon-mode "is this finding real?" yes/no | `neo_local_llm` | Decision binaria, no requiere razonamiento |
+| Translation, summarization | `neo_local_llm` | DS reasoner overkill |
+| Distill report 5KB → 300 tokens | DS `distill_payload` | Cache discipline 50× sigue siendo win |
+| **SEV ≥ 9 security audits** | DS `red_team_audit` (pro/high) | Local 7B no detecta clases sutiles |
+| **New crypto/auth/storage primitives** | DS pro+max | Frontier quality requerida |
+| Architectural decisions ground-truth | DS reasoner | Aceptamos costo por correctness |
+
+Numéricamente: 100 audits/noche en daemon mode = $3-15 con DS, $0 con
+local. El operator routing rule vive en agent prompt — no es servidor-side
+auto-routing.
+
+---
+
 ## Cross-checks rápidos
 
 ```bash

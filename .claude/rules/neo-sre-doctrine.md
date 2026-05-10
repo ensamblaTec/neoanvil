@@ -186,17 +186,18 @@ bbolt no soporta mixed RW+RO — cada tier necesita un leader único. Ver `docs/
 
 ---
 
-## 8. Specialist Tools (7 tools)
+## 8. Specialist Tools (8 tools)
 
 | Tool | Cuándo usarlo |
 |------|--------------|
 | `neo_compress_context` | Cuando BRIEFING retorna Master Plan completo, IO > 500KB, o tras 3+ ediciones seguidas. Alternativa: `BRIEFING mode: compact` cuando el plan esté cerrado |
 | `neo_apply_migration` | Ejecuta SQL raw via `dba.Analyzer` con guardrails ACID |
-| `neo_forge_tool` | Hot-compile Go → WASM de tools custom en runtime |
+| `neo_forge_tool` | Hot-compile Go → WASM de tools custom en runtime (⚠️ scaffold roto, ver technical_debt.md) |
 | `neo_download_model` | Stream de `.wasm`/`.onnx`/`.gguf` a `.neo/models/` |
 | `neo_log_analyzer` | Schema: `content\|log_path` + `max_lines` (default 1000). Análisis semántico de logs: level counts, gaps >1s, top-5 error components, correlación HNSW con corpus INC. Usar para analizar INC-*.md directamente o logs de producción |
 | `neo_tool_stats` | JSON con p50/p95/p99/errors/calls por tool MCP. Schema: `sort_by: p99\|p95\|p50\|errors\|calls` + `top N` + `format: json\|csv` |
 | `neo_debt` | **5 actions** (PILAR LXVI + LXVII): list, record, resolve, affecting_me, fetch. **4-tier debt access**: `workspace` (`.neo/technical_debt.md` — kanban.AppendTechDebt), `project` (`.neo-project/SHARED_DEBT.md` — federation.ParseSharedDebt), `org` (`.neo-org/DEBT.md` — AppendOrgDebt/ResolveOrgDebt, record accepts `affected_projects []string`), `nexus` (HTTP `/internal/nexus/debt` — Nexus dispatcher). `affecting_me` es shortcut para ver issues Nexus contra el workspace actual — recomendado al inicio de sesión cuando BRIEFING muestra `⚠️ NEXUS-DEBT:N P0:M` |
+| `neo_local_llm` | **ADR-013**: routes prompts a Ollama local (default `qwen2.5-coder:7b` por `cfg.AI.LocalModel`). $0/call, ~5-30s/audit en RTX 3090, **407 ms warm-cache** post-load. Schema: `prompt` + opcional `model`/`system`/`max_tokens`/`temperature`. Use para refactor sketches, mechanical fan-out, daemon-mode triage. SEV ≥ 9 audits + decisiones arquitectónicas siguen yendo a `deepseek_call` (frontier quality). Routing local-vs-DS lo decide el agent prompt, no el server |
 
 ---
 

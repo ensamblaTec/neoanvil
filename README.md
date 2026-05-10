@@ -325,16 +325,22 @@ Live measurements on this workstation (RTX 3090 24GB, Ollama 11434):
 
 | Workload | Qwen 7B (local) | DeepSeek API (estimated) |
 |----------|----------------:|-------------------------:|
-| Trivial prompt (~2 token reply) | 0.28 s | ~3-5 s + $0.001 |
+| Trivial prompt cold (~2 token reply, model loading) | 0.28 s | ~3-5 s + $0.001 |
+| **Trivial prompt warm-cache** (~15 char reply) | **407 ms** | ~3-5 s + $0.001 |
 | Realistic audit (~500 token reply, 16 tok/s sustained) | 25-32 s | ~5-15 s + $0.005 |
 | Daemon mode 100 audits/night | **~$0** | $3-15 |
 | Quality on 1-shot race-condition audit | found bug correctly | found bug correctly |
 
-Tradeoff: ~2× slower per audit, but free and offline-capable. Default
-model picked for portability (4.5 GB fits any 8 GB+ GPU + 16 GB+ system
-RAM); `qwen2.5-coder:32b` would be higher quality but requires 64 GB+
-system RAM to load via Ollama. Operators with more RAM can override per
-call via `args["model"]`.
+After the model is warm in VRAM (held by Ollama keep-alive), trivial
+classification calls drop to sub-500ms — competitive with the API for
+yes/no triage decisions while staying free.
+
+Tradeoff: ~2× slower per audit cold, ~equal warm, free and offline-capable.
+Default model picked for portability (4.5 GB fits any 8 GB+ GPU + 16 GB+
+system RAM); `qwen2.5-coder:32b` would be higher quality but requires
+64 GB+ system RAM to load via Ollama. Operators set the default once via
+`cfg.AI.LocalModel` in `neo.yaml`; per-call override via `args["model"]`
+still works.
 
 Recommended routing rule (codified in ADR-013, not enforced server-side):
 

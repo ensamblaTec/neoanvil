@@ -11,6 +11,21 @@ description: Inventario de las 15 tools MCP de neoanvil (neo_radar 23 intents, n
 
 ---
 
+## Specialist tools (8)
+
+| Tool | Use case |
+|------|----------|
+| `neo_compress_context` | Squash large outputs / logs / 3+ edits since last BRIEFING |
+| `neo_apply_migration` | SQL raw via dba.Analyzer (internal SQLite brain.db) |
+| `neo_forge_tool` | Hot-compile Go→WASM (⚠️ scaffold-broken, see technical_debt.md) |
+| `neo_download_model` | Stream `.wasm`/`.onnx`/`.gguf` to `.neo/models/` |
+| `neo_log_analyzer` | Semantic log analysis + INC corpus HNSW correlation |
+| `neo_tool_stats` | p50/p95/p99 + errors per tool MCP, includes plugin metrics |
+| `neo_debt` | 4-tier debt registry (workspace/project/org/nexus) — PILAR LXVI/LXVII |
+| `neo_local_llm` | **ADR-013**: prompt → local Ollama (Qwen 7B default). $0/call, ~5-30s/audit, 407 ms warm-cache trivial reply. Default model from `cfg.AI.LocalModel` |
+
+---
+
 ## Macro-tools (7)
 
 ### `neo_radar` — 23 intents

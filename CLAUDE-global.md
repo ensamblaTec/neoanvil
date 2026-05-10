@@ -124,7 +124,7 @@ Daemon mode se **suspende automáticamente** cuando RAPL > 60W (`STABILIZING`). 
 | `neo_command` | Shell dispatcher | **3 actions** | `action: run\|approve\|kill` |
 | `neo_memory` | Brain-state + Knowledge Store | **9 actions** | `action: commit\|learn\|rem_sleep\|load_snapshot\|store\|fetch\|list\|drop\|search` |
 
-### 7 Specialist Tools
+### 8 Specialist Tools
 
 | Tool | Rol |
 |------|-----|
@@ -135,6 +135,7 @@ Daemon mode se **suspende automáticamente** cuando RAPL > 60W (`STABILIZING`). 
 | `neo_log_analyzer` | Logs + correlación HNSW con INC |
 | `neo_tool_stats` | p50/p95/p99 + errors por tool MCP + plugin_metrics |
 | `neo_debt` | 4-tier debt registry (workspace/project/org/nexus, PILAR LXVI/LXVII) |
+| `neo_local_llm` | **ADR-013**: prompt → local Ollama (Qwen 2.5-Coder 7B default). $0/call, ~5-30s warm. Complemento al plugin DeepSeek para tareas no-frontier |
 
 ### Enums clave
 

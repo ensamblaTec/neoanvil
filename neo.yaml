@@ -138,7 +138,7 @@ ai:
     embedding_model: nomic-embed-text
     context_window: 8192
     embed_timeout_seconds: 8
-    local_model: ""
+    local_model: qwen2.5-coder:7b
 rag:
     db_path: .neo/db/hnsw.db
     chunk_size: 3000
