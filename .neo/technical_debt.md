@@ -229,48 +229,40 @@ renamed to `migCfg`.
 
 ---
 
-## (legacy entry — kept until file gets full archive sweep)
-## [2026-05-10 02:13] AST COMPLEXITY in boot_helpers.go:494
+<!--
+  Zombie entries swept 2026-05-10. The 4 raw "## [date] AST COMPLEXITY"
+  blocks that used to live below this line were auto-recorded by
+  AST_AUDIT and then resolved in commits 5138d0f / 3066d84, but the
+  parser couldn't recognise the ~~RESOLVED~~ markers above. They were
+  surfacing in `neo_debt(action:"affecting_me")` as false positives.
+  All four are tracked under the matching ~~RESOLVED 2026-05-10~~
+  section earlier in this file.
+-->
 
-**Prioridad:** alta
+## ~~[T001 nexus] CERTIFY-CWD-BUG~~ — RESOLVED 2026-05-10
 
-File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/neo-mcp/boot_helpers.go
-Line: 494
-Kind: COMPLEXITY
-Detail: func bootCoordinatorTier: CC=17 (limit 15)
+`projectRootOf` preferred neo.yaml over go.mod, breaking strategos
+where `neo.yaml` lives at the workspace root but `go.mod` is in
+`backend/`. `go test/build/list` ran with `cmd.Dir = projectRootOf()`
+→ "go.mod file not found" → 100% bypass=1 rate over ~30 sessions.
 
----
+Fix: introduced `goModRootOf()` helper that walks ONLY for go.mod;
+swapped 3 call sites in `cmd/neo-mcp/macro_tools.go` (fast-mode
+build line 1605, preflight `go list` line 1712, TDD `go test`
+line 1735). `projectRootOf` retained for non-Go contexts (python,
+polyglot module builds). Regression tests in
+`macro_tools_modroot_test.go` pin the layout invariant + the
+nested-go.mod corner case.
 
-## [2026-05-10 02:13] AST COMPLEXITY in config.go:396
+## ~~[T002 nexus] TECH_DEBT_MAP-TOKEN-FLOOD~~ — RESOLVED 2026-05-10
 
-**Prioridad:** alta
+`handleTechDebtMap` was uncached — operator paid ~$47 over 477 calls
+in strategos before this gate. Hotspot data only meaningfully changes
+when files certify, so a 30-min TTL cache loses zero accuracy.
 
-File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/plugin-jira/config.go
-Line: 396
-Kind: COMPLEXITY
-Detail: func migrateToPluginConfig: CC=18 (limit 15)
-
----
-
-## [2026-05-10 02:13] AST COMPLEXITY in tool_map_reduce.go:38
-
-**Prioridad:** alta
-
-File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/plugin-deepseek/tool_map_reduce.go
-Line: 38
-Kind: COMPLEXITY
-Detail: func mapReduceRefactor: CC=19 (limit 15)
-
----
-
-## [2026-05-10 03:02] AST COMPLEXITY in main.go:256
-
-**Prioridad:** alta
-
-File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/plugin-github/main.go
-Line: 256
-Kind: COMPLEXITY
-Detail: func handleToolsCall: CC=22 (limit 15)
-
----
+Fix: process-wide `techDebtMapCache` keyed by
+`<workspace>|<limit>|<targetWorkspace>`. Cached body returns prefixed
+with `⚠️ CACHED(TTL:30m)` so the operator sees the freshness window.
+`bypass_cache:true` arg forces a fresh recompute. Concurrency-safe
+via sync.RWMutex; verified by `TestTechDebtMapCache_RaceFreeUnderConcurrentReadWrite`.
 

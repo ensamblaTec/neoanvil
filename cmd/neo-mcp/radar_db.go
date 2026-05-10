@@ -4,11 +4,68 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/cpg"
 	"github.com/ensamblatec/neoanvil/pkg/telemetry"
 )
+
+// techDebtMapTTL is the per-(workspace,limit,scope) cache window for
+// handleTechDebtMap. Set per Nexus-debt T002 — operator paid ~$47 in
+// duplicate token spend over 477 calls before this gate. Hotspot data
+// only meaningfully changes when files certify, so a 30-minute TTL
+// loses essentially zero accuracy in exchange for a 50× cost cut on
+// repeat callers within a session.
+const techDebtMapTTL = 30 * time.Minute
+
+// techDebtMapCacheEntry pairs the rendered markdown with its expiry
+// stamp so a stale read fall-through to a fresh recompute is a single
+// time.Now() compare.
+type techDebtMapCacheEntry struct {
+	body    string
+	expires time.Time
+}
+
+// techDebtMapCache is a process-wide TTL cache; key shape is
+// `<workspace>|<limit>|<targetWorkspace>` so a "project" scatter
+// caches separately from the local-only call.
+var (
+	techDebtMapCacheMu sync.RWMutex
+	techDebtMapCache   = make(map[string]techDebtMapCacheEntry)
+)
+
+// techDebtMapCacheKey builds the per-call cache key. Centralised so the
+// reader and writer can't drift.
+func techDebtMapCacheKey(workspace string, limit int, targetWorkspace string) string {
+	return fmt.Sprintf("%s|%d|%s", workspace, limit, targetWorkspace)
+}
+
+// techDebtMapCacheGet returns a cached body iff the entry is non-empty
+// AND not yet expired. Holds the read lock for the lookup window only.
+func techDebtMapCacheGet(key string) (string, bool) {
+	techDebtMapCacheMu.RLock()
+	entry, ok := techDebtMapCache[key]
+	techDebtMapCacheMu.RUnlock()
+	if !ok || time.Now().After(entry.expires) {
+		return "", false
+	}
+	return entry.body, true
+}
+
+// techDebtMapCachePut stores the rendered body with the standard TTL.
+// Eviction of expired keys is opportunistic — old entries don't block
+// new puts and get GCed naturally as keys are overwritten or stay
+// untouched (memory grows linearly with workspace count, which is
+// bounded by the operator's federation size).
+func techDebtMapCachePut(key, body string) {
+	techDebtMapCacheMu.Lock()
+	techDebtMapCache[key] = techDebtMapCacheEntry{
+		body:    body,
+		expires: time.Now().Add(techDebtMapTTL),
+	}
+	techDebtMapCacheMu.Unlock()
+}
 
 func (t *RadarTool) handleDBSchema(ctx context.Context, args map[string]any) (any, error) {
 	if t.dbaEngine == nil {
@@ -54,6 +111,25 @@ func (t *RadarTool) handleTechDebtMap(ctx context.Context, args map[string]any) 
 	if lFloat, ok := args["limit"].(float64); ok && lFloat > 0 {
 		limit = int(lFloat)
 	}
+	twRaw, _ := args["target_workspace"].(string)
+
+	// [Nexus debt T002] TTL cache. Hotspot data only changes when
+	// files certify — at most a few times per session. Caching for 30
+	// min cuts the repeat-call cost from ~$0.10/call to ~$0 while
+	// losing ≤30min of freshness. The cached body is prefixed with
+	// `⚠️ CACHED(...)` so the operator sees the freshness window and
+	// can bypass with a fresh process or by including the special arg.
+	bypassCache := false
+	if v, ok := args["bypass_cache"].(bool); ok {
+		bypassCache = v
+	}
+	cacheKey := techDebtMapCacheKey(t.workspace, limit, twRaw)
+	if !bypassCache {
+		if cached, ok := techDebtMapCacheGet(cacheKey); ok {
+			return mcpText("⚠️ CACHED(TTL:30m) — pass bypass_cache:true to force fresh\n\n" + cached), nil
+		}
+	}
+
 	hotspots, err := telemetry.GetTopHotspots(limit)
 	if err != nil {
 		return nil, err
@@ -88,12 +164,13 @@ func (t *RadarTool) handleTechDebtMap(ctx context.Context, args map[string]any) 
 
 	// [333.A] target_workspace:"project" — scatter to member workspaces via Nexus and
 	// append each result as a labeled section.
-	twRaw, _ := args["target_workspace"].(string)
 	if twRaw == "project" {
 		t.appendProjectDebtSections(ctx, &sb, limit)
 	}
 
-	return mcpText(sb.String()), nil
+	body := sb.String()
+	techDebtMapCachePut(cacheKey, body)
+	return mcpText(body), nil
 }
 
 // appendProjectDebtSections scatters TECH_DEBT_MAP to all member workspaces and

@@ -138,6 +138,36 @@ func projectRootOf(filename string) string {
 	return start
 }
 
+// goModRootOf returns the directory containing the closest ancestor
+// `go.mod`, walking up from filename. Falls back to filename's dir if
+// no go.mod is found anywhere in the parent chain.
+//
+// This is the correct root for `cmd.Dir` of go-toolchain commands
+// (go test / go build / go list) because Go always resolves packages
+// relative to the module root declared in go.mod. Using projectRootOf
+// (which prefers neo.yaml) breaks for monorepo layouts like strategos
+// where neo.yaml lives at the workspace root but go.mod is in
+// `backend/`. The error surfaces as "go.mod file not found in current
+// directory or any parent directory" with bypass=1 as the only
+// workaround.
+//
+// Resolves [Nexus debt T001 CERTIFY-CWD-BUG, P0]. Operator-reported
+// 100% bypass rate on strategos for ~30 sessions before this fix.
+func goModRootOf(filename string) string {
+	start := filepath.Dir(filename)
+	for dir := start; ; {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return start
+}
+
 // [SRE-25.2.1] Global CRDT for multi-agent file locking — prevents concurrent certifications.
 var globalCRDT = &swarm.LWWSet{}
 
@@ -1602,7 +1632,7 @@ func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, 
 		// Fast mode: go build only, no bouncer/tests.
 		checks["build"] = "running"
 		buildCmd := exec.CommandContext(ctx, "go", "build", filepath.Dir(filename)) //nolint:gosec // G204-LITERAL-BIN
-		buildCmd.Dir = projectRootOf(filename)
+		buildCmd.Dir = goModRootOf(filename) // [T001] go.mod root, NOT neo.yaml root
 		if out, buildErr := buildCmd.CombinedOutput(); buildErr != nil {
 			checks["build"] = "fail:" + strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 		} else {
@@ -1709,7 +1739,7 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 	// [SRE-76.4] Preflight dependency check — verify imports resolve before running tests.
 	pkgPath := filepath.Dir(filename)
 	listCmd := exec.CommandContext(ctx, "go", "list", pkgPath) //nolint:gosec // G204-LITERAL-BIN
-	listCmd.Dir = projectRootOf(filename)
+	listCmd.Dir = goModRootOf(filename) // [T001] go.mod root, NOT neo.yaml root
 	if out, listErr := listCmd.CombinedOutput(); listErr != nil {
 		outStr := strings.TrimSpace(string(out))
 		var missing []string
@@ -1732,7 +1762,7 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 
 	// [SRE-17.3.3] Test-Driven Validation.
 	testCmd := exec.CommandContext(ctx, "go", "test", "-short", pkgPath) //nolint:gosec // G204-LITERAL-BIN
-	testCmd.Dir = projectRootOf(filename)
+	testCmd.Dir = goModRootOf(filename) // [T001] go.mod root, NOT neo.yaml root
 	out, errTest := testCmd.CombinedOutput()
 	if errTest != nil {
 		rollbackAll()
