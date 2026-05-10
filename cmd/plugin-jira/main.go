@@ -265,9 +265,9 @@ func buildState() (*state, error) {
 	if !os.IsNotExist(err) {
 		// jira.json exists but is invalid — try auto-migration from legacy
 		fmt.Fprintf(os.Stderr, "plugin-jira: jira.json invalid (%v), attempting migration\n", err)
-		cfg, migErr := migrateToPluginConfig(defaultConfigPath)
+		migCfg, migErr := migrateToPluginConfig(defaultConfigPath)
 		if migErr == nil {
-			return buildStateFromConfig(cfg)
+			return buildStateFromConfig(migCfg)
 		}
 		fmt.Fprintf(os.Stderr, "plugin-jira: migration failed: %v, falling back to env vars\n", migErr)
 	} else {

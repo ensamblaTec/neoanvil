@@ -391,18 +391,25 @@ func buildStateFromConfig(cfg *PluginConfig) (*state, error) {
 
 // ── Migration ───────────────────────────────────────────────────────────────
 
-// migrateToPluginConfig detects legacy credentials+contexts and generates jira.json.
-// Creates a backup of the legacy files before writing.
-func migrateToPluginConfig(destPath string) (*PluginConfig, error) {
-	home := os.Getenv("HOME")
-	credPath := filepath.Join(home, ".neo", "credentials.json")
-	ctxPath := filepath.Join(home, ".neo", "contexts.json")
+// legacyJiraEntry is the projection of a single jira-provider row in
+// the host's credentials.json that's relevant for migration.
+type legacyJiraEntry struct {
+	Token    string
+	Email    string
+	Domain   string
+	TenantID string
+}
 
-	credData, err := os.ReadFile(credPath)
+// readJiraCredEntry parses ~/.neo/credentials.json and returns the
+// jira-provider entry if present, plus the source path and raw bytes
+// (needed by the migration backup step). [CC refactor — split out of
+// migrateToPluginConfig]
+func readJiraCredEntry(home string) (entry *legacyJiraEntry, credPath string, raw []byte, err error) {
+	credPath = filepath.Join(home, ".neo", "credentials.json")
+	raw, err = os.ReadFile(credPath)
 	if err != nil {
-		return nil, fmt.Errorf("read credentials.json: %w", err)
+		return nil, credPath, nil, fmt.Errorf("read credentials.json: %w", err)
 	}
-
 	var creds struct {
 		Entries []struct {
 			Provider string `json:"provider"`
@@ -412,66 +419,76 @@ func migrateToPluginConfig(destPath string) (*PluginConfig, error) {
 			TenantID string `json:"tenant_id"`
 		} `json:"entries"`
 	}
-	if err := json.Unmarshal(credData, &creds); err != nil {
-		return nil, fmt.Errorf("parse credentials.json: %w", err)
-	}
-
-	var jiraEntry *struct {
-		Token    string
-		Email    string
-		Domain   string
-		TenantID string
+	if err := json.Unmarshal(raw, &creds); err != nil {
+		return nil, credPath, raw, fmt.Errorf("parse credentials.json: %w", err)
 	}
 	for _, e := range creds.Entries {
 		if e.Provider == "jira" {
-			jiraEntry = &struct {
-				Token    string
-				Email    string
-				Domain   string
-				TenantID string
-			}{e.Token, e.Email, e.Domain, e.TenantID}
+			return &legacyJiraEntry{Token: e.Token, Email: e.Email, Domain: e.Domain, TenantID: e.TenantID}, credPath, raw, nil
+		}
+	}
+	return nil, credPath, raw, errors.New("no jira entry in credentials.json")
+}
+
+// resolveLegacyContextEnv resolves the active jira space + board.
+// Tries env vars first (JIRA_ACTIVE_SPACE / JIRA_ACTIVE_BOARD), then
+// falls back to reading ~/.neo/contexts.json. Returns "UNKNOWN" for
+// space when nothing resolves so the migrated config is still valid.
+// [CC refactor]
+func resolveLegacyContextEnv(home string) (space, board string) {
+	space = os.Getenv("JIRA_ACTIVE_SPACE")
+	board = os.Getenv("JIRA_ACTIVE_BOARD")
+	if space != "" && board != "" {
+		return space, board
+	}
+	ctxPath := filepath.Join(home, ".neo", "contexts.json")
+	ctxData, err := os.ReadFile(ctxPath)
+	if err != nil {
+		if space == "" {
+			space = "UNKNOWN"
+		}
+		return space, board
+	}
+	var ctxFile struct {
+		Contexts []struct {
+			Provider string `json:"provider"`
+			SpaceID  string `json:"space_id"`
+			BoardID  string `json:"board_id"`
+		} `json:"contexts"`
+	}
+	if json.Unmarshal(ctxData, &ctxFile) == nil {
+		for _, c := range ctxFile.Contexts {
+			if c.Provider != "jira" {
+				continue
+			}
+			if space == "" {
+				space = c.SpaceID
+			}
+			if board == "" {
+				board = c.BoardID
+			}
 			break
 		}
 	}
-	if jiraEntry == nil {
-		return nil, errors.New("no jira entry in credentials.json")
+	if space == "" {
+		space = "UNKNOWN"
 	}
+	return space, board
+}
 
+// migrateToPluginConfig detects legacy credentials+contexts and generates jira.json.
+// Creates a backup of the legacy files before writing.
+func migrateToPluginConfig(destPath string) (*PluginConfig, error) {
+	home := os.Getenv("HOME")
+	jiraEntry, credPath, credData, err := readJiraCredEntry(home)
+	if err != nil {
+		return nil, err
+	}
 	keyName := "default"
 	if jiraEntry.TenantID != "" {
 		keyName = jiraEntry.TenantID
 	}
-
-	space := os.Getenv("JIRA_ACTIVE_SPACE")
-	boardID := os.Getenv("JIRA_ACTIVE_BOARD")
-
-	// Try reading from contexts.json
-	if ctxData, err := os.ReadFile(ctxPath); err == nil {
-		var ctxFile struct {
-			Contexts []struct {
-				Provider string `json:"provider"`
-				SpaceID  string `json:"space_id"`
-				BoardID  string `json:"board_id"`
-			} `json:"contexts"`
-		}
-		if json.Unmarshal(ctxData, &ctxFile) == nil {
-			for _, c := range ctxFile.Contexts {
-				if c.Provider == "jira" {
-					if space == "" {
-						space = c.SpaceID
-					}
-					if boardID == "" {
-						boardID = c.BoardID
-					}
-					break
-				}
-			}
-		}
-	}
-
-	if space == "" {
-		space = "UNKNOWN"
-	}
+	space, boardID := resolveLegacyContextEnv(home)
 
 	cfg := &PluginConfig{
 		Version:       pluginConfigVersion,

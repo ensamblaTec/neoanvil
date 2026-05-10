@@ -189,9 +189,9 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	if cfg.DBPath != "" {
-		db, err := bolt.Open(cfg.DBPath, 0600, &bolt.Options{Timeout: 5 * time.Second})
-		if err != nil {
-			return nil, fmt.Errorf("deepseek: open db %s: %w", cfg.DBPath, err)
+		db, openErr := bolt.Open(cfg.DBPath, 0600, &bolt.Options{Timeout: 5 * time.Second})
+		if openErr != nil {
+			return nil, fmt.Errorf("deepseek: open db %s: %w", cfg.DBPath, openErr)
 		}
 		if err := db.Update(func(tx *bolt.Tx) error {
 			for _, name := range []string{bucketThreads, bucketBilling, bucketCheckpts} {

@@ -53,28 +53,13 @@ func main() {
 	}
 
 	if *binPath == "" {
-		// Auto-detect: look for neo-mcp in same directory as neo-nexus, then PATH
-		exe, _ := os.Executable()
-		candidate := filepath.Join(filepath.Dir(exe), "neo-mcp")
-		if _, err := os.Stat(candidate); err == nil {
-			*binPath = candidate
-		} else {
-			*binPath = "neo-mcp" // fallback to PATH
-		}
+		*binPath = autodetectNeoMCPBinary()
 	}
 
 	// [SRE-SSRF] Initialize SSRF trusted ports for Nexus: the full child port range
 	// plus well-known internal services. Without this, SafeHTTPClient() used in scatter.go
 	// blocks loopback calls to children (127.0.0.1 hits SSRF barrier on nil trustedPorts map).
-	{
-		ports := make([]int, 0, cfg.Nexus.PortRangeSize+16)
-		for p := cfg.Nexus.PortRangeBase; p < cfg.Nexus.PortRangeBase+cfg.Nexus.PortRangeSize; p++ {
-			ports = append(ports, p)
-		}
-		// Well-known internal services
-		ports = append(ports, 11434, 11435, 9000, 8087, 8085, 8081, 8080, 6060)
-		sre.InitTrustedPorts(ports)
-	}
+	initSSRFTrustedPorts(cfg)
 
 	log.Printf("[NEXUS] Starting multi-workspace dispatcher on %s:%d", cfg.Nexus.BindAddr, *port)
 	log.Printf("[NEXUS] neo-mcp binary: %s", *binPath)
@@ -115,14 +100,8 @@ func main() {
 	// every child as NEO_NEXUS_INTERNAL_TOKEN so children can authenticate their
 	// /internal/certify/* and /internal/chaos/* calls back to Nexus. The token is
 	// ephemeral — a new one is created on each Nexus restart.
-	{
-		b := make([]byte, 32)
-		if _, err := rand.Read(b); err != nil {
-			log.Fatalf("[NEXUS-FATAL] failed to generate internal token: %v", err)
-		}
-		pool.InternalToken = hex.EncodeToString(b)
-		log.Printf("[NEXUS] internal auth token generated (len=%d)", len(pool.InternalToken))
-	}
+	pool.InternalToken = mustGenerateInternalToken()
+	log.Printf("[NEXUS] internal auth token generated (len=%d)", len(pool.InternalToken))
 
 	// Context for all background goroutines — created before EnsureAll so services
 	// receive cancellation on Nexus shutdown.
@@ -1370,4 +1349,45 @@ func broadcastKnowledgeRefresh(srcWsID string, pool *nexus.ProcessPool) {
 	for i := 0; i < cap(sem); i++ {
 		sem <- struct{}{}
 	}
+}
+
+// autodetectNeoMCPBinary returns the path of the neo-mcp binary the
+// dispatcher will spawn. Looks for it next to the running binary first
+// (matches our build layout); falls back to "neo-mcp" so the caller
+// can rely on $PATH lookup. Extracted from main() to keep CC ≤ 15.
+// [CC refactor]
+func autodetectNeoMCPBinary() string {
+	exe, _ := os.Executable()
+	candidate := filepath.Join(filepath.Dir(exe), "neo-mcp")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return "neo-mcp"
+}
+
+// initSSRFTrustedPorts seeds sre.InitTrustedPorts with the full child
+// port range plus well-known internal services. Without this,
+// SafeHTTPClient() used in scatter.go blocks loopback calls to
+// children (127.0.0.1 hits the SSRF barrier on a nil trustedPorts
+// map). Extracted from main() to keep CC ≤ 15. [CC refactor]
+func initSSRFTrustedPorts(cfg *nexus.NexusConfig) {
+	ports := make([]int, 0, cfg.Nexus.PortRangeSize+16)
+	for p := cfg.Nexus.PortRangeBase; p < cfg.Nexus.PortRangeBase+cfg.Nexus.PortRangeSize; p++ {
+		ports = append(ports, p)
+	}
+	// Well-known internal services.
+	ports = append(ports, 11434, 11435, 9000, 8087, 8085, 8081, 8080, 6060)
+	sre.InitTrustedPorts(ports)
+}
+
+// mustGenerateInternalToken returns a 32-byte hex token used by
+// children to authenticate /internal/certify/* and /internal/chaos/*
+// calls back to Nexus. Fatal if rand.Read fails (system entropy is
+// genuinely broken at that point). Extracted from main(). [CC refactor]
+func mustGenerateInternalToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("[NEXUS-FATAL] failed to generate internal token: %v", err)
+	}
+	return hex.EncodeToString(b)
 }

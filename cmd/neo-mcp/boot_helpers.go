@@ -493,52 +493,83 @@ type coordBootResult struct {
 // [354.Z-redesign / PILAR LXVII / 355.A-B]
 func bootCoordinatorTier(workspace string, cfg *config.NeoConfig) coordBootResult {
 	var res coordBootResult
-
-	// [354.Z / Piece 2] Non-coordinator workspaces proxy tier:"project" to the coord.
-	if cfg.Project != nil && cfg.Project.CoordinatorWorkspace != "" && !isCoordinatorWorkspace(workspace, cfg) {
-		res.CoordWSID = resolveCoordinatorWSID(cfg.Project.CoordinatorWorkspace)
-		if res.CoordWSID == "" {
-			log.Printf("[SRE-WARN] coordinator_workspace=%q not found in registry — tier:\"project\" will error until coord boots", cfg.Project.CoordinatorWorkspace)
-		} else {
-			log.Printf("[NEO-BOOT] tier:\"project\" will proxy to coordinator wsid=%s", res.CoordWSID)
-		}
-	}
-
-	// [PILAR LXVII / 355.A] Open org-tier store when this is the org coordinator.
-	if orgDir, ok := config.FindNeoOrgDir(workspace); ok && cfg.Org != nil {
-		projectRoot := workspace
-		pdir, hasProject := federation.FindNeoProjectDir(workspace)
-		if hasProject {
-			projectRoot = filepath.Dir(pdir)
-		}
-		ks, orgErr := knowledge.OpenOrgStore(knowledge.OrgStoreConfig{
-			OrgDir:                orgDir,
-			ProjectRoot:           projectRoot,
-			CoordinatorProject:    cfg.Org.CoordinatorProject,
-			DBPathOverride:        cfg.Org.SharedMemoryPath,
-			IsStandaloneWorkspace: !hasProject,
-		})
-		switch {
-		case orgErr == nil && ks != nil:
-			res.OrgKS = ks
-		case orgErr != nil && orgErr.Error() != "knowledge: org store is read-only from non-coordinator projects":
-			log.Printf("[ORG-BOOT] OpenOrgStore: %v", orgErr)
-		}
-		// [355.B] Mirror org directives into .claude/rules/ with `org-` prefix so the
-		// agent picks them up alongside workspace-local rules. Idempotent, orphans logged.
-		if sync, serr := federation.SyncOrgDirectivesToWorkspace(orgDir, workspace); serr == nil && sync != nil {
-			if sync.Copied > 0 {
-				log.Printf("[ORG-DIRS] synced %d org directive(s) to %s/.claude/rules/ (skipped %d identical)",
-					sync.Copied, workspace, sync.Skipped)
-			}
-			if len(sync.OrphansDetected) > 0 {
-				log.Printf("[ORG-DIRS] orphan org-rules in workspace (source no longer exists): %v", sync.OrphansDetected)
-			}
-		}
-	}
-
+	resolveProjectCoord(workspace, cfg, &res)
+	openOrgTierIfCoordinator(workspace, cfg, &res)
 	if cfg.Org != nil {
 		res.OrgWriters = cfg.Org.Writers
 	}
 	return res
+}
+
+// resolveProjectCoord finds the project-tier coordinator workspace ID
+// for non-coordinator workspaces and writes the result into res.
+// Logs warning when declared coordinator is not in the registry.
+// [CC refactor — split out of bootCoordinatorTier]
+func resolveProjectCoord(workspace string, cfg *config.NeoConfig, res *coordBootResult) {
+	if cfg.Project == nil || cfg.Project.CoordinatorWorkspace == "" {
+		return
+	}
+	if isCoordinatorWorkspace(workspace, cfg) {
+		return
+	}
+	res.CoordWSID = resolveCoordinatorWSID(cfg.Project.CoordinatorWorkspace)
+	if res.CoordWSID == "" {
+		log.Printf("[SRE-WARN] coordinator_workspace=%q not found in registry — tier:\"project\" will error until coord boots",
+			cfg.Project.CoordinatorWorkspace)
+		return
+	}
+	log.Printf("[NEO-BOOT] tier:\"project\" will proxy to coordinator wsid=%s", res.CoordWSID)
+}
+
+// openOrgTierIfCoordinator opens the org-tier KnowledgeStore for this
+// workspace when an `.neo-org/` ancestor exists and the operator
+// declared cfg.Org. Non-coordinator projects receive a read-only-error
+// from OpenOrgStore which is intentionally swallowed (they proxy
+// instead). Also mirrors org directives into .claude/rules/ via 355.B.
+// [CC refactor — split out of bootCoordinatorTier]
+func openOrgTierIfCoordinator(workspace string, cfg *config.NeoConfig, res *coordBootResult) {
+	if cfg.Org == nil {
+		return
+	}
+	orgDir, ok := config.FindNeoOrgDir(workspace)
+	if !ok {
+		return
+	}
+	projectRoot := workspace
+	pdir, hasProject := federation.FindNeoProjectDir(workspace)
+	if hasProject {
+		projectRoot = filepath.Dir(pdir)
+	}
+	ks, orgErr := knowledge.OpenOrgStore(knowledge.OrgStoreConfig{
+		OrgDir:                orgDir,
+		ProjectRoot:           projectRoot,
+		CoordinatorProject:    cfg.Org.CoordinatorProject,
+		DBPathOverride:        cfg.Org.SharedMemoryPath,
+		IsStandaloneWorkspace: !hasProject,
+	})
+	switch {
+	case orgErr == nil && ks != nil:
+		res.OrgKS = ks
+	case orgErr != nil && orgErr.Error() != "knowledge: org store is read-only from non-coordinator projects":
+		log.Printf("[ORG-BOOT] OpenOrgStore: %v", orgErr)
+	}
+	syncOrgDirectivesIntoWorkspace(orgDir, workspace)
+}
+
+// syncOrgDirectivesIntoWorkspace mirrors org directives into the
+// workspace's .claude/rules/ with `org-` prefix so the agent picks
+// them up alongside local rules (PILAR LXVII / 355.B). Idempotent.
+// Orphans are logged. [CC refactor]
+func syncOrgDirectivesIntoWorkspace(orgDir, workspace string) {
+	sync, serr := federation.SyncOrgDirectivesToWorkspace(orgDir, workspace)
+	if serr != nil || sync == nil {
+		return
+	}
+	if sync.Copied > 0 {
+		log.Printf("[ORG-DIRS] synced %d org directive(s) to %s/.claude/rules/ (skipped %d identical)",
+			sync.Copied, workspace, sync.Skipped)
+	}
+	if len(sync.OrphansDetected) > 0 {
+		log.Printf("[ORG-DIRS] orphan org-rules in workspace (source no longer exists): %v", sync.OrphansDetected)
+	}
 }

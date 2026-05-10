@@ -87,12 +87,31 @@ func loadGithubPluginConfig(path string) (*PluginConfig, error) {
 	if len(cfg.APIKeys) == 0 {
 		return nil, errors.New("at least one api_key is required")
 	}
-	for name, key := range cfg.APIKeys {
+	if err := validateAPIKeys(cfg.APIKeys); err != nil {
+		return nil, err
+	}
+	if err := validateProjects(cfg.Projects, cfg.APIKeys); err != nil {
+		return nil, err
+	}
+	if cfg.ActiveProject != "" {
+		if _, ok := cfg.Projects[cfg.ActiveProject]; !ok {
+			return nil, fmt.Errorf("active_project %q not in projects map", cfg.ActiveProject)
+		}
+	}
+	return &cfg, nil
+}
+
+// validateAPIKeys verifies each api_key has a supported auth type +
+// either inline token or token_ref, and applies defaults for rate
+// limits when fields are zero. Extracted from loadGithubPluginConfig
+// so the parent stays at CC ≤ 7. [CC refactor]
+func validateAPIKeys(apiKeys map[string]*APIKey) error {
+	for name, key := range apiKeys {
 		if key.Auth.Type != "PAT" {
-			return nil, fmt.Errorf("api_key %q: only Type=\"PAT\" is supported", name)
+			return fmt.Errorf("api_key %q: only Type=\"PAT\" is supported", name)
 		}
 		if key.Auth.Token == "" && key.Auth.TokenRef == "" {
-			return nil, fmt.Errorf("api_key %q: token or token_ref required", name)
+			return fmt.Errorf("api_key %q: token or token_ref required", name)
 		}
 		if key.RateLimit.MaxRequestsPerHour == 0 {
 			key.RateLimit.MaxRequestsPerHour = 5000
@@ -101,23 +120,25 @@ func loadGithubPluginConfig(path string) (*PluginConfig, error) {
 			key.RateLimit.Concurrency = 10
 		}
 	}
-	for projName, proj := range cfg.Projects {
+	return nil
+}
+
+// validateProjects verifies each project has owner+repo and refers to
+// an existing api_key entry. Extracted from loadGithubPluginConfig.
+// [CC refactor]
+func validateProjects(projects map[string]*Project, apiKeys map[string]*APIKey) error {
+	for projName, proj := range projects {
 		if proj.APIKeyRef == "" {
-			return nil, fmt.Errorf("project %q: api_key ref required", projName)
+			return fmt.Errorf("project %q: api_key ref required", projName)
 		}
-		if _, ok := cfg.APIKeys[proj.APIKeyRef]; !ok {
-			return nil, fmt.Errorf("project %q references unknown api_key %q", projName, proj.APIKeyRef)
+		if _, ok := apiKeys[proj.APIKeyRef]; !ok {
+			return fmt.Errorf("project %q references unknown api_key %q", projName, proj.APIKeyRef)
 		}
 		if proj.Owner == "" || proj.Repo == "" {
-			return nil, fmt.Errorf("project %q: owner+repo required", projName)
+			return fmt.Errorf("project %q: owner+repo required", projName)
 		}
 	}
-	if cfg.ActiveProject != "" {
-		if _, ok := cfg.Projects[cfg.ActiveProject]; !ok {
-			return nil, fmt.Errorf("active_project %q not in projects map", cfg.ActiveProject)
-		}
-	}
-	return &cfg, nil
+	return nil
 }
 
 // resolveGithubToken extracts the actual PAT from a key — inline

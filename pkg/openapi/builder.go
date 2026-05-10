@@ -48,73 +48,15 @@ type BuildOptions struct {
 // contracts. Operation IDs are derived from method + path so they're
 // stable across rebuilds (good for client codegen).
 func BuildSpec(contracts []ContractIface, tools []ToolIface, opts BuildOptions) *Spec {
-	if opts.Title == "" {
-		opts.Title = "NeoAnvil"
-	}
-	if opts.Version == "" {
-		opts.Version = "1.0.0"
-	}
-	spec := &Spec{
-		OpenAPI: "3.0.3",
-		Info: Info{
-			Title:   opts.Title,
-			Version: opts.Version,
-			Description: "NeoAnvil dispatcher + tool surface (auto-generated). " +
-				"Contract source: AST scan of Go handlers + tool registry.",
-		},
-		Paths: make(map[string]PathItem, len(contracts)),
-		Tags:  defaultTags(),
-	}
-	if opts.BaseURL != "" {
-		spec.Servers = []Server{{URL: opts.BaseURL}}
-	}
+	applyBuildDefaults(&opts)
+	spec := newSpecFromOpts(opts, len(contracts))
 
 	for _, c := range contracts {
-		path := c.GetPath()
-		if !opts.IncludeInternal && strings.HasPrefix(path, "/internal/") {
+		op, opPath, ok := buildOperation(c, opts)
+		if !ok {
 			continue
 		}
-		method := strings.ToLower(c.GetMethod())
-		if method == "" {
-			continue
-		}
-		opPath := normalizeOpenAPIPath(path)
-		op := &Operation{
-			OperationID: deriveOperationID(c.GetMethod(), path, c.GetBackendFn()),
-			Tags:        []string{tagForPath(opPath)},
-			Summary:     c.GetBackendFn(),
-			Responses:   defaultResponses(),
-			Parameters:  pathParameters(opPath),
-		}
-		// [Area 4.1.C] Promote the 200 response from baseline to
-		// schema-typed when the scanner resolved the handler's
-		// encode target.
-		if opts.ResponseScanner != nil {
-			if schema := opts.ResponseScanner.SchemaFor(c.GetBackendFn()); schema != nil {
-				op.Responses["200"] = Response{
-					Description: "OK",
-					Content: map[string]MediaType{
-						"application/json": {Schema: schema},
-					},
-				}
-			}
-		}
-		item := spec.Paths[opPath]
-		switch method {
-		case "get":
-			item.Get = op
-		case "post":
-			item.Post = op
-		case "put":
-			item.Put = op
-		case "patch":
-			item.Patch = op
-		case "delete":
-			item.Delete = op
-		default:
-			continue // unsupported verb
-		}
-		spec.Paths[opPath] = item
+		mergeOperationIntoPath(spec.Paths, opPath, strings.ToLower(c.GetMethod()), op)
 	}
 
 	if opts.IncludeMCPTools && len(tools) > 0 {
@@ -123,6 +65,102 @@ func BuildSpec(contracts []ContractIface, tools []ToolIface, opts BuildOptions) 
 		}
 	}
 	return spec
+}
+
+// applyBuildDefaults fills missing BuildOptions fields with sensible
+// defaults so callers can pass a zero-value BuildOptions{}.
+func applyBuildDefaults(opts *BuildOptions) {
+	if opts.Title == "" {
+		opts.Title = "NeoAnvil"
+	}
+	if opts.Version == "" {
+		opts.Version = "1.0.0"
+	}
+}
+
+// newSpecFromOpts constructs the empty Spec scaffold (info + servers
+// + paths map) before any contract is rendered.
+func newSpecFromOpts(opts BuildOptions, contractsCap int) *Spec {
+	spec := &Spec{
+		OpenAPI: "3.0.3",
+		Info: Info{
+			Title:   opts.Title,
+			Version: opts.Version,
+			Description: "NeoAnvil dispatcher + tool surface (auto-generated). " +
+				"Contract source: AST scan of Go handlers + tool registry.",
+		},
+		Paths: make(map[string]PathItem, contractsCap),
+		Tags:  defaultTags(),
+	}
+	if opts.BaseURL != "" {
+		spec.Servers = []Server{{URL: opts.BaseURL}}
+	}
+	return spec
+}
+
+// buildOperation renders a single contract into an Operation. Returns
+// ok=false when the contract should be dropped (internal path filter,
+// missing method). Splits the per-contract logic out of BuildSpec so
+// that hot loop stays at CC ≤ 5. [CC refactor]
+func buildOperation(c ContractIface, opts BuildOptions) (*Operation, string, bool) {
+	path := c.GetPath()
+	if !opts.IncludeInternal && strings.HasPrefix(path, "/internal/") {
+		return nil, "", false
+	}
+	if c.GetMethod() == "" {
+		return nil, "", false
+	}
+	opPath := normalizeOpenAPIPath(path)
+	op := &Operation{
+		OperationID: deriveOperationID(c.GetMethod(), path, c.GetBackendFn()),
+		Tags:        []string{tagForPath(opPath)},
+		Summary:     c.GetBackendFn(),
+		Responses:   defaultResponses(),
+		Parameters:  pathParameters(opPath),
+	}
+	applyResponseSchema(op, c, opts.ResponseScanner)
+	return op, opPath, true
+}
+
+// applyResponseSchema upgrades the operation's 200 response from the
+// generic baseline to schema-typed JSON when a HandlerScanner resolved
+// the handler's encode target. [Area 4.1.C]
+func applyResponseSchema(op *Operation, c ContractIface, scanner *HandlerScanner) {
+	if scanner == nil {
+		return
+	}
+	schema := scanner.SchemaFor(c.GetBackendFn())
+	if schema == nil {
+		return
+	}
+	op.Responses["200"] = Response{
+		Description: "OK",
+		Content: map[string]MediaType{
+			"application/json": {Schema: schema},
+		},
+	}
+}
+
+// mergeOperationIntoPath assigns op to the correct method slot on the
+// PathItem identified by opPath. Unsupported verbs are silently
+// dropped. [CC refactor — was a 6-arm switch inside BuildSpec]
+func mergeOperationIntoPath(paths map[string]PathItem, opPath, method string, op *Operation) {
+	item := paths[opPath]
+	switch method {
+	case "get":
+		item.Get = op
+	case "post":
+		item.Post = op
+	case "put":
+		item.Put = op
+	case "patch":
+		item.Patch = op
+	case "delete":
+		item.Delete = op
+	default:
+		return // unsupported verb — drop without recording
+	}
+	paths[opPath] = item
 }
 
 // normalizeOpenAPIPath converts Go's TrimPrefix-style path with leaf

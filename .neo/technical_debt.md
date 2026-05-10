@@ -133,3 +133,89 @@ DeepSeek API returns 200s consistently. If DS finds nothing new,
 remove this entry. If DS surfaces a SEV ≥ 9, walk-through the chain
 mechanically before applying any fix (DS hallucinates SEV 10s ~25%
 of the time per `feedback_deepseek_hallucination_patterns.md`).
+## ~~[2026-05-10 02:10] AST COMPLEXITY in builder.go:50~~ — RESOLVED 2026-05-10
+
+`BuildSpec` CC=18 → split into `applyBuildDefaults`, `newSpecFromOpts`,
+`buildOperation`, `applyResponseSchema`, `mergeOperationIntoPath`.
+Each helper at CC ≤ 7. `BuildSpec` body is now ~10 lines.
+
+## ~~[2026-05-10 02:10] AST COMPLEXITY in config.go:74~~ — RESOLVED 2026-05-10
+
+`loadGithubPluginConfig` CC=18 → split into `validateAPIKeys` and
+`validateProjects` helpers. Parent function now linear top-to-bottom.
+
+---
+
+## ~~[2026-05-10 02:12] AST COMPLEXITY in main.go:36~~ — RESOLVED 2026-05-10
+
+`func main` CC=17 → extracted three helpers: `autodetectNeoMCPBinary`,
+`initSSRFTrustedPorts`, `mustGenerateInternalToken`. Each helper is
+single-purpose and small. Parent `main` flow now reads as a sequence
+of named operations.
+
+---
+
+## ~~[2026-05-10 02:13] AST COMPLEXITY in boot_helpers.go:494~~ — RESOLVED 2026-05-10
+
+`bootCoordinatorTier` CC=17 → split into `resolveProjectCoord`,
+`openOrgTierIfCoordinator`, `syncOrgDirectivesIntoWorkspace` helpers.
+Each one single-purpose. Parent now reads as 3 sequential steps.
+
+## ~~AST COMPLEXITY in cmd/plugin-jira/config.go:396~~ — RESOLVED 2026-05-10
+
+`migrateToPluginConfig` CC=18 → extracted `readJiraCredEntry` (returns
+entry + path + raw bytes for backup) and `resolveLegacyContextEnv`
+(env-or-contexts.json fallback). Migration body now linear.
+
+## ~~AST COMPLEXITY in cmd/plugin-deepseek/tool_map_reduce.go:38~~ — RESOLVED 2026-05-10
+
+`mapReduceRefactor` CC=19 → extracted `parseMapReduceArgs`,
+`runMapReduceSmokeTest`, `mapPhase`, `refactorOneFile`,
+`emitProgressNotification`. Parent reads top-to-bottom: parse → smoke →
+fan-out → reduce.
+
+## ~~AST SHADOW in pkg/deepseek/client.go:192~~ — RESOLVED 2026-05-10
+
+`db, err := bolt.Open(...)` shadowed outer `err` → renamed to `openErr`.
+
+## ~~AST SHADOW in cmd/plugin-jira/main.go:268~~ — RESOLVED 2026-05-10
+
+`cfg, migErr := migrateToPluginConfig(...)` shadowed outer `cfg` →
+renamed to `migCfg`.
+
+---
+
+## (legacy entry — kept until file gets full archive sweep)
+## [2026-05-10 02:13] AST COMPLEXITY in boot_helpers.go:494
+
+**Prioridad:** alta
+
+File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/neo-mcp/boot_helpers.go
+Line: 494
+Kind: COMPLEXITY
+Detail: func bootCoordinatorTier: CC=17 (limit 15)
+
+---
+
+## [2026-05-10 02:13] AST COMPLEXITY in config.go:396
+
+**Prioridad:** alta
+
+File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/plugin-jira/config.go
+Line: 396
+Kind: COMPLEXITY
+Detail: func migrateToPluginConfig: CC=18 (limit 15)
+
+---
+
+## [2026-05-10 02:13] AST COMPLEXITY in tool_map_reduce.go:38
+
+**Prioridad:** alta
+
+File: /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/cmd/plugin-deepseek/tool_map_reduce.go
+Line: 38
+Kind: COMPLEXITY
+Detail: func mapReduceRefactor: CC=19 (limit 15)
+
+---
+
