@@ -4,7 +4,7 @@
 
 Este archivo NO depende del código interno de NeoAnvil. Solo describe el contrato operativo con el orquestador.
 
-**Versión contrato: V6.5 — 13 tools MCP / 32 operations.**
+**Versión contrato: V10.6 — 14 tools MCP / 60+ operations / 23 intents radar.**
 
 ---
 
@@ -110,30 +110,31 @@ Daemon mode se **suspende automáticamente** cuando RAPL > 60W (`STABILIZING`). 
 
 ---
 
-## 5. Las 13 tools MCP (contrato V6.5)
+## 5. Las 14 tools MCP (contrato V10.6)
 
 ### 7 Macro-Tools
 
 | Tool | Rol | Ops | Campo clave |
 |------|-----|-----|-------------|
-| `neo_radar` | Oráculo read-only | **17 intents** | `intent` |
+| `neo_radar` | Oráculo read-only | **23 intents** | `intent` |
 | `neo_sre_certify_mutation` | Guardian ACID post-edición | 1 | `mutated_files[]`, `complexity_intent`, `rollback_mode` |
-| `neo_daemon` | Admin asíncrono | **6 actions** | `action` (NO `intent`). Prohibido en Pair/Fast |
+| `neo_daemon` | Admin asíncrono | **12 actions** | `action` (NO `intent`). Prohibido en Pair/Fast (excepto MARK_DONE/trust_status/pair_audit_emit) |
 | `neo_chaos_drill` | Estrés síncrono 10s | 1 | `target`, `aggression_level` (1-10), `inject_faults` |
 | `neo_cache` | Cache obs + control | **6 actions** | `action: stats\|flush\|resize\|warmup\|persist\|inspect` |
 | `neo_command` | Shell dispatcher | **3 actions** | `action: run\|approve\|kill` |
-| `neo_memory` | Brain-state | **4 actions** | `action: commit\|learn\|rem_sleep\|load_snapshot` |
+| `neo_memory` | Brain-state + Knowledge Store | **9 actions** | `action: commit\|learn\|rem_sleep\|load_snapshot\|store\|fetch\|list\|drop\|search` |
 
-### 6 Specialist Tools
+### 7 Specialist Tools
 
 | Tool | Rol |
 |------|-----|
 | `neo_compress_context` | Squash de outputs largos |
 | `neo_apply_migration` | SQL raw via `dba.Analyzer` ACID |
-| `neo_forge_tool` | Hot-compile Go→WASM en runtime |
+| `neo_forge_tool` | Hot-compile Go→WASM en runtime (⚠️ scaffold roto, ver technical_debt.md) |
 | `neo_download_model` | Stream .wasm/.onnx/.gguf a `.neo/models/` |
 | `neo_log_analyzer` | Logs + correlación HNSW con INC |
-| `neo_tool_stats` | p50/p95/p99 + errors por tool MCP |
+| `neo_tool_stats` | p50/p95/p99 + errors por tool MCP + plugin_metrics |
+| `neo_debt` | 4-tier debt registry (workspace/project/org/nexus, PILAR LXVI/LXVII) |
 
 ### Enums clave
 

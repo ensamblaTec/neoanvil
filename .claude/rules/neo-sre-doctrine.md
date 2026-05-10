@@ -1,6 +1,6 @@
-# DOCTRINA SRE: TOOLS V6.5 (OUROBOROS)
+# DOCTRINA SRE: TOOLS V10.6 (OUROBOROS)
 
-Esquema y uso de las **14 herramientas MCP** que exponen 60+ operations. Inventario: 7 macro-tools + 7 specialists. **406+ épicas cerradas. Estado GREEN.**
+Esquema y uso de las **14 herramientas MCP** que exponen 60+ operations. Inventario: 7 macro-tools + 7 specialists. **master_plan.md vacío (todo archivado en master_done.md, 72 entries) · 3 plugins MCP (jira, deepseek, github) + 1 testmock (echo) · 8 ADRs activos (005-012). Estado GREEN.**
 Cualquier tool fuera de este set es deuda técnica erradicada.
 
 **PROHIBIDO:** usar `Agent(subagent_type="Explore")` para auditar este repositorio — cuesta 31.5k tokens vs ~2k con neo_radar. Usar siempre AST_AUDIT/COMPILE_AUDIT/TECH_DEBT_MAP directamente.

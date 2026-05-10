@@ -1,6 +1,6 @@
 # NeoAnvil Rules — Rust
 
-Plantilla de reglas específicas para proyectos Rust orquestados por NeoAnvil V6.5.
+Plantilla de reglas específicas para proyectos Rust orquestados por NeoAnvil V10.6.
 Copiar a `.claude/rules/` del proyecto destino junto con las reglas universales.
 
 ---

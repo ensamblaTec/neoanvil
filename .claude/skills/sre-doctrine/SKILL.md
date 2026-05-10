@@ -1,9 +1,9 @@
 ---
 name: sre-doctrine
-description: Doctrina SRE Ouroboros V7.2 para neoanvil — flujo operativo (BRIEFING → BLAST_RADIUS → Edit → certify), modos pair/fast/daemon, leyes universales (zero-hardcoding, aislamiento MCP, atomic rollback). Use when starting a session, before editing code, or troubleshooting workflow gaps. Auto-loaded.
+description: Doctrina SRE Ouroboros V10.6 para neoanvil — flujo operativo (BRIEFING → BLAST_RADIUS → Edit → certify), modos pair/fast/daemon, leyes universales (zero-hardcoding, aislamiento MCP, atomic rollback). Use when starting a session, before editing code, or troubleshooting workflow gaps. Auto-loaded.
 ---
 
-# Doctrina SRE — Ouroboros V7.2
+# Doctrina SRE — Ouroboros V10.6
 
 > Reglas operativas obligatorias para todo agente operando neoanvil.
 > Migrado de `.claude/rules/neo-synced-directives.md` (split temático
@@ -153,8 +153,12 @@ curl -X POST http://127.0.0.1:9000/api/v1/workspaces/start/<id>
 
 ## See also
 
-- [`skills/sre-tools/SKILL.md`](../sre-tools/SKILL.md) — referencia de las 14+ tools MCP
+- [`skills/sre-tools/SKILL.md`](../sre-tools/SKILL.md) — referencia de las 14 tools MCP
 - [`skills/sre-quality/SKILL.md`](../sre-quality/SKILL.md) — leyes de calidad de código
-- [`skills/jira-workflow/SKILL.md`](../jira-workflow/SKILL.md) — doctrina Jira
+- [`skills/sre-federation/SKILL.md`](../sre-federation/SKILL.md) — tier ownership (workspace/project/org/nexus)
+- [`skills/sre-troubleshooting/SKILL.md`](../sre-troubleshooting/SKILL.md) — recovery patterns
+- [`skills/jira-workflow/SKILL.md`](../jira-workflow/SKILL.md) — doctrina Jira (3 plugins activos: jira, deepseek, github)
+- [`skills/github-workflow/SKILL.md`](../github-workflow/SKILL.md) — doctrina GitHub
+- [`skills/deepseek-workflow/SKILL.md`](../deepseek-workflow/SKILL.md) — doctrina DeepSeek (cache 50×)
 - [`output-styles/neo-sre.md`](../../output-styles/neo-sre.md) — tono SRE activable
-- [`rules/neo-synced-directives.md`](../../rules/neo-synced-directives.md) — archivo legacy completo (incluye obsoletas)
+- [`rules/neo-synced-directives.md`](../../rules/neo-synced-directives.md) — directiva corpus (legacy + actuales)

@@ -175,7 +175,7 @@ Walk-through:
 
 ## Output style (`.claude/output-styles/neo-sre.md`)
 
-Refuerza la disciplina Ouroboros V7.2 sin reescribir el system prompt
+Refuerza la disciplina Ouroboros V10.6 sin reescribir el system prompt
 base de Claude Code. Activación:
 
 ```json

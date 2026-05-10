@@ -30,9 +30,9 @@ Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.m
 
 **7 Macro-Tools** (ver contrato en `CLAUDE-global.md §5` + detalle en `.claude/rules/neo-sre-doctrine.md`):
 
-- `neo_radar` — **19 intents**: BRIEFING, BLAST_RADIUS, SEMANTIC_CODE, DB_SCHEMA, TECH_DEBT_MAP, READ_MASTER_PLAN, SEMANTIC_AST, READ_SLICE, AST_AUDIT, HUD_STATE, FRONTEND_ERRORS, WIRING_AUDIT, COMPILE_AUDIT, GRAPH_WALK, PROJECT_DIGEST, INCIDENT_SEARCH, PATTERN_AUDIT, CONTRACT_QUERY, FILE_EXTRACT
+- `neo_radar` — **23 intents**: BRIEFING, BLAST_RADIUS, SEMANTIC_CODE, DB_SCHEMA, TECH_DEBT_MAP, READ_MASTER_PLAN, SEMANTIC_AST, READ_SLICE, AST_AUDIT, HUD_STATE, FRONTEND_ERRORS, WIRING_AUDIT, COMPILE_AUDIT, GRAPH_WALK, PROJECT_DIGEST, INCIDENT_SEARCH, PATTERN_AUDIT, CONTRACT_QUERY, FILE_EXTRACT, CONTRACT_GAP, INBOX, PLUGIN_STATUS, CLAUDE_FOLDER_AUDIT
 - `neo_sre_certify_mutation` — ACID Guardian (single op): AST + Bouncer + tests + seal TTL
-- `neo_daemon` — **12 actions**: 6 originales (PullTasks, PushTasks, Vacuum_Memory, SetStage, FLUSH_PMEM, QUARANTINE_IP — prohibidas en Pair/Fast) + MARK_DONE (read-only, exempt) + 5 PILAR XXVII (`execute_next`, `approve`, `reject` — daemon mode only · `trust_status`, `pair_audit_emit` — pair-exempt). Ver [`docs/pilar-xxvii-daemon-mcp.md`](./docs/general/briefing-format.md) y [`docs/pair-trust-feedback.md`](./docs/general/readme-reference.md).
+- `neo_daemon` — **12 actions**: 6 originales (PullTasks, PushTasks, Vacuum_Memory, SetStage, FLUSH_PMEM, QUARANTINE_IP — prohibidas en Pair/Fast) + MARK_DONE (read-only, exempt) + 5 PILAR XXVII (`execute_next`, `approve`, `reject` — daemon mode only · `trust_status`, `pair_audit_emit` — pair-exempt). Ver [`ADR-009 daemon-trust-scoring`](./docs/adr/ADR-009-daemon-trust-scoring.md) + skills `/daemon-flow` y `/daemon-trust`.
 - `neo_chaos_drill` — Load test síncrono 10s (single op)
 - `neo_cache` — **6 actions**: stats, flush, resize, warmup, persist, inspect (consolidó 6 tools)
 - `neo_command` — **3 actions**: run, approve, kill (consolidó 3 tools)
@@ -72,7 +72,7 @@ Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.m
 | Package | Rol |
 |---------|-----|
 | `cmd/neo-mcp/` | Entrypoint MCP + handlers macro/micro |
-| `cmd/neo-mcp/radar_handlers.go` | 19 intents radar (~3800 LOC — post-Épica 300) |
+| `cmd/neo-mcp/radar_*.go` | 23 intents radar (split en archivos por intent: radar_audit/blast/briefing/compile/contracts/db/digest/file_extract/folder_audit/graph/hud/inbox/incidents/plugins/semantic) |
 | `cmd/neo-mcp/tool_cache.go` | Dispatcher unificado (Épica 239) |
 | `cmd/neo-mcp/tool_command.go` | Dispatcher unificado (Épica 239) |
 | `cmd/neo-mcp/tool_memory.go` | Dispatcher unificado (Épica 239) |
@@ -167,7 +167,7 @@ Binario separado `cmd/neo-nexus` que orquesta múltiples instancias de `neo-mcp`
 - Contrato operativo base: [`CLAUDE-global.md`](./CLAUDE-global.md)
 - Leyes universales (template para nuevos proyectos): [`docs/neo-global.md`](./docs/general/neo-global.md)
 - Workflow paso a paso: [`.claude/rules/neo-workflow.md`](./.claude/rules/neo-workflow.md)
-- Doctrina macro-tools (13 tools / 32 ops): [`.claude/rules/neo-sre-doctrine.md`](./.claude/rules/neo-sre-doctrine.md)
+- Doctrina macro-tools (14 tools / 60+ ops, 23 intents): [`.claude/rules/neo-sre-doctrine.md`](./.claude/rules/neo-sre-doctrine.md)
 - Leyes de código específicas Go/MCP: [`.claude/rules/neo-code-quality.md`](./.claude/rules/neo-code-quality.md)
 - Doctrina DB/RAG/migraciones (scoped a pkg/dba, pkg/rag, migrations): [`.claude/rules/neo-db.md`](./.claude/rules/neo-db.md)
 - Directivas activas (auto-gen, autoritativas): [`.claude/rules/neo-synced-directives.md`](./.claude/rules/neo-synced-directives.md)

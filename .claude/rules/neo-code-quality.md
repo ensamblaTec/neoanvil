@@ -1,4 +1,4 @@
-# LEYES DE CALIDAD SRE (NeoAnvil V6.5)
+# LEYES DE CALIDAD SRE (NeoAnvil V10.6)
 
 Directivas de código obligatorias para todo agente operando en este repositorio.
 Estado actual: `make audit` reporta **0 staticcheck + 0 ineffassign + 0 modernize + 0 CC>15** en código productivo. Cada regresión bloquea merge vía `make audit-ci`.

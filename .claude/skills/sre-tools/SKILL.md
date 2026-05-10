@@ -1,6 +1,6 @@
 ---
 name: sre-tools
-description: Inventario de las 14+ tools MCP de neoanvil (neo_radar 18 intents, neo_sre_certify_mutation, neo_chaos_drill, neo_command, neo_cache, neo_daemon, neo_memory + 7 specialists incluyendo el plugin Jira). Use when picking a tool, troubleshooting tool degradation, or learning about a specific intent.
+description: Inventario de las 14 tools MCP de neoanvil (neo_radar 23 intents, neo_sre_certify_mutation, neo_chaos_drill, neo_command, neo_cache, neo_daemon, neo_memory + 7 specialists incluyendo el plugin Jira). Use when picking a tool, troubleshooting tool degradation, or learning about a specific intent.
 ---
 
 # SRE Tools — inventario operativo
@@ -13,7 +13,7 @@ description: Inventario de las 14+ tools MCP de neoanvil (neo_radar 18 intents, 
 
 ## Macro-tools (7)
 
-### `neo_radar` — 18 intents
+### `neo_radar` — 23 intents
 
 | Intent | Cuándo usar |
 |--------|-------------|
@@ -37,8 +37,9 @@ description: Inventario de las 14+ tools MCP de neoanvil (neo_radar 18 intents, 
 | `CONTRACT_QUERY` | Endpoint HTTP por path fragment |
 | `FILE_EXTRACT` | Surgical extraction por símbolo |
 | `CONTRACT_GAP` | Diff TS fetch vs Go routes |
-| `INBOX` | Agent-to-agent inbox |
+| `INBOX` | Agent-to-agent inbox cross-workspace |
 | `PLUGIN_STATUS` | Plugin pool runtime state (PILAR XXIII) |
+| `CLAUDE_FOLDER_AUDIT` | Drift detection .claude/skills/ vs CLAUDE.md (128.1) |
 
 ### `neo_sre_certify_mutation` — Guardian ACID
 

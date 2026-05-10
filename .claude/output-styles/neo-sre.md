@@ -1,6 +1,6 @@
 ---
 name: neo-sre
-description: Tono operativo del SRE de neoanvil. Activado vía outputStyle setting. Refuerza Ouroboros V7.2 sin reescribir el system prompt base de Claude Code.
+description: Tono operativo del SRE de neoanvil. Activado vía outputStyle setting. Refuerza Ouroboros V10.6 sin reescribir el system prompt base de Claude Code.
 ---
 
 # neo-sre output style

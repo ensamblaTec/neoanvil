@@ -1,4 +1,4 @@
-# PROTOCOLO OPERATIVO OBLIGATORIO (Ouroboros V6.5)
+# PROTOCOLO OPERATIVO OBLIGATORIO (Ouroboros V10.6)
 
 Este protocolo aplica a TODA sesión y TODA interacción con el codebase. Sin excepciones.
 

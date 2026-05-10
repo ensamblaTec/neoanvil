@@ -1,6 +1,6 @@
 # NeoAnvil Rules — Web (TypeScript / React / Next.js)
 
-Plantilla de reglas específicas para proyectos Web orquestados por NeoAnvil V6.5.
+Plantilla de reglas específicas para proyectos Web orquestados por NeoAnvil V10.6.
 Cubre: TypeScript · React · Next.js · Vite. Copiar a `.claude/rules/` del proyecto destino.
 
 ---
