@@ -12,6 +12,7 @@ import (
 
 	"github.com/ensamblatec/neoanvil/pkg/astx"
 	"github.com/ensamblatec/neoanvil/pkg/kanban"
+	"github.com/ensamblatec/neoanvil/pkg/sre"
 )
 
 // serverBootTime is set once at process start; used to derive a stable session ID per run.
@@ -122,6 +123,7 @@ func auditFrontendSource(ctx context.Context, t *RadarTool, absTarget string) (a
 	defer lintCancel()
 	shCmd := exec.CommandContext(lintCtx, "sh", "-c", linterCmd) //nolint:gosec // G204-SHELL-WITH-VALIDATION
 	shCmd.Dir = filepath.Dir(absTarget)
+	sre.HardenSubprocess(shCmd, 0) // [T006-sweep] golangci-lint may parallel-spawn gocompile workers
 	out, errLint := shCmd.CombinedOutput()
 	text := fmt.Sprintf("## Linter output for %s\n```\n%s\n```", absTarget, string(out))
 	if errLint != nil {

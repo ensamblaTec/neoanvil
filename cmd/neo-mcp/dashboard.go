@@ -27,6 +27,7 @@ import (
 	"github.com/ensamblatec/neoanvil/pkg/observability"
 	"github.com/ensamblatec/neoanvil/pkg/pubsub"
 	"github.com/ensamblatec/neoanvil/pkg/rag"
+	"github.com/ensamblatec/neoanvil/pkg/sre"
 	"github.com/ensamblatec/neoanvil/pkg/telemetry"
 )
 
@@ -392,6 +393,7 @@ func RegisterDashboardAPI(mux *http.ServeMux, opts DashboardOpts) {
 		outBin := filepath.Join(ws, "bin", "neo-mcp-rebuilt")
 		cmd := exec.CommandContext(r.Context(), "go", "build", "-o", outBin, "./cmd/neo-mcp") //nolint:gosec // G204-LITERAL-BIN
 		cmd.Dir = ws
+		sre.HardenSubprocess(cmd, 0) // [T006-sweep] HUD rebuild may stall on cgo grandchildren
 		out, buildErr := cmd.CombinedOutput()
 		if buildErr != nil {
 			_ = json.NewEncoder(w).Encode(map[string]any{

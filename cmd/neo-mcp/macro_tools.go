@@ -1633,6 +1633,7 @@ func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, 
 		checks["build"] = "running"
 		buildCmd := exec.CommandContext(ctx, "go", "build", filepath.Dir(filename)) //nolint:gosec // G204-LITERAL-BIN
 		buildCmd.Dir = goModRootOf(filename) // [T001] go.mod root, NOT neo.yaml root
+		sre.HardenSubprocess(buildCmd, 0)    // [T006-sweep] cgo grandchildren can pin pipes
 		if out, buildErr := buildCmd.CombinedOutput(); buildErr != nil {
 			checks["build"] = "fail:" + strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 		} else {
@@ -1663,6 +1664,7 @@ func (t *CertifyMutationTool) runPolyglotBuild(ctx context.Context, filename, ex
 	if moduleDir != "" {
 		shCmd := exec.CommandContext(ctx, "sh", "-c", buildCmd) //nolint:gosec // G204-SHELL-WITH-VALIDATION
 		shCmd.Dir = filepath.Join(projectRootOf(filename), moduleDir)
+		sre.HardenSubprocess(shCmd, 0) // [T006-sweep] polyglot module builds may invoke long-running compilers
 		out, errBuild := shCmd.CombinedOutput()
 		if errBuild != nil {
 			rollbackAll()
@@ -1677,6 +1679,7 @@ func (t *CertifyMutationTool) runPolyglotBuild(ctx context.Context, filename, ex
 	case ".rs":
 		fallbackCmd = exec.CommandContext(ctx, "cargo", "build")
 		fallbackCmd.Dir = filepath.Dir(filename)
+		sre.HardenSubprocess(fallbackCmd, 0) // [T006-sweep] cargo build runs rustc with parallel codegen
 	case ".py":
 		fallbackCmd = exec.CommandContext(ctx, "python3", "-c",
 			fmt.Sprintf("import ast, sys; ast.parse(open('%s').read())", filename))

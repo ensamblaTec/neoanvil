@@ -358,6 +358,7 @@ func (t *RunCommandTool) Execute(ctx context.Context, args map[string]any) (any,
 			command = strings.ReplaceAll(command, "// turbo", "")
 		}
 		cmd := exec.CommandContext(ctx, "sh", "-c", command)
+		sre.HardenSubprocess(cmd, 0) // [T006-sweep] Setpgid+WaitDelay for cgo/proto-gen subprocesses
 
 		cmdStr := strings.TrimSpace(command)
 		if strings.HasSuffix(cmdStr, "&") {
@@ -438,6 +439,7 @@ func (t *ApproveCommandTool) Execute(ctx context.Context, args map[string]any) (
 	telemetry.LogAction("Ejecutando Ticket Aprobado: " + ticketID)
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", staged.Command)
+	sre.HardenSubprocess(cmd, 0) // [T006-sweep] cap pipe-drain wait for runaway subprocesses
 	out, err := cmd.CombinedOutput()
 
 	texto := fmt.Sprintf("Command Executed: %s\nOutput:\n%s\nError (if any): %v", staged.Command, string(out), err)
@@ -850,6 +852,7 @@ func (t *ForgeTool) Execute(ctx context.Context, args map[string]any) (any, erro
 
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", pathWasm, pathGo)
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	sre.HardenSubprocess(cmd, 0) // [T006-sweep] go build chain may invoke cgo
 	out, errCmd := cmd.CombinedOutput()
 	if errCmd != nil {
 		return nil, fmt.Errorf("wasm compilation failed: %s\n%v", string(out), errCmd)

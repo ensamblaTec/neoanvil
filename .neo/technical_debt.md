@@ -155,7 +155,7 @@ of named operations.
 
 ---
 
-## [2026-05-10 03:00] Subprocess hang pattern — COMPILE_AUDIT fixed, 6+ siblings pending
+## ~~[2026-05-10 03:00] Subprocess hang pattern — COMPILE_AUDIT fixed, 6+ siblings~~ — RESOLVED 2026-05-10
 
 **Symptom (operator-reported in another project):** COMPILE_AUDIT
 hangs ~30min on projects with heavy cgo / tree-sitter / proto-gen
@@ -196,6 +196,28 @@ this repo (`go build ./...` = 3.3s) the hang is invisible.
 Recommended fix: extract a `hardenedExec()` helper in pkg/sre and
 wire all call sites in one commit. Defer until operator sees the
 pattern bite a second time.
+
+**Status:** ✅ Closed proactively 2026-05-10. New helpers in
+`pkg/sre/subprocess.go`:
+  · `HardenSubprocess(cmd, waitDelay)` — retrofit existing exec.Cmd
+  · `HardenedExec(ctx, waitDelay, name, args...)` — convenience constructor
+
+All 8 sibling call sites wired with `sre.HardenSubprocess(cmd, 0)`
+(0 = default 5s waitDelay):
+  · `cmd/neo-mcp/tools.go:361` — neo_command run (sh -c)
+  · `cmd/neo-mcp/tools.go:441` — neo_command approve (bash -c)
+  · `cmd/neo-mcp/tools.go:853` — neo_forge_tool wasm compile (go build)
+  · `cmd/neo-mcp/dashboard.go:395` — HUD rebuild (go build)
+  · `cmd/neo-mcp/radar_audit.go:124` — lint shell invocation
+  · `cmd/neo-mcp/macro_tools.go:1636` — fast-mode build (go build, T001 path)
+  · `cmd/neo-mcp/macro_tools.go:1666` — polyglot module build (sh -c)
+  · `cmd/neo-mcp/macro_tools.go:1681` — Rust fallback (cargo build)
+
+5 regression tests in `pkg/sre/subprocess_test.go`:
+BoundedByContextPlusWaitDelay (sleep 30 → 500ms), RetrofitPath
+(sh chain w/ orphaned bg child → 1.3s), NilSafe, ZeroWaitDelay
+PicksDefault, HappyPathQuickReturn (no overhead). All pass with
+`-race`. AST_AUDIT clean on all touched files.
 
 ---
 
