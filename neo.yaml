@@ -145,6 +145,9 @@ ai:
     embedding_model: nomic-embed-text
     context_window: 8192
     embed_timeout_seconds: 8
+    # [ADR-013] Default for neo_local_llm. This PC: 31 GB RAM + RTX 3090 24 GB.
+    # qwen2.5-coder:7b (4.5 GB) is the only viable option here; 32b needs 44.5 GB.
+    local_model: "qwen2.5-coder:7b"
 rag:
     db_path: .neo/db/hnsw.db
     chunk_size: 3000

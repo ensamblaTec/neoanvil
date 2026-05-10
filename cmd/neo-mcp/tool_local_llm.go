@@ -112,11 +112,12 @@ func (t *LocalLLMTool) Execute(ctx context.Context, args map[string]any) (any, e
 	if err != nil {
 		return nil, fmt.Errorf("local llm: %w", err)
 	}
+	// MCP requires the standard content-block envelope so Claude Code (and any
+	// well-behaved MCP client) renders the result. The metadata footer keeps
+	// latency / model / size visible for debugging without a separate field.
+	body := fmt.Sprintf("%s\n\n---\n_model: %s · latency: %dms · prompt: %d chars · response: %d chars_",
+		strings.TrimSpace(out), model, elapsed.Milliseconds(), len(finalPrompt), len(out))
 	return map[string]any{
-		"response":      out,
-		"model":         model,
-		"latency_ms":    elapsed.Milliseconds(),
-		"prompt_chars":  len(finalPrompt),
-		"response_chars": len(out),
+		"content": []map[string]any{{"type": "text", "text": body}},
 	}, nil
 }

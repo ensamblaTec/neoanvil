@@ -114,6 +114,10 @@ ai:
   embedding_model: "nomic-embed-text"
   # Ventana de contexto maxima esperada
   context_window: 8192
+  # [ADR-013] Modelo default para neo_local_llm. Vacío = qwen2.5-coder:7b
+  # (4.5 GB, fits any 8 GB+ GPU + 16 GB+ system RAM). Operadores con
+  # ≥64 GB de RAM pueden setear "qwen2.5-coder:32b" para mejor calidad.
+  # local_model: ""
 
 rag:
   # Ruta del archivo fisico para el Grafo Vectorial HNSW

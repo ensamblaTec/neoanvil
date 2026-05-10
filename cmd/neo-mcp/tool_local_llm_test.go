@@ -38,6 +38,7 @@ func TestLocalLLMTool_Schema(t *testing.T) {
 }
 
 func TestLocalLLMTool_Execute_HappyPath(t *testing.T) {
+	// extractMCPText helper is defined in radar_inbox_test.go and reused.
 	srv := ollamaGenerateMock(t, "func Foo() error { return nil }")
 	defer srv.Close()
 
@@ -48,18 +49,15 @@ func TestLocalLLMTool_Execute_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	m, ok := out.(map[string]any)
-	if !ok {
-		t.Fatalf("expected map result, got %T", out)
+	text := extractMCPText(t, out)
+	if !strings.Contains(text, "Foo") {
+		t.Errorf("response body missing expected token: %q", text)
 	}
-	if !strings.Contains(m["response"].(string), "Foo") {
-		t.Errorf("response missing expected token: %v", m["response"])
+	if !strings.Contains(text, "qwen2.5-coder:7b") {
+		t.Errorf("metadata footer missing model: %q", text)
 	}
-	if m["model"].(string) != "qwen2.5-coder:7b" {
-		t.Errorf("model not propagated: got %v", m["model"])
-	}
-	if m["latency_ms"].(int64) < 0 {
-		t.Errorf("latency_ms should be ≥ 0, got %v", m["latency_ms"])
+	if !strings.Contains(text, "latency:") {
+		t.Errorf("metadata footer missing latency: %q", text)
 	}
 }
 

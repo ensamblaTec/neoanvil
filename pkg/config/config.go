@@ -74,6 +74,12 @@ type AIConfig struct {
 	EmbeddingModel      string   `yaml:"embedding_model"`
 	ContextWindow       int      `yaml:"context_window"`
 	EmbedTimeoutSeconds int      `yaml:"embed_timeout_seconds"`
+	// LocalModel is the default model name passed to neo_local_llm (ADR-013)
+	// when args["model"] is not provided. Empty falls back to the tool's
+	// internal default ("qwen2.5-coder:7b"), which fits any 8 GB+ GPU and
+	// 16 GB+ system RAM. Operators with ≥64 GB system RAM can set this to
+	// "qwen2.5-coder:32b" for higher quality at ~30 s/audit.
+	LocalModel string `yaml:"local_model"`
 }
 
 type RAGConfig struct {

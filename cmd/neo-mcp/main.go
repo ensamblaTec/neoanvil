@@ -750,10 +750,11 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	// Nexus tier proxies to Nexus dispatcher HTTP endpoints; workspace/project are
 	// local file access; org is reserved for PILAR LXVII.
 	mustRegister(NewDebtTool(workspace, lookupWorkspaceID(workspace), cfg))
-	// [ADR-013] Local LLM tool — routes prompts to operator's GPU via Ollama
-	// (default qwen2.5-coder:32b). $0/call complement to plugin-deepseek for
-	// daemon mode + non-frontier audit tasks.
-	mustRegister(NewLocalLLMTool(cfg.AI.BaseURL, ""))
+	// [ADR-013] Local LLM tool — routes prompts to operator's GPU via Ollama.
+	// Default model resolved from cfg.AI.LocalModel; falls back to the tool's
+	// portable default (qwen2.5-coder:7b) when unset. $0/call complement to
+	// plugin-deepseek for daemon mode + non-frontier audit tasks.
+	mustRegister(NewLocalLLMTool(cfg.AI.BaseURL, cfg.AI.LocalModel))
 
 	telemetry.SetAutoApprove(cfg.Cognitive.AutoApprove)
 
