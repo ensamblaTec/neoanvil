@@ -216,29 +216,86 @@ func (graph *Graph) Neighbors(nodeID uint32) iter.Seq[uint32] {
 //     than float32 in pure Go (no VPMADDUBSW).
 //   - default: float32 Search.
 //
-// Falls back to float32 Search if the requested companion is not populated
-// (e.g. graph just created, populate failed). Caller passes the operator's
-// configured quant mode (cfg.RAG.VectorQuant); empty string == float32.
+// Falls back to float32 Search if the requested companion is not populated.
+// Caller passes the operator's configured quant mode (cfg.RAG.VectorQuant);
+// empty string == float32.
 //
-// Empirical recall on production corpus (25k-vector neoanvil hnsw.bin,
-// 50 random queries top-10): all four backends scored 1.000 median.
+// [ADR-014 follow-up F2] Lazy re-populate: companion arrays go stale when
+// new vectors are Inserted post-boot (BinaryVectors[] doesn't grow with
+// Vectors[]). Without this fix, the first Insert after boot makes
+// BinaryPopulated()==false forever and we silently fall back to float32 —
+// invisible regression masquerading as success. Empirically observed in
+// strategosia + strategosia_frontend during 2026-05-10 audit. The fix:
+// when a quant mode is requested but the companion is stale (and was once
+// populated, signalled by BinaryWords>0 / Int8Scales!=nil), re-populate
+// inline. Cost amortised — re-populate is ~3.2 µs/vector × N, paid once
+// per ingest cycle, not per search.
+//
+// Empirical recall on production corpus (3 workspaces, 25k-124k vectors,
+// 50 random queries top-10 each): all backends scored 1.000 median.
 // See pkg/rag/recall_measure_live_test.go.
 func (graph *Graph) SearchAuto(ctx context.Context, queryVector []float32, topK int, cpu tensorx.ComputeDevice, quant string) ([]uint32, error) {
 	switch quant {
 	case "hybrid":
+		graph.ensureBinaryPopulated()
 		if graph.BinaryPopulated() && len(graph.Vectors) == len(graph.Nodes)*graph.VecDim {
 			return graph.SearchHybridBinary(ctx, queryVector, topK, cpu)
 		}
 	case "binary":
+		graph.ensureBinaryPopulated()
 		if graph.BinaryPopulated() {
 			return graph.SearchBinary(ctx, queryVector, topK)
 		}
 	case "int8":
+		graph.ensureInt8Populated()
 		if graph.Int8Populated() {
 			return graph.SearchInt8(ctx, queryVector, topK)
 		}
 	}
 	return graph.Search(ctx, queryVector, topK, cpu)
+}
+
+// ensureBinaryPopulated re-runs PopulateBinary when the companion is stale.
+// Stale = BinaryVectors[] count doesn't match Nodes[] count, which happens
+// after every successful Insert/InsertBatch since those only update
+// Vectors[] (the float32 source of truth). Guarded by snapshotMu so two
+// concurrent searches don't both pay the population cost.
+//
+// We only re-populate if the companion was populated at least once before
+// (BinaryWords > 0). When a workspace boots with vector_quant=float32, we
+// don't auto-promote to binary on first search — that would be invasive.
+func (graph *Graph) ensureBinaryPopulated() {
+	if graph.BinaryWords == 0 {
+		return // never populated; respect operator's float32 default
+	}
+	if graph.BinaryPopulated() {
+		return // up-to-date
+	}
+	graph.snapshotMu.Lock()
+	defer graph.snapshotMu.Unlock()
+	// Re-check under lock — another goroutine may have populated while we waited.
+	if graph.BinaryPopulated() {
+		return
+	}
+	graph.PopulateBinary()
+}
+
+// ensureInt8Populated mirrors ensureBinaryPopulated for the int8 companion.
+// Int8Scales is the marker for "ever populated" since len(Int8Scales)
+// equals node count when fresh and zero when never populated.
+func (graph *Graph) ensureInt8Populated() {
+	if len(graph.Int8Scales) == 0 {
+		return // never populated; respect operator's float32 default
+	}
+	if graph.Int8Populated() {
+		return // up-to-date
+	}
+	graph.snapshotMu.Lock()
+	defer graph.snapshotMu.Unlock()
+	if graph.Int8Populated() {
+		return
+	}
+	graph.PopulateInt8()
 }
 
 // If a QueryBatcher is active (367.C), the request is coalesced with other
