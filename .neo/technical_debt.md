@@ -266,3 +266,14 @@ with `⚠️ CACHED(TTL:30m)` so the operator sees the freshness window.
 `bypass_cache:true` arg forces a fresh recompute. Concurrency-safe
 via sync.RWMutex; verified by `TestTechDebtMapCache_RaceFreeUnderConcurrentReadWrite`.
 
+## [2026-05-10 04:26] AST INFINITE_LOOP in bridge.go:328
+
+**Prioridad:** alta
+
+File: pkg/cpg/bridge.go
+Line: 328
+Kind: INFINITE_LOOP
+Detail: for{} with no break/return/goto/panic — potential livelock
+
+---
+

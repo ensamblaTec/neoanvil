@@ -472,7 +472,12 @@ func (t *RadarTool) handleBlastRadiusProjectScatter(ctx context.Context, args ma
 	sem := make(chan struct{}, 4)
 	nexusBase := nexusDispatcherBase()
 	memberIDs := nexusMemberWorkspaceIDs(nexusBase, proj.MemberWorkspaces)
-	client := sre.SafeInternalHTTPClient(2)
+	// [T005 nexus] 10s timeout — was 2s, but slow workspaces (cold
+	// CPG rebuild, large RAG WAL) needed up to 8s to respond and
+	// were appearing as "unreachable" → confidence:low fallback.
+	// 10s gives them enough headroom while still bounded for the
+	// scatter-gather UX.
+	client := sre.SafeInternalHTTPClient(10)
 
 	for i, ws := range proj.MemberWorkspaces {
 		rows[i] = rowData{name: filepath.Base(ws), impact: "—", conf: "—", cov: "—"}

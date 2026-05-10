@@ -245,17 +245,22 @@ func ExtractGoRoutes(workspace string) ([]ContractNode, error) {
 // registration, returns (method, path, handlerName). Returns empty strings on miss.
 // When the receiver is a known RouterGroup identifier (see collectRouteGroupPrefixes),
 // the accumulated prefix is prepended to the extracted path. [330.G]
+//
+// Inline-chain support [T004 nexus / 2026-05-10]: when the receiver
+// is a CallExpr (e.g. `protected.Group("/admin").GET("/users", ...)`),
+// walkRouterChain unwinds the chain and accumulates an inlinePrefix
+// that is composed with the recvIdent prefix. This was the root cause
+// of CONTRACT_QUERY 10% coverage on routers heavy with sub-grouping
+// (typical Gin / Echo layouts).
 func extractRouteCall(fset *token.FileSet, call *ast.CallExpr, prefixes map[string]string) (method, routePath, handlerName string) {
 	_ = fset // kept for future position-aware filtering
 	// Identify the selector or ident being called.
 	var fnName string
-	var recvIdent string
+	var recvIdent, inlinePrefix string
 	switch fn := call.Fun.(type) {
 	case *ast.SelectorExpr:
 		fnName = fn.Sel.Name
-		if id, ok := fn.X.(*ast.Ident); ok {
-			recvIdent = id.Name
-		}
+		recvIdent, inlinePrefix = walkRouterChain(fn.X)
 	case *ast.Ident:
 		fnName = fn.Name
 	default:
@@ -266,7 +271,8 @@ func extractRouteCall(fset *token.FileSet, call *ast.CallExpr, prefixes map[stri
 	if fnName == "HandleFunc" || fnName == "Handle" {
 		if len(call.Args) >= 2 {
 			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				routePath = applyGroupPrefix(prefixes, recvIdent, strings.Trim(lit.Value, `"'`))
+				rawPath := strings.Trim(lit.Value, `"'`)
+				routePath = applyGroupPrefix(prefixes, recvIdent, joinRoutePath(inlinePrefix, rawPath))
 				method = "ANY"
 				handlerName = exprName(call.Args[1])
 			}
@@ -287,10 +293,61 @@ func extractRouteCall(fset *token.FileSet, call *ast.CallExpr, prefixes map[stri
 	if verb, ok := httpVerbs[fnName]; ok {
 		if len(call.Args) >= 2 {
 			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				routePath = applyGroupPrefix(prefixes, recvIdent, strings.Trim(lit.Value, `"'`))
+				rawPath := strings.Trim(lit.Value, `"'`)
+				routePath = applyGroupPrefix(prefixes, recvIdent, joinRoutePath(inlinePrefix, rawPath))
 				method = verb
 				handlerName = exprName(call.Args[len(call.Args)-1])
 			}
+		}
+	}
+	return
+}
+
+// walkRouterChain unwinds a chain of `.Group("...")` calls hanging
+// off the receiver of a route registration and returns:
+//
+//   - recvIdent: the bottom-most identifier (e.g. `engine`, `router`,
+//     or a variable bound to the result of an earlier Group); empty
+//     when the chain doesn't terminate in an identifier.
+//   - inlinePrefix: the joined path of every inline `.Group("seg")`
+//     call discovered, ordered from outermost to innermost.
+//
+// Examples:
+//
+//	r.GET(...)                         → recv="r", prefix=""
+//	r.Group("/v1").GET(...)            → recv="r", prefix="/v1"
+//	r.Group("/v1").Group("/auth").POST → recv="r", prefix="/v1/auth"
+//	api.Group("/admin").DELETE(...)    → recv="api", prefix="/admin"
+//
+// The caller still consults collectRouteGroupPrefixes for variables
+// bound to Group results (`api := router.Group("/api")`), so the
+// final routePath = applyGroupPrefix(prefixes[recv], join(inline, raw)).
+// [T004 nexus]
+func walkRouterChain(expr ast.Expr) (recvIdent, inlinePrefix string) {
+	// Bounded depth — gin/echo/chi routers in practice top out at ~5
+	// levels of grouping. 32 is a generous ceiling that also makes
+	// the AST_AUDIT linter (which can't see returns inside switch
+	// cases) happy with explicit termination.
+	cur := expr
+	for range 32 {
+		switch e := cur.(type) {
+		case *ast.Ident:
+			recvIdent = e.Name
+			return
+		case *ast.CallExpr:
+			sel, ok := e.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Group" || len(e.Args) < 1 {
+				return // chain interrupted by non-Group call → bail
+			}
+			lit, ok := e.Args[0].(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return // dynamic group path (variable, expr) — can't resolve
+			}
+			seg := strings.Trim(lit.Value, `"'`)
+			inlinePrefix = joinRoutePath(seg, inlinePrefix)
+			cur = sel.X
+		default:
+			return
 		}
 	}
 	return

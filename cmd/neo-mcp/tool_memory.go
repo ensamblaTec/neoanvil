@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -869,6 +870,15 @@ func (t *MemoryTool) proxyNexusOp(op string, args map[string]any) (any, error) {
 //
 // To avoid an infinite proxy loop, the outgoing args force tier:"project"
 // on the coordinator side (coordinator has ks != nil, won't re-proxy).
+//
+// [T003 nexus / 2026-05-10] silent-fail hardening: previously the
+// proxy swallowed a "coord returned empty response" branch as success
+// (mcpJSON with `error` field but no Go-level error). The agent saw
+// no error and assumed the store landed; in fact nothing persisted.
+// Now: empty response and unrecognised payloads BOTH return Go-level
+// errors so the caller can't mistake them for success. Plus explicit
+// `[KNOWLEDGE-PROXY]` log lines audit every proxy call's outcome.
+//
 // [354.Z-redesign piece 2]
 func (t *MemoryTool) proxyToCoordinator(action string, args map[string]any) (any, error) {
 	nexusBase := nexusDispatcherBase()
@@ -894,9 +904,15 @@ func (t *MemoryTool) proxyToCoordinator(action string, args map[string]any) (any
 		return nil, fmt.Errorf("neo_memory %s coord-proxy: marshal: %w", action, err)
 	}
 	url := nexusBase + "/workspaces/" + t.coordinatorWSID + "/mcp/message"
+	keyForLog := ""
+	if k, ok := forwardArgs["key"].(string); ok {
+		keyForLog = k
+	}
+	log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — POST", action, t.coordinatorWSID, keyForLog)
 	client := sre.SafeInternalHTTPClient(10)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body)) //nolint:gosec // G107-WRAPPED-SAFE-CLIENT: url derived from nexusDispatcherBase
 	if err != nil {
+		log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — POST failed: %v", action, t.coordinatorWSID, keyForLog, err)
 		return nil, fmt.Errorf("neo_memory %s coord-proxy: POST %s: %w", action, url, err)
 	}
 	defer resp.Body.Close()
@@ -913,19 +929,34 @@ func (t *MemoryTool) proxyToCoordinator(action string, args map[string]any) (any
 		} `json:"error,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — decode failed: %v", action, t.coordinatorWSID, keyForLog, err)
 		return nil, fmt.Errorf("neo_memory %s coord-proxy: decode: %w", action, err)
 	}
 	if env.Error != nil {
+		log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — coord error: %s", action, t.coordinatorWSID, keyForLog, env.Error.Message)
 		return nil, fmt.Errorf("neo_memory %s coord-proxy: coord returned error: %s", action, env.Error.Message)
 	}
 	if len(env.Result.Content) == 0 {
-		return mcpJSON(map[string]any{"error": "coord returned empty response", "tier": "project"}), nil
+		// [T003 fix] previously returned mcpJSON{"error":...} with nil Go-error,
+		// which the agent interpreted as success. Surface as real error.
+		log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — empty content", action, t.coordinatorWSID, keyForLog)
+		return nil, fmt.Errorf("neo_memory %s coord-proxy: coord returned empty response (data NOT persisted)", action)
 	}
-	// Return the inner JSON text as-is (already mcpJSON-wrapped on coord side).
+	// Parse the inner JSON the coord sent.
 	var inner map[string]any
 	if err := json.Unmarshal([]byte(env.Result.Content[0].Text), &inner); err != nil {
-		return mcpJSON(map[string]any{"raw": env.Result.Content[0].Text, "tier": "project"}), nil
+		log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — coord returned non-JSON: %s", action, t.coordinatorWSID, keyForLog, env.Result.Content[0].Text)
+		return nil, fmt.Errorf("neo_memory %s coord-proxy: coord returned non-JSON payload: %s", action, env.Result.Content[0].Text)
 	}
+	// [T003 fix] strict success marker check — the coord MUST set ok:true
+	// or include a recognised non-error field (entries[]/value/etc.). If
+	// the inner payload contains an `error` field, surface it as a Go
+	// error so the caller can't mistake it for success.
+	if errMsg, ok := inner["error"].(string); ok && errMsg != "" {
+		log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — coord embedded error: %s", action, t.coordinatorWSID, keyForLog, errMsg)
+		return nil, fmt.Errorf("neo_memory %s coord-proxy: %s", action, errMsg)
+	}
+	log.Printf("[KNOWLEDGE-PROXY] action=%s coord=%s key=%s — ok", action, t.coordinatorWSID, keyForLog)
 	return mcpJSON(inner), nil
 }
 
