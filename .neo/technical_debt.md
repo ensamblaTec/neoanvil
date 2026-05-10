@@ -8,6 +8,68 @@
 
 ## Active deferred items
 
+### [scaffold-broken] `neo_forge_tool` — non-functional since initial commit (2026-05-10)
+
+E2E audit (test `cmd/neo-mcp/forge_e2e_test.go::TestForgeTool_E2E_PipelineState`)
+demonstrated TWO independent failure modes:
+
+**Bug 1 (compile path):** `astx.CreateShadowFile` puts the Go source in
+`/proc/<pid>/fd/<N>` (memfd-style ramfs). `go build` rejects this:
+
+> wasm compilation failed: directory /proc/1211343/fd/8 outside
+> modules listed in go.work or their selected dependencies
+
+**Bug 2 (execute path):** Even if compilation succeeded,
+`DynamicWasmTool.Execute` (cmd/neo-mcp/tools.go:807) calls
+`sandbox.Execute(ctx, "", 1000)` which routes to
+`EvaluatePlan(ctx, cpu, "")` — a generic plan evaluator with empty
+code. The just-loaded WASM module's exported function is NEVER
+invoked. The "Singularidad Alcanzada" success string overstates
+what the pipeline actually delivers.
+
+**State:** The tool has been registered in the MCP registry since
+the initial commit (`fd99a39`) but has zero recorded invocations
+across all known sessions (token_spend telemetry shows it never
+ran). The wazero runtime imports + sandbox machinery exist but
+the operator-facing contract is fictional.
+
+**Decision pending operator approval:**
+  · Option A — remove from `mustRegister` in `cmd/neo-mcp/main.go:747`
+    and delete `cmd/neo-mcp/tools.go::ForgeTool`/`DynamicWasmTool`
+    + `pkg/wasmx/sandbox.go::LoadDynamicTool`. Honest cleanup.
+  · Option B — define a real wasip1 tool contract (entrypoint
+    name, JSON in/out marshalling) and wire DynamicWasmTool.Execute
+    to actually invoke the loaded module. Multi-day scope.
+  · Option C — keep as deadcode marker (current state). NOT
+    recommended; it misleads the operator about a feature.
+
+Recommended: A. The test stays as the audit record; if option B
+ever lands, the test becomes the regression gate.
+
+### [deadcode-candidate] `cmd/neo evolve` — Darwin Engine never iterated
+
+`cmd/neo/evolve.go` (Darwin Engine — genetic evolution of Go
+functions, SRE-93). Single commit since initial: `fd99a39`.
+Zero references in `docs/`, `.claude/skills/`, or any test.
+No commit since 2026-04-XX touched it. Operator-facing UX
+("`neo evolve <file> <func>` runs genetic evolution and benchmarks
+mutations") never materialised in workflow.
+
+**Triage:** confirm with operator, then `git rm cmd/neo/evolve.go`
++ remove `evolveCmd` from `cmd/neo/main.go`'s rootCmd assembly.
+
+### [deadcode-candidate] `cmd/neo ask` / `chat` — Voice of Leviathan unused
+
+`cmd/neo/ask.go` (Natural-language CLI via Ollama, SRE-95.B).
+Same status as evolve: single commit `fd99a39`, zero references
+anywhere. Originally meant to translate "neo ask 'how many tasks
+are open?'" into MCP tool calls. Replaced in practice by Claude
+Code's native MCP integration — no operator workflow uses it.
+
+**Triage:** same as evolve — confirm + remove if approved.
+
+
+
 ### ~~Pre-existing plugin-jira input validation gaps~~ — RESOLVED 2026-05-09
 
 **Status:** closed across two commits this session.

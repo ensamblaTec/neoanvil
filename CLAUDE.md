@@ -176,13 +176,14 @@ Binario separado `cmd/neo-nexus` que orquesta múltiples instancias de `neo-mcp`
 - README completo: [`README.md`](./README.md)
 - **`.claude/` reference completo:** [`docs/claude-folder-inventory.md`](./docs/plugins/claude-folder-inventory.md)
 
-**Skills disponibles** (14 total — `skills/` → auto-load si `trigger:` match, task-mode vía `/nombre`):
+**Skills disponibles** (15 total — `skills/` → auto-load si `trigger:` match, task-mode vía `/nombre`):
 
 | Skill | Invocación | Uso |
 |-------|-----------|-----|
 | `sre-doctrine` | auto-load | Flujo Ouroboros, modos pair/fast/daemon, leyes |
 | `jira-workflow` | auto-load | Ciclo vida Jira, naming, transitions, doc-pack |
 | `github-workflow` | auto-load | 20 actions plugin-github, multi-tenant PAT, cross-ref Jira ↔ GitHub |
+| `deepseek-workflow` | auto-load | 4 actions plugin-deepseek, cache 50× discipline, threaded mode, triage rules |
 | `sre-tools` | auto-load | Inventario 14 tools MCP, 23 intents, degradación |
 | `sre-quality` | auto-load | Zero-Alloc, SafeHTTP, certify TTL, gosec, deadcode |
 | `sre-federation` | auto-load | Tier ownership, federation walk-up, CPG, auth, debt |
