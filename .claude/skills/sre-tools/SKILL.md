@@ -68,11 +68,15 @@ dry_run: bool
 Trampa: `O(1)_OPTIMIZATION` falla con nested loops aunque sean
 pipeline/channel. Usar `FEATURE_ADD` para feature con control flow.
 
-### `neo_daemon` (PROHIBIDO en Pair/Fast Mode)
+### `neo_daemon` — 12 actions
 
-6 actions: `PullTasks`, `PushTasks`, `Vacuum_Memory`, `SetStage`,
-`FLUSH_PMEM`, `QUARANTINE_IP`. Suspendido si RAPL >60W (modo
-STABILIZING).
+**6 originales** (PROHIBIDAS en Pair/Fast): `PullTasks`, `PushTasks`,
+`Vacuum_Memory`, `SetStage`, `FLUSH_PMEM`, `QUARANTINE_IP`.
+**+ MARK_DONE** (read-only, exempt en cualquier modo).
+**+ 5 PILAR XXVII**: `execute_next` / `approve` / `reject` (daemon-mode only)
++ `trust_status` / `pair_audit_emit` (pair-exempt para feedback loop).
+Suspendido cuando RAPL > 60W (modo STABILIZING). Ver
+[ADR-009 daemon-trust-scoring](../../../docs/adr/ADR-009-daemon-trust-scoring.md).
 
 ### `neo_chaos_drill` — Asedio síncrono 10s
 
