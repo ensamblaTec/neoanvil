@@ -396,14 +396,69 @@ Closing as zombie / false positive.
 
 ---
 
-## [2026-05-10 06:18] AST COMPLEXITY in embedder.go:256
+## ~~[2026-05-10 06:18] AST COMPLEXITY in embedder.go:256~~ — RESOLVED 2026-05-12 (stale / false positive)
 
-**Prioridad:** alta
+Original entry flagged `func EmbedBatch: CC=23 (limit 15)` at line 256.
 
-File: pkg/rag/embedder.go
-Line: 256
-Kind: COMPLEXITY
-Detail: func EmbedBatch: CC=23 (limit 15)
+Re-audited 2026-05-12 via `AST_AUDIT pkg/rag/embedder.go`:
+> ✅ AST_AUDIT: No issues found.
+
+The refactor in commit `c4c3b1a` (batch `/api/embed` migration) split
+`EmbedBatch` into the dispatch surface (lines 256-292, ~35 LOC, linear
+control flow) plus helpers `truncateTexts`, `acquireBatchSlots`,
+`dispatchBatchHTTP`, `decodeBatchEmbeddings`, `embedSequentialFallback`.
+Each helper at CC ≤ 5. The original entry pre-dates this refactor by
+hours — the recorder fired before the split landed and the resolution
+marker was never written.
+
+Closing as zombie. `make audit-ci` clean against `.neo/audit-baseline.txt`.
+
+---
+
+## ~~[2026-05-10] neo_forge_tool scaffold broken~~ — RESOLVED 2026-05-12 (Option A: deleted)
+
+Scaffold removed in this session. Decision: Option A from the original
+entry (`git rm`) over salvaging the architecture (Option B). Rationale:
+zero recorded invocations across telemetry; daemon mode uses local-LLM
+direct (ADR-013) instead of WASM-forged tools; the salvage cost (fix
+shadow-file path + define wasip1 contract + wire `Execute`) is 1-2 days
+for a feature with no concrete operator workflow.
+
+Files removed:
+- `cmd/neo-mcp/tools.go` — `DynamicWasmTool` + `ForgeTool` + `NewForgeTool` (~75 LOC)
+- `cmd/neo-mcp/main.go:755` — `mustRegister(NewForgeTool(...))` registration
+- `cmd/neo-mcp/forge_e2e_test.go` — audit test (use case gone)
+- `pkg/wasmx/sandbox.go` — `Sandbox.LoadDynamicTool` (only consumer was forge)
+
+The wazero sandbox + `pkg/astx.CreateShadowFile` remain intact for future
+hot-path uses.
+
+---
+
+## ~~[2026-05-10] cmd/neo evolve — Darwin Engine never iterated~~ — RESOLVED 2026-05-12 (deleted)
+
+`cmd/neo/evolve.go` (104 LOC, SRE-93.B) deleted along with `pkg/darwin/`
+package (6 files: mutator, profiler, proposal + tests). Only consumer
+was `evolveCmd()` registered in `cmd/neo/main.go:70`. Zero references
+elsewhere; never invoked in any session telemetry.
+
+If the use case re-emerges, reimplement as a thin orchestrator over
+`neo_local_llm` (Qwen 2.5-Coder 7B, ADR-013) + `neo_sre_certify_mutation`
++ `pkg/cpg` SSA fitness — ~200 LOC end-to-end with today's primitives,
+versus the 104 LOC scaffold-only-no-genetic-loop that we just deleted.
+
+---
+
+## ~~[2026-05-10] cmd/neo ask / chat — Voice of Leviathan unused~~ — RESOLVED 2026-05-12 (deleted)
+
+`cmd/neo/ask.go` (367 LOC, SRE-95.B.1/B.2) deleted along with `askCmd()`
+and `chatCmd()` registrations in `cmd/neo/main.go:68-69`. The NL→MCP
+translator was superseded by Claude Code itself as the primary MCP
+client; CLI form never used in any session telemetry.
+
+Headless NL→MCP (the only remaining use case — CI/cron without a human
+agent) can be implemented as a ~50 LOC wrapper over `neo_local_llm` +
+`curl` to Nexus if it ever materialises.
 
 ---
 

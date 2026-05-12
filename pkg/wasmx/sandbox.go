@@ -176,17 +176,3 @@ func (l *LocalEmbedder) fastHashFallback(text string) []float32 {
 	return vec
 }
 
-func (sandbox *Sandbox) LoadDynamicTool(ctx context.Context, wasmBinary []byte) (string, error) {
-	newMod, err := sandbox.runtime.CompileModule(ctx, wasmBinary)
-	if err != nil {
-		return "", fmt.Errorf("compiling dynamic wasm: %w", err)
-	}
-
-	modName := fmt.Sprintf("hot_tool_%d", len(wasmBinary))
-	_, err = sandbox.runtime.InstantiateModule(ctx, newMod, wazero.NewModuleConfig().WithName(modName))
-	if err != nil {
-		return "", fmt.Errorf("instantiating hot tool: %w", err)
-	}
-
-	return modName, nil
-}

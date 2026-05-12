@@ -752,7 +752,6 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 		orgKS:           orgKS,
 		orgWriters:      orgWriters, // [361.A] RBAC writers allowlist from .neo-org/neo.yaml
 	})
-	mustRegister(NewForgeTool(registry, sandbox)) // [SRE-13.1.2] WebAssembly Hot-Forge (Tool 17)
 	mustRegister(NewLogAnalyzerTool(embedder, hnswGraph, wal, cpuEngine)) // [PILAR-XXI/151] Semantic log analysis + incident correlation
 	// [PILAR LXVI / 351.C] 4-tier debt registry access (workspace/project/nexus/org).
 	// Nexus tier proxies to Nexus dispatcher HTTP endpoints; workspace/project are

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/briefing.sh",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

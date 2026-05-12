@@ -65,9 +65,6 @@ func main() {
 		bootstrapCmd(),  // [SRE-59.1] Pack consciousness into portable archive
 		merkleCmd(),     // [SRE-59.2] Brain sync fingerprint via Merkle root
 		hotreloadCmd(),  // [SRE-59.3] Trigger hot-rebuild of neo-mcp binary
-		askCmd(),        // [SRE-95.B.1] Voice of the Leviathan — natural language CLI
-		chatCmd(),       // [SRE-95.B.2] Interactive REPL
-		evolveCmd(),       // [SRE-93.B] Darwin Engine — genetic code evolution CLI
 		initProjectCmd(), // [PILAR-XXXI] Project federation: detect monorepo, create .neo-project/
 		loginCmd(),       // [PILAR-XXXIII] Store API key/TenantID in ~/.neo/credentials.json
 		spaceCmd(),       // [PILAR-XXIII / 124.8] Active space/board per provider
