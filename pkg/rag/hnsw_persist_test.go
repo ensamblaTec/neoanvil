@@ -294,6 +294,64 @@ func TestStaleGuard_NilInputs(t *testing.T) {
 	}
 }
 
+// TestStaleGuard_WALSizeZeroSkipsFileSizeGate verifies the WALFileSize=0
+// sentinel emitted by buildSnapshotHeader when shutdown raced wal.Close().
+// On next boot, the file-size gate must be skipped (size 0 ≠ actual size
+// always, would force unnecessary cold rebuild). Stale must come solely
+// from NodeKeyN/EdgeKeyN/VectorKeyN mismatch. [bug-fix 2026-05-13]
+func TestStaleGuard_WALSizeZeroSkipsFileSizeGate(t *testing.T) {
+	g, w, _ := makeTestGraph(t, 4)
+	path := filepath.Join(t.TempDir(), "snap.bin")
+	if err := SaveHNSWSnapshot(g, w, path); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := LoadHNSWSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the shutdown race: zero out WALFileSize as buildSnapshotHeader
+	// would do when stat fails. WAL file on disk has its actual size; the
+	// sentinel must skip the comparison.
+	snap.Header.WALFileSize = 0
+	if stale, reason := IsHNSWSnapshotStale(w, &snap.Header); stale {
+		t.Errorf("WALFileSize=0 sentinel must not mark snapshot stale on its own; got stale: %s", reason)
+	}
+	// Sanity: with real key change, sentinel-stamped snapshot still stales.
+	if err := w.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketNodes)
+		if b == nil {
+			return nil
+		}
+		return b.Put([]byte("extra_after_zero_sentinel"), make([]byte, 16))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if stale, _ := IsHNSWSnapshotStale(w, &snap.Header); !stale {
+		t.Error("expected stale after node bucket Put even with WALFileSize=0 sentinel")
+	}
+}
+
+// TestSaveSnapshot_HealthyWALSetsSize verifies the happy path: a healthy
+// open WAL produces a non-zero WALFileSize. The shutdown-race case (WAL
+// closed mid-flight → Path() empty → stat fails → sentinel 0) cannot be
+// reliably reproduced in-test (closing the WAL also breaks bucket probe),
+// but the stale-guard test above proves the sentinel works end-to-end on
+// the read side. [bug-fix 2026-05-13]
+func TestSaveSnapshot_HealthyWALSetsSize(t *testing.T) {
+	g, w, _ := makeTestGraph(t, 4)
+	path := filepath.Join(t.TempDir(), "snap.bin")
+	if err := SaveHNSWSnapshot(g, w, path); err != nil {
+		t.Fatal(err)
+	}
+	healthy, err := LoadHNSWSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if healthy.Header.WALFileSize == 0 {
+		t.Error("healthy WAL save must produce non-zero WALFileSize (sentinel 0 only on stat failure)")
+	}
+}
+
 // itoa is a tiny helper to avoid importing strconv just for subtests.
 func itoa(n int) string {
 	if n == 0 {

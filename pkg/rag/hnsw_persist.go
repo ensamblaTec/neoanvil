@@ -230,9 +230,18 @@ func buildSnapshotHeader(g *Graph, w *WAL) (HNSWSnapshotHeader, error) {
 	}); err != nil {
 		return HNSWSnapshotHeader{}, fmt.Errorf("SaveHNSWSnapshot: probe wal bucket counts: %w", err)
 	}
-	walFileInfo, err := os.Stat(w.db.Path())
-	if err != nil {
-		return HNSWSnapshotHeader{}, fmt.Errorf("SaveHNSWSnapshot: stat wal: %w", err)
+	// [BUG-FIX 2026-05-13] During SIGTERM shutdown, w.db.Path() may return
+	// empty due to race with deferred wal.Close() (boot_helpers.go:111 closes
+	// the WAL via defer cleanupRAG, while the SIGTERM goroutine at
+	// cmd/neo-mcp/main.go:528 simultaneously calls SaveHNSWSnapshot). When
+	// bbolt is closed, db.Path() returns "" → os.Stat("") fails → snapshot
+	// save fails → next boot does cold rebuild (sees node-count mismatch).
+	// Tolerate this: WALFileSize=0 means "unknown" — IsHNSWSnapshotStale
+	// skips the file-size gate when this sentinel is present, falling back
+	// to NodeKeyN/EdgeKeyN/VectorKeyN which are the semantic stale-detectors.
+	var walSize int64
+	if walFileInfo, err := os.Stat(w.db.Path()); err == nil {
+		walSize = walFileInfo.Size()
 	}
 	return HNSWSnapshotHeader{
 		SchemaVersion: HNSWSnapshotSchemaVersion,
@@ -241,7 +250,7 @@ func buildSnapshotHeader(g *Graph, w *WAL) (HNSWSnapshotHeader, error) {
 		EdgeCount:     edgeCount,
 		VectorCount:   vectorCount,
 		BuildAtUnix:   nowUnix(),
-		WALFileSize:   walFileInfo.Size(),
+		WALFileSize:   walSize, // 0 = unknown (shutdown race); see comment above
 		NodeKeyN:      nodeKeyN,
 		EdgeKeyN:      edgeKeyN,
 		VectorKeyN:    vectorKeyN,
@@ -382,7 +391,12 @@ func IsHNSWSnapshotStale(w *WAL, h *HNSWSnapshotHeader) (bool, string) {
 	if err != nil {
 		return true, fmt.Sprintf("stat wal failed: %v", err)
 	}
-	if info.Size() != h.WALFileSize {
+	// [BUG-FIX 2026-05-13] WALFileSize=0 is the "unknown" sentinel emitted by
+	// buildSnapshotHeader when shutdown raced db.Close() (see comment there).
+	// Skip the size gate when sentinel present — the NodeKeyN/EdgeKeyN/
+	// VectorKeyN checks below detect semantic stalessness without needing the
+	// raw file size.
+	if h.WALFileSize != 0 && info.Size() != h.WALFileSize {
 		return true, fmt.Sprintf("wal size %d != snapshot %d", info.Size(), h.WALFileSize)
 	}
 	var nodeKeyN, edgeKeyN, vectorKeyN uint64
