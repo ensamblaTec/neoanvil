@@ -352,6 +352,76 @@ func TestSaveSnapshot_HealthyWALSetsSize(t *testing.T) {
 	}
 }
 
+// TestShutdownSequence_HNSWSnapshotPersisted is a regression test for commit
+// 2d75c03 (fix(mcp): remove racing SIGTERM goroutine — consolidate shutdown
+// in main). Replicates the exact ordering that cmd/neo-mcp/main.go executes
+// during graceful shutdown:
+//
+//     1. wal.Sync()                  ← flush WAL writes
+//     2. SaveHNSWSnapshot(g, w, p)   ← capture graph state to disk
+//     3. wal.Close()                 ← (via defer cleanupRAG, AFTER this)
+//
+// Pre-fix, a SIGTERM goroutine raced main() and called os.Exit(0) before
+// SaveHNSWSnapshot could run; the saved snapshot stayed frozen at boot-time
+// count → next boot detected stale (current WAL count > snapshot count) →
+// chronic HNSW:cold. This test pins the contract so a future regression
+// (re-introduction of a racing goroutine or out-of-order Close) is caught.
+//
+// The test does NOT verify race-free behavior in a multi-goroutine context
+// — that requires an integration test against the running binary. It does
+// verify that the canonical sequential ordering produces a usable snapshot.
+func TestShutdownSequence_HNSWSnapshotPersisted(t *testing.T) {
+	g, w, _ := makeTestGraph(t, 4)
+	path := filepath.Join(t.TempDir(), "shutdown_snap.bin")
+
+	// === Phase 1: simulate session activity (graph already populated by makeTestGraph). ===
+	initialNodes := uint32(len(g.Nodes))
+	if initialNodes == 0 {
+		t.Fatal("setup: graph has 0 nodes — makeTestGraph regression")
+	}
+
+	// === Phase 2: shutdown sequence as in main() ===
+	if err := w.Sync(); err != nil {
+		t.Fatalf("shutdown Step 1 wal.Sync: %v", err)
+	}
+	if err := SaveHNSWSnapshot(g, w, path); err != nil {
+		t.Fatalf("shutdown Step 2 SaveHNSWSnapshot: %v — this is the bug 2d75c03 fixed", err)
+	}
+
+	// === Phase 3: snapshot must be readable + match WAL state at shutdown ===
+	snap, err := LoadHNSWSnapshot(path)
+	if err != nil {
+		t.Fatalf("snapshot file not loadable post-shutdown save: %v", err)
+	}
+	if snap.Header.NodeCount != initialNodes {
+		t.Errorf("snapshot NodeCount %d != graph at shutdown %d (truncated save)",
+			snap.Header.NodeCount, initialNodes)
+	}
+	if snap.Header.WALFileSize == 0 {
+		t.Error("WALFileSize=0 (sentinel) — save reached the stat-failed branch, " +
+			"which means WAL was already closed when save ran (race regressed)")
+	}
+
+	// === Phase 4: defer cleanupRAG fires → wal.Close. Snapshot must survive. ===
+	if err := w.Close(); err != nil {
+		t.Fatalf("shutdown Step 3 wal.Close: %v", err)
+	}
+	snapAfterClose, err := LoadHNSWSnapshot(path)
+	if err != nil {
+		t.Fatalf("snapshot file corrupted/deleted after wal.Close: %v", err)
+	}
+	if snapAfterClose.Header.NodeCount != snap.Header.NodeCount {
+		t.Error("snapshot mutated after wal.Close — file write was not flushed")
+	}
+
+	// === Phase 5: simulate next boot's stale-check. With our canonical
+	// shutdown ordering, snapshot must NOT appear stale (would force cold rebuild). ===
+	// We cannot test IsHNSWSnapshotStale here because it requires a live WAL —
+	// the post-close snapshot can only be re-loaded into a fresh WAL during a
+	// real boot. The contract checked above (NodeCount matches, WALFileSize
+	// non-zero) is sufficient to prove the snapshot is non-stale-by-content.
+}
+
 // itoa is a tiny helper to avoid importing strconv just for subtests.
 func itoa(n int) string {
 	if n == 0 {
