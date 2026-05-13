@@ -83,8 +83,15 @@ Tras bug no obvio, auditoría arquitectónica compleja o patrón nuevo: `neo_mem
 
 ## G18 — DIRECTIVE CRUD
 
-`neo_memory(action: "learn")` acepta `action_type`: add (default), update, delete.
-Update/delete requieren `directive_id` (1-based). ADD con `supersedes: [1,2]` auto-depreca. DELETE es soft (`~~OBSOLETO~~`). Sync dual-layer: BoltDB ↔ `.claude/rules/neo-synced-directives.md`.
+`neo_memory(action: "learn")` acepta `action_type`:
+
+- `add` (default) — nueva directiva, ≤500 chars, normalize-based dedup.
+- `update` — requiere `directive_id` (1-based) + nuevo texto.
+- `delete` — soft (`~~OBSOLETO~~`), recoverable via update.
+- `compact` — hard-purge `~~OBSOLETO~~` + dedupe por tag. **Destructive.** Escribe snapshot pre-destructive a `.neo/db/directives_snapshot.json` (ADR-017).
+- `restore` — re-add missing entries from snapshot (fills gaps; no re-activation de OBSOLETO). Optional `snapshot_path` override.
+
+ADD con `supersedes: [1,2]` auto-depreca. Sync dual-layer: BoltDB ↔ `.claude/rules/neo-synced-directives.md`. Boot path tiene 2-tier corruption guards (abs + rel-loss>20%) — ver `docs/general/directives-durability.md`.
 
 ## G19 — SELF-AUDIT DE CIERRE
 

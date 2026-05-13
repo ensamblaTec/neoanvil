@@ -482,7 +482,12 @@ Full list in `go.mod`.
 | [deepseek-api-reference.md](./docs/plugins/deepseek-api-reference.md) | DeepSeek plugin API reference |
 | [plugin-author-guide.md](./docs/plugins/plugin-author-guide.md) | Writing custom MCP plugins |
 | [neo-global.md](./docs/general/neo-global.md) | Universal operational laws |
+| [directives-durability.md](./docs/general/directives-durability.md) | Corruption guards + snapshot/restore (ADR-017) |
 | [ADR-005](./docs/adr/ADR-005-plugin-architecture.md) | Plugin subprocess architecture |
+| [ADR-013](./docs/adr/ADR-013-local-llm-tool.md) | Local LLM tool (`neo_local_llm`) |
+| [ADR-014](./docs/adr/ADR-014-hnsw-hybrid-quant.md) | HNSW hybrid quantization |
+| [ADR-016](./docs/adr/ADR-016-ouroboros-lifecycle-hooks.md) | Ouroboros lifecycle hooks (PreToolUse/PostToolUse/Stop) |
+| [ADR-017](./docs/adr/ADR-017-directives-durability.md) | Directives durability hardening (this session) |
 
 ## Contributing
 
