@@ -715,6 +715,24 @@ func applyIntegrationDefaults(cfg *NeoConfig, ns *bool) {
 	}
 }
 
+// scaledCacheCapacity returns an auto-scaled RAG cache capacity proportional to
+// MaxNodesPerWorkspace. capacity = maxNodes / divisor, floored at minCap. For
+// small workspaces (≤50k nodes default) returns minCap; for 1M+ nodes scales
+// linearly (e.g. 1M/500 = 2000 query-cache entries). Operators can override by
+// setting an explicit query_cache_capacity / embedding_cache_capacity in neo.yaml.
+//
+// Heuristic chosen empirically: query divisor=500 (0.2% of max_nodes), embed
+// divisor=1000 (0.1%) — balances RAM footprint against hit-rate degradation
+// observed when capacity << index size (e.g. strategos at 765k nodes with
+// cap=256 query / 128 embed produced ~0% hit ratio).
+func scaledCacheCapacity(maxNodes, divisor, minCap int) int {
+	scaled := maxNodes / divisor
+	if scaled < minCap {
+		return minCap
+	}
+	return scaled
+}
+
 // applyRAGDefaults backfills RAG observability and concurrency thresholds.
 func applyRAGDefaults(cfg *NeoConfig, ns *bool) {
 	// Backfill OllamaConcurrency for configs that predate this field.
@@ -755,15 +773,21 @@ func applyRAGDefaults(cfg *NeoConfig, ns *bool) {
 		cfg.RAG.VectorQuant = "float32"
 		*ns = true
 	}
-	// [PILAR-XXV/175] Query cache capacity backfill — default 256 entries.
-	// Set to 0 in neo.yaml to disable the cache entirely.
+	// [PILAR-XXV/175 + LARGE-PROJECT] Query cache capacity backfill —
+	// auto-scales with MaxNodesPerWorkspace via scaledCacheCapacity.
+	// 50k nodes → 256 (min), 600k nodes → 1200, 1M nodes → 2000.
+	// Set explicit value in neo.yaml to override (any non-zero value sticks).
+	// Set to negative in neo.yaml to disable the cache entirely — but bear in
+	// mind 0 triggers backfill, so use 1 for "minimal cache" or omit + clear it
+	// out-of-band if disabling is the goal.
 	if cfg.RAG.QueryCacheCapacity == 0 {
-		cfg.RAG.QueryCacheCapacity = 256
+		cfg.RAG.QueryCacheCapacity = scaledCacheCapacity(cfg.RAG.MaxNodesPerWorkspace, 500, 256)
 		*ns = true
 	}
-	// [PILAR-XXV/199] Embedding cache capacity backfill — default 128.
+	// [PILAR-XXV/199 + LARGE-PROJECT] Embedding cache capacity backfill —
+	// auto-scales: max_nodes/1000, floor 128. 1M nodes → 1024 entries.
 	if cfg.RAG.EmbeddingCacheCapacity == 0 {
-		cfg.RAG.EmbeddingCacheCapacity = 128
+		cfg.RAG.EmbeddingCacheCapacity = scaledCacheCapacity(cfg.RAG.MaxNodesPerWorkspace, 1000, 128)
 		*ns = true
 	}
 	// [273.A] Max embed chars backfill — default 4000 (conservative for nomic-embed-text 2048-token default).

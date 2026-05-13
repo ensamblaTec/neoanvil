@@ -4,10 +4,13 @@
 # solo da visibilidad para que el operador no se vaya con edits sin sellar.
 #
 # Triggered por Claude Code Stop event (al final de la conversación).
-# Output: JSON con `additionalContext` para inyectar el banner al agent (NO
-# stdout markdown — Claude Code parsea JSON, raw stdout se silencia).
+# Output: JSON con `systemMessage` top-level. **El schema de Claude Code NO
+# incluye `Stop` en `hookSpecificOutput`** — solo PreToolUse/UserPromptSubmit/
+# PostToolUse/PostToolBatch. Para Stop usar systemMessage/reason/decision al
+# nivel raíz. Bug previo: emitía hookSpecificOutput.hookEventName="Stop" y
+# Claude Code rechazaba con "Hook JSON output validation failed".
 #
-# Spec: ADR-016 (revision 2026-05-13: JSON output format).
+# Spec: ADR-016 (revision 2026-05-13: JSON output format; 2026-05-13bis: Stop fix).
 
 set -uo pipefail
 
@@ -50,10 +53,7 @@ Bypass de emergencia: \`NEO_CERTIFY_BYPASS=1 git commit\` (queda registrado como
   python3 -c "
 import json, sys
 print(json.dumps({
-  'hookSpecificOutput': {
-    'hookEventName': 'Stop',
-    'additionalContext': sys.argv[1],
-  }
+  'systemMessage': sys.argv[1],
 }))
 " "$CTX"
 fi

@@ -526,3 +526,80 @@ func TestLoadConfig_AutoDiscoversCPGEntry(t *testing.T) {
 		t.Errorf("cfg.CPG.PackageDir = %q, want cmd/myservice", cfg.CPG.PackageDir)
 	}
 }
+
+// TestScaledCacheCapacity verifies the auto-scale heuristic for RAG cache
+// capacities. Floor must hold for small workspaces; linear scaling kicks in
+// when maxNodes / divisor exceeds minCap.
+func TestScaledCacheCapacity(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxNodes int
+		divisor  int
+		minCap   int
+		want     int
+	}{
+		// Floor: small workspace stays at minimum.
+		{"small floor query", 50_000, 500, 256, 256},      // 50000/500=100 < 256 → floor
+		{"small floor embed", 50_000, 1000, 128, 128},     // 50000/1000=50 < 128 → floor
+		{"at floor boundary", 128_000, 500, 256, 256},     // 128000/500=256 = floor → exact
+		// Linear scaling: large workspace scales up.
+		{"600k query scales", 600_000, 500, 256, 1200},    // strategos prev cap
+		{"600k embed scales", 600_000, 1000, 128, 600},
+		{"1M query scales", 1_000_000, 500, 256, 2000},
+		{"1M embed scales", 1_000_000, 1000, 128, 1000},
+		{"1.2M query scales", 1_200_000, 500, 256, 2400},  // strategos new cap
+		// Edge cases.
+		{"zero maxNodes uses min", 0, 500, 256, 256},
+		{"negative divisor safe — produces negative, clamped to min", 50_000, -1, 128, 128},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scaledCacheCapacity(tc.maxNodes, tc.divisor, tc.minCap)
+			if got != tc.want {
+				t.Errorf("scaledCacheCapacity(%d, %d, %d) = %d, want %d",
+					tc.maxNodes, tc.divisor, tc.minCap, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyRAGDefaults_CacheAutoScale verifies the backfill produces scaled
+// cache capacities when MaxNodesPerWorkspace is large and capacities are unset.
+func TestApplyRAGDefaults_CacheAutoScale(t *testing.T) {
+	cfg := &NeoConfig{}
+	cfg.RAG.MaxNodesPerWorkspace = 1_000_000 // explicit large workspace
+	// Leave QueryCacheCapacity / EmbeddingCacheCapacity at 0 → backfill triggers.
+
+	ns := false
+	applyRAGDefaults(cfg, &ns)
+
+	if cfg.RAG.QueryCacheCapacity != 2000 {
+		t.Errorf("QueryCacheCapacity = %d, want 2000 (1M/500)", cfg.RAG.QueryCacheCapacity)
+	}
+	if cfg.RAG.EmbeddingCacheCapacity != 1000 {
+		t.Errorf("EmbeddingCacheCapacity = %d, want 1000 (1M/1000)", cfg.RAG.EmbeddingCacheCapacity)
+	}
+	if !ns {
+		t.Error("backfill should have set ns=true")
+	}
+}
+
+// TestApplyRAGDefaults_RespectExplicitCacheCap verifies that an explicit cache
+// capacity (any non-zero value) is preserved — the auto-scale only kicks in
+// when the operator left the field at zero.
+func TestApplyRAGDefaults_RespectExplicitCacheCap(t *testing.T) {
+	cfg := &NeoConfig{}
+	cfg.RAG.MaxNodesPerWorkspace = 1_000_000
+	cfg.RAG.QueryCacheCapacity = 999    // operator override
+	cfg.RAG.EmbeddingCacheCapacity = 42 // operator override
+
+	ns := false
+	applyRAGDefaults(cfg, &ns)
+
+	if cfg.RAG.QueryCacheCapacity != 999 {
+		t.Errorf("explicit QueryCacheCapacity overwritten: got %d, want 999", cfg.RAG.QueryCacheCapacity)
+	}
+	if cfg.RAG.EmbeddingCacheCapacity != 42 {
+		t.Errorf("explicit EmbeddingCacheCapacity overwritten: got %d, want 42", cfg.RAG.EmbeddingCacheCapacity)
+	}
+}
