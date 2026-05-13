@@ -271,6 +271,14 @@ func (ldt *LearnDirectiveTool) handleDeleteDirective(args map[string]any) (any, 
 }
 
 func (ldt *LearnDirectiveTool) handleCompactDirectives() (any, error) {
+	// Pre-destructive backup: snapshot BoltDB state to .neo/db/directives_snapshot.json
+	// so a wrongful compact is recoverable beyond git. Born from 2026-05-13
+	// 7-directive drift incident — git history of the .md file was the only
+	// recovery option since .neo/db/ is gitignored. Non-fatal: log + proceed.
+	snapshotPath := filepath.Join(ldt.workspace, ".neo", "db", "directives_snapshot.json")
+	if backupErr := ldt.wal.SnapshotDirectives(snapshotPath); backupErr != nil {
+		log.Printf("[DIRECTIVES-SYNC] pre-compact snapshot failed: %v — proceeding (recovery requires git of neo-synced-directives.md)", backupErr)
+	}
 	removed, kept, err := ldt.wal.CompactDirectives()
 	if err != nil {
 		return nil, fmt.Errorf("[neo_learn_directive] compact failed: %w", err)

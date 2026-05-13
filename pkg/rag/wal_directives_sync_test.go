@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -323,6 +324,79 @@ func TestLoadDirectivesFromDisk_RelativeLossWithinThreshold(t *testing.T) {
 	if !found {
 		t.Errorf("expected destructive sweep to deprecate rule #1 when relative loss < threshold; baseline=%d, before=%d, active_now=%d",
 			baseline, before, countActiveDirectives(t, wal))
+	}
+}
+
+// TestSnapshotDirectives_WritesValidJSON verifies the pre-destructive backup
+// helper produces a parseable JSON snapshot with correct counts.
+func TestSnapshotDirectives_WritesValidJSON(t *testing.T) {
+	ws := t.TempDir()
+	wal := openTestWAL(t, ws)
+	baseline := countActiveDirectives(t, wal)
+
+	if err := wal.SaveDirective("[TEST] snapshot rule 1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := wal.SaveDirective("[TEST] snapshot rule 2"); err != nil {
+		t.Fatal(err)
+	}
+	// Soft-delete one entry so the snapshot has both active + deprecated.
+	if err := wal.DeprecateDirective(baseline+1, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshotPath := filepath.Join(ws, ".neo", "db", "directives_snapshot.json")
+	if err := wal.SnapshotDirectives(snapshotPath); err != nil {
+		t.Fatalf("SnapshotDirectives failed: %v", err)
+	}
+
+	data, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("snapshot file unreadable: %v", err)
+	}
+
+	var payload struct {
+		SnapshotAtUnix  int64    `json:"snapshot_at_unix"`
+		ActiveCount     int      `json:"active_count"`
+		DeprecatedCount int      `json:"deprecated_count"`
+		Directives      []string `json:"directives"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("snapshot JSON invalid: %v", err)
+	}
+
+	if payload.SnapshotAtUnix == 0 {
+		t.Error("snapshot_at_unix should be non-zero")
+	}
+	if payload.DeprecatedCount < 1 {
+		t.Errorf("expected ≥1 deprecated entry in snapshot, got %d", payload.DeprecatedCount)
+	}
+	if payload.ActiveCount < 1 {
+		t.Errorf("expected ≥1 active entry in snapshot, got %d", payload.ActiveCount)
+	}
+	totalEntries := payload.ActiveCount + payload.DeprecatedCount
+	if len(payload.Directives) != totalEntries {
+		t.Errorf("directives slice length %d != active+deprecated %d", len(payload.Directives), totalEntries)
+	}
+}
+
+// TestSnapshotDirectives_MissingDirReturnsNil verifies that SnapshotDirectives
+// creates parent directories rather than failing on missing paths.
+func TestSnapshotDirectives_CreatesParentDir(t *testing.T) {
+	ws := t.TempDir()
+	wal := openTestWAL(t, ws)
+
+	if err := wal.SaveDirective("[TEST] dir-create rule"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Path with two missing parent levels.
+	snapshotPath := filepath.Join(ws, "nonexistent", "deeper", "snap.json")
+	if err := wal.SnapshotDirectives(snapshotPath); err != nil {
+		t.Fatalf("SnapshotDirectives should create parents: %v", err)
+	}
+	if _, err := os.Stat(snapshotPath); err != nil {
+		t.Fatalf("snapshot file not written: %v", err)
 	}
 }
 

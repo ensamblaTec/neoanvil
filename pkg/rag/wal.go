@@ -950,9 +950,54 @@ func (wal *WAL) GetDirectives() ([]string, error) {
 	return rules, err
 }
 
+// SnapshotDirectives writes the current BoltDB directives state to a JSON
+// file at snapshotPath. Recovery option before destructive operations
+// (CompactDirectives hard-purge, mass-deprecation). Format: timestamp +
+// active/deprecated counts + raw entries (including ~~OBSOLETO~~ markers).
+// Caller decides whether write failure aborts the destructive op.
+//
+// Born from 2026-05-13 7-directive drift incident — git history of the
+// .md file was the only recovery option since .neo/db/ is gitignored.
+func (wal *WAL) SnapshotDirectives(snapshotPath string) error {
+	rules, err := wal.GetDirectives()
+	if err != nil {
+		return fmt.Errorf("SnapshotDirectives: read: %w", err)
+	}
+	active, deprecated := 0, 0
+	for _, r := range rules {
+		if strings.HasPrefix(r, "~~OBSOLETO~~") {
+			deprecated++
+		} else {
+			active++
+		}
+	}
+	payload := struct {
+		SnapshotAtUnix  int64    `json:"snapshot_at_unix"`
+		ActiveCount     int      `json:"active_count"`
+		DeprecatedCount int      `json:"deprecated_count"`
+		Directives      []string `json:"directives"`
+	}{
+		SnapshotAtUnix:  time.Now().Unix(),
+		ActiveCount:     active,
+		DeprecatedCount: deprecated,
+		Directives:      rules,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("SnapshotDirectives: marshal: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(snapshotPath), 0755); err != nil {
+		return fmt.Errorf("SnapshotDirectives: mkdir: %w", err)
+	}
+	return os.WriteFile(snapshotPath, data, 0600)
+}
+
 // CompactDirectives hard-purges all ~~OBSOLETO~~ entries and deduplicates
 // the active set. Tag-based dedup keeps the LAST (most recent) entry when
 // multiple entries share the same leading [TAG]. Returns (removed, kept).
+//
+// DESTRUCTIVE. Callers should invoke SnapshotDirectives first for
+// recovery — see handleCompactDirectives in cmd/neo-mcp/tools.go.
 func (wal *WAL) CompactDirectives() (int, int, error) {
 	var removed, kept int
 	err := wal.db.Batch(func(tx *bbolt.Tx) error {
