@@ -45,7 +45,7 @@ type deepseekPreCheckResult struct {
 // deepseekPreCheck invokes DeepSeek red_team_audit on a hot-path file via
 // the Nexus plugin dispatch endpoint. Returns advisory text for the certify
 // result. Non-blocking: plugin unavailable or timeout → log + continue. [371.C]
-func (t *CertifyMutationTool) deepseekPreCheck(filename string, src []byte) deepseekPreCheckResult {
+func (t *CertifyMutationTool) deepseekPreCheck(filename string, _ []byte) deepseekPreCheckResult {
 	mode := t.cfg.SRE.DeepseekPreCertify
 	if mode == "" {
 		mode = "manual"
