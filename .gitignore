@@ -16,6 +16,9 @@ bin/
 .neo/models/
 .neo/.env
 .neo/mode
+# [ADR-016] Ouroboros lifecycle hooks state
+.neo/blast_cache.json
+.neo/session_pending_cert.list
 # docker-compose runtime overrides (1.1.B). .env.example is the committed template.
 .env
 .neo/credentials.json
