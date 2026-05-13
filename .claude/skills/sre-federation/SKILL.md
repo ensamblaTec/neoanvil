@@ -1,12 +1,6 @@
 ---
 name: sre-federation
-description: Federation tier ownership (workspace/project/org/nexus), PILAR XXXI project federation walk-up, PILAR XXXII CPG fast-boot, PILAR XXXIII auth+multi-tenant BoltDB, PILAR LXVI nexus debt registry, PILAR LXVII org tier. Use when working with .neo-project/, .neo-org/, knowledge store, debt registry, or cross-workspace coordination.
-paths:
-  - "pkg/federation/**"
-  - "pkg/nexus/**"
-  - "pkg/cpg/**"
-  - "pkg/auth/**"
-  - "pkg/knowledge/**"
+description: Federation tier ownership (workspace/project/org/nexus), PILAR XXXI project federation walk-up, PILAR XXXII CPG fast-boot, PILAR XXXIII auth+multi-tenant BoltDB, PILAR LXVI nexus debt registry, PILAR LXVII org tier. Task-mode skill — invoke with `/sre-federation` when working on .neo-project/, .neo-org/, knowledge store, debt registry, or cross-workspace coordination.
 ---
 
 # SRE Federation — Tier Ownership + PILARs XXXI-LXVII

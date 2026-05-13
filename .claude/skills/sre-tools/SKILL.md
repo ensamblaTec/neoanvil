@@ -1,6 +1,6 @@
 ---
 name: sre-tools
-description: Inventario de las 15 tools MCP de neoanvil (neo_radar 23 intents, neo_sre_certify_mutation, neo_chaos_drill, neo_command, neo_cache, neo_daemon, neo_memory + 8 specialists incluyendo neo_local_llm ADR-013 y los plugins Jira/DeepSeek/GitHub). Use when picking a tool, troubleshooting tool degradation, or learning about a specific intent.
+description: Inventario de las 15 tools MCP de neoanvil (neo_radar 23 intents, neo_sre_certify_mutation, neo_chaos_drill, neo_command, neo_cache, neo_daemon, neo_memory + 8 specialists incluyendo neo_local_llm ADR-013 y los plugins Jira/DeepSeek/GitHub). Task-mode skill — invoke with `/sre-tools` when picking a tool, troubleshooting tool degradation, or learning about a specific intent.
 ---
 
 # SRE Tools — inventario operativo

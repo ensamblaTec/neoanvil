@@ -1,9 +1,6 @@
 ---
 name: sre-quality
-description: Leyes de calidad de código para neoanvil — Zero-Allocation, Aislamiento MCP, Safe HTTP, certify TTL, AST audit policy, gosec annotations, deadcode triage, MCP Tool Schema requirements. Use when writing/reviewing Go code, debugging hot-path performance, or hitting SRE veto.
-paths:
-  - "pkg/**/*.go"
-  - "cmd/**/*.go"
+description: Leyes de calidad de código para neoanvil — Zero-Allocation, Aislamiento MCP, Safe HTTP, certify TTL, AST audit policy, gosec annotations, deadcode triage, MCP Tool Schema requirements. Task-mode skill — invoke with `/sre-quality` when writing/reviewing Go code, debugging hot-path performance, or hitting SRE veto.
 ---
 
 # Leyes de Calidad SRE
