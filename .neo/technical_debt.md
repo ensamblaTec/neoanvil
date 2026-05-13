@@ -462,9 +462,32 @@ agent) can be implemented as a ~50 LOC wrapper over `neo_local_llm` +
 
 ---
 
-## [2026-05-13 02:51] [context-bloat] CLAUDE.md + rules + skills inyectan ~64k tokens upfront — auto-mode degrada doctrina Ouroboros
+## ~~[2026-05-13 02:51] [context-bloat] CLAUDE.md + rules + skills inyectan ~64k tokens upfront~~ — RESOLVED 2026-05-13 (audit c2b35c0+1)
 
-**Prioridad:** P2
+**Status:** Audit completo descubrió que las acciones A+B ya estaban hechas (commit `bf36b19` consolidación previa). Acción D parcialmente OK (0 tag duplicates). Quedaba pendiente compactar 3 outliers grandfathered >500 chars; resuelto en este audit.
+
+**Medición actual upfront (post-audit):**
+- CLAUDE.md: 52 líneas / 4,061 chars / ~1,015 tok
+- .claude/rules/*.md (1 archivo): 16,391 chars / ~4,098 tok
+- **Total upfront fixed budget: ~20,452 chars / ~5,113 tok** ← debt entry target era ≤20k tokens. **5× MARGIN bajo target.**
+- Skills auto-load: 11/17 (BRIEFING reporta `11 auto, 6 task`) — cargan contextualmente, no upfront global.
+- Directivas: 57/60 capacity, 0 tag duplicates, **todas ≤500 chars** post-compact de 3 outliers en este audit.
+
+**Acciones del entry original — status real:**
+- **A. CLAUDE.md ≤60 líneas:** ✅ DONE (52 líneas actuales)
+- **B. Consolidar 5 rules/*.md:** ✅ DONE (solo 1 archivo `neo-synced-directives.md` existe)
+- **C. Reclasificar 8 skills auto→task:** SKIPPED (riesgo medio, beneficio marginal — skills auto cargan contextualmente, no en cada turn)
+- **D. ≤40 directivas + dedupe:** PARCIAL — 0 tag dupes confirmado, count 57 (no 62), 3 outliers compactados a ≤500 chars en este audit
+- **E. Mover docs a docs/general/:** ya está hecho (CLAUDE.md referencia `docs/general/neo-global.md`, etc.)
+- **F. Scope-aware loading:** SKIPPED (riesgo medio en pkg/config, ROI bajo dado que target ya cumplido)
+
+**Lesson registrada:** debt entries decay rápido. Re-audit antes de ejecutar — A/B ya estaban hechas pero el entry no se actualizó tras `bf36b19`. Aprendido: `git log --grep` previo a empezar trabajo en debt items, o `git log <path>` de los archivos mencionados.
+
+---
+
+## ~~ORIGINAL ENTRY (preserved for reference)~~
+
+**Prioridad:** P2 (original)
 
 ## Problema
 
