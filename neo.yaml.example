@@ -55,6 +55,11 @@ server:
   tool_timeout_seconds: 120
 
 workspace:
+  # [358.A — ADR-015] Scope del workspace: "fullstack" (default, todas las rules+skills
+  # aplican), "backend" (Go MCP code; frontend skills irrelevantes), "frontend" (web/, UI;
+  # DB doctrine + gosec irrelevantes), "infra" (Nexus/PKI/SCADA), "db" (migrations + dba).
+  # Hoy es informacional — surface en BRIEFING. Futuro: scope-aware rule injection.
+  scope: "fullstack"
   # Directorios ignorados por el Watcher y el RAG.
   # IMPORTANTE: Añadir siempre entornos virtuales Python y cachés de paquetes —
   # de lo contrario miles de archivos de pip/vendor saturarán Ollama durante ingesta.

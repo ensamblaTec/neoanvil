@@ -57,6 +57,19 @@ type WorkspaceConfig struct {
 	// Format: free-form string; convention is `<host>/<owner>/<repo>` or
 	// `project:<name>:<basename>` to match the resolver's output. [135.A.1]
 	CanonicalID string `yaml:"canonical_id,omitempty"`
+
+	// Scope declares the workspace's primary work domain. Reserved values:
+	// "fullstack" (default — load all rules + skills, current behavior),
+	// "backend" (Go MCP code / pkg/cmd-only — frontend rules irrelevant),
+	// "frontend" (web/, UI only — DB doctrine + gosec irrelevant),
+	// "infra" (Nexus/PKI/SCADA — code-quality + DB skills not central),
+	// "db" (migrations + dba — code-quality lite, but DB doctrine essential).
+	//
+	// Today this field is INFORMATIONAL — surfaced in BRIEFING for context,
+	// used by future scope-aware rule injection (ADR-015) that will let
+	// SessionStart hook selectively load only the relevant skills/docs.
+	// See [CONFIG-FIELD-BACKFILL-RULE] in directives. [358.A]
+	Scope string `yaml:"scope,omitempty"`
 }
 
 type DatabaseConfig struct {
@@ -455,6 +468,7 @@ func defaultNeoConfig() *NeoConfig {
 			AllowedExtensions: []string{".go", ".ts", ".js", ".py", ".md", ".rs", ".html", ".css", ".yaml"},
 			MaxFileSizeMB:     5,
 			Modules:           map[string]string{"web": "npm run build"}, // [SRE-26.1.2]
+			Scope:             "fullstack",                                // [358.A] default — load everything; see ADR-015
 		},
 		AI: AIConfig{
 			Provider:            "ollama",
@@ -1162,6 +1176,12 @@ func applyWorkspaceDefaults(cfg *NeoConfig, ns *bool) {
 	// Workspace safety backfill — MaxFileSizeMB=0 means no limit (OOM risk)
 	if cfg.Workspace.MaxFileSizeMB == 0 {
 		cfg.Workspace.MaxFileSizeMB = 5
+		*ns = true
+	}
+	// [358.A] Scope backfill — empty defaults to "fullstack" (current behavior).
+	// See ADR-015 + [CONFIG-FIELD-BACKFILL-RULE] in synced directives.
+	if cfg.Workspace.Scope == "" {
+		cfg.Workspace.Scope = "fullstack"
 		*ns = true
 	}
 	// AllowedExtensions=nil means nothing gets indexed into RAG

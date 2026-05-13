@@ -155,6 +155,49 @@ func TestLoadConfigBackfill(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_WorkspaceScope_Backfill verifies that an empty workspace.scope
+// is backfilled to "fullstack" per CONFIG-FIELD-BACKFILL-RULE. Without backfill,
+// the config-watcher round-trip would persist scope:"" perpetually [358.A].
+func TestLoadConfig_WorkspaceScope_Backfill(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "neo.yaml")
+
+	// Minimal config without workspace.scope set
+	if err := os.WriteFile(cfgPath, []byte("server:\n  mode: fast\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Workspace.Scope != "fullstack" {
+		t.Errorf("expected workspace.scope=fullstack after backfill, got %q", cfg.Workspace.Scope)
+	}
+
+	// Round-trip: write config back and re-load. Scope must persist (not regress to "").
+	cfg2, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.Workspace.Scope != "fullstack" {
+		t.Errorf("scope must persist after round-trip, got %q", cfg2.Workspace.Scope)
+	}
+
+	// Explicit non-default scope must be preserved (no clobbering).
+	cfgExplicit := filepath.Join(dir, "explicit.yaml")
+	if err := os.WriteFile(cfgExplicit, []byte("workspace:\n  scope: backend\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg3, err := LoadConfig(cfgExplicit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg3.Workspace.Scope != "backend" {
+		t.Errorf("explicit scope must be preserved, got %q", cfg3.Workspace.Scope)
+	}
+}
+
 // TestLoadDotEnv verifies that loadDotEnv sets env vars from a file
 // and that shell env vars take priority over .env values.
 func TestLoadDotEnv(t *testing.T) {
