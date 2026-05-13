@@ -44,7 +44,18 @@ func TestBackgroundIndexFile_SymlinkEscapeRejected(t *testing.T) {
 	// We test the gate directly because backgroundIndexFile spawns
 	// goroutines + Ollama embedder; the safety property is purely the
 	// prefix re-check.
-	wsRoot := ws
+	//
+	// [bug-fix 2026-05-13] On macOS t.TempDir() returns /var/folders/... but
+	// filepath.EvalSymlinks resolves to /private/var/folders/... (system-wide
+	// symlink redirect). Comparing raw ws against resolved paths triggered a
+	// chronic false-positive failure of the *inner* assertion below. Fix:
+	// canonicalize the workspace root via EvalSymlinks BEFORE comparison so
+	// both sides are in the same realm. The security property remains: the
+	// outside-target test below still must reject (resolved escapes ws).
+	wsRoot, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(ws): %v", err)
+	}
 	if got := isPathUnderRoot(resolved, wsRoot); got {
 		t.Errorf("resolved %s incorrectly inside workspace %s", resolved, wsRoot)
 	}
