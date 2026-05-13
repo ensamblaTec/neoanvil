@@ -1,7 +1,7 @@
 ---
 name: local-llm-workflow
 description: Doctrina operativa del tool `mcp__neoanvil__neo_local_llm` (ADR-013). Task-mode skill — invoke with `/local-llm-workflow` when deciding whether a prompt should go to the local Ollama LLM (Qwen 2.5-Coder 7B by default) or to the DeepSeek plugin. Covers the routing matrix, prompt shape, system prompt usage, model override decisions, hardware-fit caveats, latency expectations, the cost calculus vs DS, and the empirical quality calibration.
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Local LLM Workflow — `neo_local_llm` operacional

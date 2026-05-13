@@ -1,7 +1,7 @@
 ---
 name: deepseek-workflow
 description: Doctrina operativa del plugin DeepSeek (mcp__neoanvil__deepseek_call). Task-mode skill — invoke with `/deepseek-workflow` when invoking distill_payload, map_reduce_refactor, red_team_audit, or generate_boilerplate. Covers action selection, cache discipline (50× cheaper repeat calls), thread continuity, model selection (v4-flash vs v4-pro), reasoning_effort knobs, the Babel pattern (English prompts), and the empirical hallucination triage rules.
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # DeepSeek Workflow — plugin operacional

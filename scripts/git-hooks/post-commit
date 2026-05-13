@@ -74,7 +74,7 @@ fi
 # "Z0-9" in regex examples, "MCPI-130" phantom) NO disparan prepare_doc_pack.
 # Mismo precedente que sync-master-plan.sh:39.
 if declare -F extract_subject_tickets >/dev/null 2>&1; then
-    TICKETS=$(extract_subject_tickets "$COMMIT_MSG")
+    TICKETS=$(extract_subject_tickets "$COMMIT_MSG" || true)
 else
     # Fallback if lib not present.
     TICKETS=$(printf '%s' "$COMMIT_MSG" | head -n 1 | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | sort -u || true)

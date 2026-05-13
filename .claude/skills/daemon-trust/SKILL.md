@@ -1,7 +1,7 @@
 ---
 name: daemon-trust
 description: Trust score dashboard for PILAR XXVII. Per-pattern α/β counters, tier history with demote/promote events, decay-aware lower bound, and a comparison "what trust said this morning vs now". Use when auditing model performance per (pattern, scope), debugging unexpected tier transitions, or preparing a trust review before activating daemon mode. Task-mode skill (invoke with `/daemon-trust [filter_pattern]`).
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Daemon Trust — Score Dashboard

@@ -1,7 +1,7 @@
 ---
 name: github-workflow
 description: Doctrina operativa del plugin GitHub (mcp__neoanvil__github_github). Task-mode skill — invoke with `/github-workflow` when invoking any GitHub action (list_prs, create_pr, merge_pr, get_checks, cross_ref, etc.), troubleshooting auth, picking PAT scopes, or wiring GitHub ↔ Jira cross-references. Covers action selection, multi-tenant credentials, audit log shape, rate-limit awareness, and the cross_ref → jira/link_issue pattern.
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # GitHub Workflow — plugin operacional
