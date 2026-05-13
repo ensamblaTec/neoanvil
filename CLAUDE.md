@@ -36,7 +36,7 @@ Motor SRE de orquestación MCP. **Ouroboros V10.6** · 15 tools MCP · 3 plugins
 - Leyes de código Go/MCP: skill `/sre-quality` (paths-scoped auto-load en `pkg/**/*.go`, `cmd/**/*.go`) · Archive: [`docs/general/code-quality-laws.md`](./docs/general/code-quality-laws.md)
 - Doctrina Database: skill `/sre-db` (paths-scoped auto-load en `pkg/dba/`, `pkg/rag/`, `migrations/`)
 - Directivas vivas (auto-sync BoltDB↔disk): [`.claude/rules/neo-synced-directives.md`](./.claude/rules/neo-synced-directives.md)
-- Skills task-mode disponibles: `/jira-workflow`, `/deepseek-workflow`, `/github-workflow`, `/sre-federation`, `/sre-troubleshooting`, `/brain-doctor`, `/daemon-flow`, etc. Ver [`.claude/skills/`](./.claude/skills/).
+- Skills task-mode disponibles: `/jira-workflow`, `/jira-create-pilar`, `/jira-doc-from-commit`, `/deepseek-workflow`, `/github-workflow`, `/local-llm-workflow`, `/neo-doc-pack`, `/sre-federation`, `/sre-troubleshooting`, `/brain-doctor`, `/daemon-flow`, `/daemon-trust`. Ver [`.claude/skills/`](./.claude/skills/).
 
 ## Federación
 
