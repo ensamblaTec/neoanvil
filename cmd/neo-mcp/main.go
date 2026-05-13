@@ -514,23 +514,22 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	hnswGraph.SetAffinityConfig(cfg.SRE.CPUAffinityEnabled, cfg.SRE.CPUAffinityCores) // [367.A]
 
 	// [SRE] Fase 7.2: Protección ACID contra SIGKILL / SIGINT
+	// [BUG-FIX 2026-05-13] Previously this goroutine raced main()'s shutdown
+	// path: main exits before the goroutine reaches SaveHNSWSnapshot, killing
+	// the save mid-flight (no error logged; snapshot file stays stale at
+	// boot-time count instead of shutdown-time count → chronic HNSW:cold).
+	// Fix: HNSW save now runs SYNCHRONOUSLY in main()'s shutdown sequence
+	// below (see persistCachesOnShutdown + saveShutdownHNSWSnapshot). This
+	// goroutine keeps only the bookkeeping it owns (wal.Close, GhostGC,
+	// observability close, exit) — none of which depends on the WAL state.
 	go func() {
 		<-ctx.Done()
 		log.Println("[SRE-SHUTDOWN] OS Signal received. Executing ACID Graceful Teardown...")
 		_ = wal.Sync()
-		// [ÉPICA 149] Save HNSW snapshot BEFORE closing the WAL — the
-		// save needs to probe wal.db for the current Tx.ID. After this
-		// point, the next cold-boot can fast-load instead of rebuilding.
-		// Failures are logged but don't block shutdown — the WAL itself
-		// is the source of truth; snapshot is derived.
-		if cfg.RAG.HNSWPersistPath != "" {
-			persistPath := filepath.Join(workspace, cfg.RAG.HNSWPersistPath)
-			if err := rag.SaveHNSWSnapshot(hnswGraph, wal, persistPath); err != nil {
-				log.Printf("[SRE-SHUTDOWN] HNSW snapshot save failed: %v", err)
-			} else {
-				log.Printf("[SRE-SHUTDOWN] HNSW snapshot saved to %s", persistPath)
-			}
-		}
+		// HNSW save is now performed by main() synchronously (line ~1857 area)
+		// to avoid the goroutine-vs-main-exit race. If main() didn't get a
+		// chance to run (e.g. forced kill that bypassed shutdown path), there
+		// is no recovery here — the WAL itself is still the source of truth.
 		_ = wal.Close()
 		// [SRE-58.3] Ghost Mode GC — clean up sandbox artifacts on clean shutdown.
 		if liveCfg := LiveConfig(cfg); liveCfg != nil && liveCfg.Governance.GhostMode {
@@ -1855,6 +1854,20 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	persistCachesOnShutdown(caches, workspace)
 	// [Épica 263.B] Save CPG snapshot on graceful shutdown so next boot is fast.
 	cpgMgr.SaveSnapshot(filepath.Join(workspace, cfg.CPG.PersistPath))
+	// [BUG-FIX 2026-05-13] HNSW snapshot save SYNCHRONOUSLY in main shutdown
+	// path, before defer cleanupRAG fires wal.Close(). Previously this was in
+	// a goroutine that raced main exit and never completed (no log lines for
+	// "saved" or "failed" — silently killed mid-flight). Now: graph state at
+	// shutdown moment is captured to disk before WAL closes, so the next
+	// boot's stale-check sees a matching snapshot and avoids cold rebuild.
+	if cfg.RAG.HNSWPersistPath != "" {
+		persistPath := filepath.Join(workspace, cfg.RAG.HNSWPersistPath)
+		if err := rag.SaveHNSWSnapshot(hnswGraph, wal, persistPath); err != nil {
+			log.Printf("[SRE-SHUTDOWN] HNSW snapshot save failed: %v", err)
+		} else {
+			log.Printf("[SRE-SHUTDOWN] HNSW snapshot saved to %s", persistPath)
+		}
+	}
 
 	// [291.E] Stop all active mock servers to free ports.
 	activeMocksMu.Lock()
