@@ -505,9 +505,9 @@ Si retorna `"error":"model \"...\" not found"` → cambiar `embedding_model` a u
 ## Referencias
 
 - Template base (este archivo): `neoanvil/docs/neo-project-federation-guide.md`
-- Doctrina de 14 MCP tools (4-tier workspace/project/org/nexus): `neoanvil/.claude/rules/neo-sre-doctrine.md`
+- Doctrina de 15 MCP tools (4-tier workspace/project/org/nexus): `neoanvil/.claude/skills/sre-tools/SKILL.md` + full schemas en `neoanvil/docs/general/sre-tools-reference.md`
 - Guide org-tier PILAR LXVII (`.neo-org/` federation): `neoanvil/docs/pilar-lxvii-org-tier.md`
-- Workflow operativo: `neoanvil/.claude/rules/neo-workflow.md`
+- Workflow operativo: `neoanvil/.claude/skills/sre-workflow/SKILL.md`
 - Leyes de calidad Go/MCP: `neoanvil/docs/general/code-quality-laws.md`
-- Doctrina DB/RAG: `neoanvil/.claude/rules/neo-db.md`
+- Doctrina DB/RAG: `neoanvil/.claude/skills/sre-db/SKILL.md` (paths-scoped auto-load)
 - Directivas activas (auto-gen): `neoanvil/.claude/rules/neo-synced-directives.md`

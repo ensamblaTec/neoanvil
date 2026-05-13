@@ -31,9 +31,10 @@ Motor SRE de orquestación MCP. **Ouroboros V10.6** · 15 tools MCP · 3 plugins
 
 ## Doctrina + reglas activas
 
-- Doctrina operativa: [`.claude/skills/sre-doctrine/SKILL.md`](./.claude/skills/sre-doctrine/SKILL.md) (auto-load) · Flujo paso a paso: [`.claude/rules/neo-workflow.md`](./.claude/rules/neo-workflow.md)
-- Tools MCP (15 tools, 60+ ops): [`.claude/skills/sre-tools/SKILL.md`](./.claude/skills/sre-tools/SKILL.md) · Esquemas: [`.claude/rules/neo-sre-doctrine.md`](./.claude/rules/neo-sre-doctrine.md)
-- Leyes de código Go/MCP: [`docs/general/code-quality-laws.md`](./docs/general/code-quality-laws.md) (zero-alloc, aislamiento MCP, gosec) · referenciable via skill `/sre-quality`
+- Doctrina operativa (laws): [`.claude/skills/sre-doctrine/SKILL.md`](./.claude/skills/sre-doctrine/SKILL.md) (auto-load) · Flujo paso a paso (procedural): [`.claude/skills/sre-workflow/SKILL.md`](./.claude/skills/sre-workflow/SKILL.md) (auto-load)
+- Tools MCP (15 tools, 60+ ops): [`.claude/skills/sre-tools/SKILL.md`](./.claude/skills/sre-tools/SKILL.md) (task) · Schemas completos: [`docs/general/sre-tools-reference.md`](./docs/general/sre-tools-reference.md)
+- Leyes de código Go/MCP: skill `/sre-quality` (paths-scoped auto-load en `pkg/**/*.go`, `cmd/**/*.go`) · Archive: [`docs/general/code-quality-laws.md`](./docs/general/code-quality-laws.md)
+- Doctrina Database: skill `/sre-db` (paths-scoped auto-load en `pkg/dba/`, `pkg/rag/`, `migrations/`)
 - Directivas vivas (auto-sync BoltDB↔disk): [`.claude/rules/neo-synced-directives.md`](./.claude/rules/neo-synced-directives.md)
 - Skills task-mode disponibles: `/jira-workflow`, `/deepseek-workflow`, `/github-workflow`, `/sre-federation`, `/sre-troubleshooting`, `/brain-doctor`, `/daemon-flow`, etc. Ver [`.claude/skills/`](./.claude/skills/).
 

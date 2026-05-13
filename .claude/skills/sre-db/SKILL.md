@@ -1,4 +1,6 @@
 ---
+name: sre-db
+description: Doctrina Database para neoanvil — ZERO-ALLOC, ACID guardrails via dba.Analyzer, EXPLAIN QUERY PLAN, anti-patterns SQL (SELECT * en tablas >1M filas, joins cuádruples real-time, mutaciones sin WHERE determinístico), RAG WAL sanitizer. Path-scoped auto-load cuando editas pkg/dba/, pkg/rag/, o migrations/. Migrado de `.claude/rules/neo-db.md` (2026-05-13).
 paths:
   - "pkg/dba/**"
   - "pkg/rag/**"

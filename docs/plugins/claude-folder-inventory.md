@@ -176,11 +176,10 @@ Cada archivo es contexto que se añade cuando los paths matcheen.
 ~40k chars per-file. Recomendación: archivos < 30k chars; split por
 dominio si excede.
 
-**neoanvil uso (post ctx-bloat refactor 2026-05-13, fase 4):** 4 archivos, total ~56 KB en `.claude/rules/`.
-- `neo-synced-directives.md` — 17 KB (51 entries, BoltDB-synced)
-- `neo-sre-doctrine.md` — 22 KB (candidate split a skill futuro)
-- `neo-workflow.md` — 14 KB (candidate migrate a skill futuro)
-- `neo-db.md` — 3 KB
+**neoanvil uso (post skill-first refactor 2026-05-13):** **1 archivo** en `.claude/rules/`.
+- `neo-synced-directives.md` — 17 KB (51 entries, BoltDB-synced via `pkg/rag/wal.go`)
+
+Todo lo demás migrado a `.claude/skills/` con frontmatter declarativo (auto / paths-scoped / task).
 
 Archivados a `docs/general/` (mayo 2026, content vive en skills):
 - `directives-archive-deepseek.md` ← skill `deepseek-workflow`
@@ -245,8 +244,9 @@ Migrar de `rules/` a `skills/` los archivos que:
 | Archivo actual | Acción | Razón |
 |---|---|---|
 | `rules/neo-synced-directives.md` (17 KB, post-compact) | KEEP (BoltDB sync target, hardcoded en `pkg/rag/wal.go`) | Auto-managed |
-| `rules/neo-workflow.md` (14 KB) | Migrar a `skills/sre-workflow/SKILL.md` | Procedimental |
-| `rules/neo-sre-doctrine.md` (22 KB) | Migrar a `skills/sre-doctrine/SKILL.md` (parcial hoy) | Procedimental |
+| ✅ `rules/neo-workflow.md` → `skills/sre-workflow/SKILL.md` | Migrado 2026-05-13 (auto-load) | Procedimental |
+| ✅ `rules/neo-sre-doctrine.md` → `docs/general/sre-tools-reference.md` | Archivado 2026-05-13 (tool reference; sre-tools skill apunta a él) | Reference |
+| ✅ `rules/neo-db.md` → `skills/sre-db/SKILL.md` | Migrado 2026-05-13 (paths-scoped: pkg/dba/, pkg/rag/, migrations/) | DB doctrine |
 | `rules/jira-workflow.md` | ✅ migrado a `skills/jira-workflow/` | hecho 2026-04-28 |
 | `rules/neo-code-quality.md` (10 KB) | Mover a `docs/general/` (step E) | Constraints — referenciable via skill |
 | `rules/neo-gosec-audit.md` (5 KB) | Mover a `docs/general/` (step E) | Policy doc |

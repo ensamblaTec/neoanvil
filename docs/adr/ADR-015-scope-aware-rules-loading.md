@@ -12,14 +12,12 @@ After the 2026-05-13 context-bloat refactor (steps D, B, A, E, C), upfront sessi
 |---|---|---|
 | `CLAUDE.md` (51 lines) | ~940 | universal |
 | `.claude/rules/neo-synced-directives.md` (51 entries) | ~4,300 | universal (BoltDB-managed) |
-| `.claude/rules/neo-sre-doctrine.md` (22KB) | ~5,500 | mostly universal |
-| `.claude/rules/neo-workflow.md` (14KB) | ~3,500 | mostly universal |
-| `.claude/rules/neo-db.md` (3KB) | ~750 | **DB work only** |
-| 2 auto-load skills (sre-doctrine, sre-troubleshooting) | ~1,500 | universal |
+| 3 auto-load skills (sre-doctrine, sre-troubleshooting, sre-workflow) | ~2,000 | universal |
+| 3 paths-scoped skills (sre-quality, sre-federation, sre-db) | 0 baseline (only when files matching) | scope-specific ✓ |
 
-The single clearly scope-specific file (`neo-db.md`) is 3KB. The bigger lever for future scope-aware optimization is when more rules accumulate.
+**Update 2026-05-13 (Phase 1.5 — skill-first refactor):** `.claude/rules/` collapsed from 11 → 4 → **1 file**. All non-BoltDB doctrine migrated to `.claude/skills/` with native frontmatter triggers (`paths:` field for path-scoped auto-load). Three skills (`sre-quality`, `sre-federation`, `sre-db`) now use the native Claude Code mechanism — Phase 2 mostly obviated.
 
-**Problem:** Claude Code auto-loads ALL `.claude/rules/*.md` as project instructions unconditionally — no built-in filter. SessionStart hooks can ADD context but cannot UNLOAD already-injected rules.
+**Problem solved natively:** Claude Code already supports path-scoped skill auto-load via `paths:` frontmatter. By migrating doctrine from `rules/` (always-loaded) to `skills/` with `paths:`, scope-awareness comes for free.
 
 ## Decision
 

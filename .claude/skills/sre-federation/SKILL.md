@@ -1,7 +1,12 @@
 ---
 name: sre-federation
-description: Federation tier ownership (workspace/project/org/nexus), PILAR XXXI project federation walk-up, PILAR XXXII CPG fast-boot, PILAR XXXIII auth+multi-tenant BoltDB, PILAR LXVI nexus debt registry, PILAR LXVII org tier. Task-mode skill — invoke with `/sre-federation` when working on .neo-project/, .neo-org/, knowledge store, debt registry, or cross-workspace coordination.
-disable-model-invocation: true
+description: Federation tier ownership (workspace/project/org/nexus), PILAR XXXI project federation walk-up, PILAR XXXII CPG fast-boot, PILAR XXXIII auth+multi-tenant BoltDB, PILAR LXVI nexus debt registry, PILAR LXVII org tier. Path-scoped auto-load cuando editas pkg/federation/, pkg/nexus/, pkg/cpg/, pkg/auth/, o pkg/knowledge/; también invocable con `/sre-federation`.
+paths:
+  - "pkg/federation/**"
+  - "pkg/nexus/**"
+  - "pkg/cpg/**"
+  - "pkg/auth/**"
+  - "pkg/knowledge/**"
 ---
 
 # SRE Federation — Tier Ownership + PILARs XXXI-LXVII

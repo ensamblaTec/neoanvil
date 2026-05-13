@@ -7,7 +7,7 @@ disable-model-invocation: true
 # SRE Tools — inventario operativo
 
 > Las 15 tools MCP que expone neoanvil (más specialists). Para detalle
-> completo de schemas ver `.claude/rules/neo-sre-doctrine.md` —
+> completo de schemas ver `docs/general/sre-tools-reference.md` —
 > esta skill es la guía de selección rápida.
 
 ---

@@ -1,7 +1,9 @@
 ---
 name: sre-quality
-description: Leyes de calidad de código para neoanvil — Zero-Allocation, Aislamiento MCP, Safe HTTP, certify TTL, AST audit policy, gosec annotations, deadcode triage, MCP Tool Schema requirements. Task-mode skill — invoke with `/sre-quality` when writing/reviewing Go code, debugging hot-path performance, or hitting SRE veto.
-disable-model-invocation: true
+description: Leyes de calidad de código para neoanvil — Zero-Allocation, Aislamiento MCP, Safe HTTP, certify TTL, AST audit policy, gosec annotations, deadcode triage, MCP Tool Schema requirements. Path-scoped auto-load cuando editas pkg/**/*.go o cmd/**/*.go; también invocable explícitamente con `/sre-quality`.
+paths:
+  - "pkg/**/*.go"
+  - "cmd/**/*.go"
 ---
 
 # Leyes de Calidad SRE
@@ -182,4 +184,4 @@ Hot-reload via fsnotify sin restart:
 - [`sre-tools`](../sre-tools/SKILL.md) — referencia tools
 - [`docs/general/gosec-audit-policy.md`](../../../docs/general/gosec-audit-policy.md) — categorías gosec válidas
 - [`docs/general/deadcode-policy.md`](../../../docs/general/deadcode-policy.md) — política deadcode
-- [`.claude/rules/neo-db.md`](../../rules/neo-db.md) — doctrina DB scoped
+- Skill `/sre-db` ([`../sre-db/SKILL.md`](../sre-db/SKILL.md)) — doctrina DB scoped (paths-scoped auto-load)

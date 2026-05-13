@@ -1,3 +1,8 @@
+---
+name: sre-workflow
+description: PROTOCOLO OPERATIVO OBLIGATORIO Ouroboros V10.6 — flujo paso a paso BOOT → INVESTIGAR → EDITAR → CERTIFICAR. Tabla completa de herramientas Neo vs nativas, reglas de degradación (BLAST_RADIUS_FALLBACK, SEMANTIC_CODE_FALLBACK, GRAPH_WALK no reachable), árbol de decisión rápido, auditoría periódica, self-audit al cierre de épica. Auto-loaded para todo agente operando este codebase.
+---
+
 # PROTOCOLO OPERATIVO OBLIGATORIO (Ouroboros V10.6)
 
 Este protocolo aplica a TODA sesión y TODA interacción con el codebase. Sin excepciones.
