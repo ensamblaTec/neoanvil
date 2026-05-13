@@ -523,3 +523,19 @@ Acumulación incremental sin política de poda. 5 archivos `neo-synced-directive
 
 ---
 
+
+## [2026-05-13] PRE-EXISTING FLAKE — TestBackgroundIndexFile_SymlinkEscapeRejected (macOS /var symlink)
+
+`cmd/neo-mcp/background_index_symlink_test.go:66` falla en macOS con:
+```
+inner symlink /var/folders/d1/.../alias.txt resolved to /private/var/folders/d1/.../data.txt
+  should be under workspace /var/folders/d1/.../...
+```
+
+**Root cause:** macOS hace `/var → /private/var` symlink-redirect a nivel filesystem. `t.TempDir()` retorna paths bajo `/var/folders/` pero `filepath.EvalSymlinks` resuelve a `/private/var/folders/`. El test verifica que el resolvedPath esté bajo `workspace`, pero workspace es la versión `/var/folders/...` y resolvedPath es `/private/var/folders/...` — no match.
+
+**Verificación pre-existing:** `git stash && go test -run TestBackgroundIndexFile_SymlinkEscapeRejected` falla idéntico sin mis cambios actuales (2026-05-13). NO causado por HotFilesCache.
+
+**Fix sugerido (defer):** El test debe normalizar `workspace` con `filepath.EvalSymlinks` antes de comparar, o usar un workspace dir explícito que no esté bajo `/var`. Ticket separate, no bloquea HotFilesCache landing.
+
+**Impact:** Hasta el fix, `NEO_CERTIFY_BYPASS=1 git commit` para cualquier .go/.ts/.tsx/.js/.css en cmd/neo-mcp/ (per directiva [SRE-CERTIFY-BYPASS]). Pre-commit hook bloqueará sin esta variable.

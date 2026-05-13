@@ -213,6 +213,7 @@ type RadarTool struct {
 	queryCache     *rag.QueryCache       // [175] LRU cache for repeated SEMANTIC_CODE / INCIDENT_SEARCH
 	textCache      *rag.TextCache        // [179] LRU cache for full-text handler output (BLAST_RADIUS)
 	embCache       *rag.Cache[[]float32] // [199] skips ~30ms Ollama roundtrip on repeat embed
+	hotFiles       *rag.HotFilesCache    // [LARGE-PROJECT/A 2026-05-13] LRU file-content cache invalidated by mtime; skips os.ReadFile in READ_SLICE/FILE_EXTRACT for repeat-touched files
 	dbaEngine      *dba.Analyzer
 	cfg            *config.NeoConfig
 	workspace      string
@@ -234,6 +235,12 @@ type RadarTool struct {
 }
 
 func NewRadarTool(graph *rag.Graph, cpu *tensorx.CPUDevice, pool *memx.ObservablePool[memx.F32Slab], embedder rag.Embedder, wal *rag.WAL, lexicalIdx *rag.LexicalIndex, dbaEngine *dba.Analyzer, cfg *config.NeoConfig, workspace string) *RadarTool {
+	// [LARGE-PROJECT/A 2026-05-13] Hot-files cache: 32 MB cap is empirically
+	// sufficient for typical pair-mode workloads (master_plan ~50KB, big
+	// generated SQL files ~500KB, hot Go files <100KB each). Invalidates on
+	// mtime+size mismatch — never serves stale content. Future: thread
+	// capacity through cfg.RAG.HotFilesCapacityBytes if operators need tuning.
+	const hotFilesCapBytes = 32 * 1024 * 1024
 	return &RadarTool{
 		graph:      graph,
 		wal:        wal,
@@ -244,6 +251,7 @@ func NewRadarTool(graph *rag.Graph, cpu *tensorx.CPUDevice, pool *memx.Observabl
 		dbaEngine:  dbaEngine,
 		cfg:        cfg,
 		workspace:  workspace,
+		hotFiles:   rag.NewHotFilesCache(hotFilesCapBytes),
 	}
 }
 

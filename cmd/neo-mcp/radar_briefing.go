@@ -160,9 +160,24 @@ func (t *RadarTool) handleReadSlice(_ context.Context, args map[string]any) (any
 	if !filepath.IsAbs(target) {
 		absPath = filepath.Join(t.workspace, target)
 	}
-	data, err := os.ReadFile(absPath) //nolint:gosec // G304-WORKSPACE-CANON
-	if err != nil {
-		return nil, fmt.Errorf("READ_SLICE: cannot read %s: %w", target, err)
+	// [LARGE-PROJECT/A] Try hot-files cache first; mtime+size invalidation
+	// inside Get guarantees we never serve stale content. Miss path falls
+	// through to os.ReadFile + Put for next time.
+	var data []byte
+	if t.hotFiles != nil {
+		if cached, ok := t.hotFiles.Get(absPath); ok {
+			data = cached
+		}
+	}
+	if data == nil {
+		var err error
+		data, err = os.ReadFile(absPath) //nolint:gosec // G304-WORKSPACE-CANON
+		if err != nil {
+			return nil, fmt.Errorf("READ_SLICE: cannot read %s: %w", target, err)
+		}
+		if t.hotFiles != nil {
+			t.hotFiles.Put(absPath, data)
+		}
 	}
 
 	allLines := strings.Split(string(data), "\n")

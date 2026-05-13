@@ -127,9 +127,22 @@ func (t *RadarTool) handleFileExtract(_ context.Context, args map[string]any) (a
 	if !filepath.IsAbs(target) {
 		absPath = filepath.Join(t.workspace, target)
 	}
-	data, err := os.ReadFile(absPath) //nolint:gosec // G304-WORKSPACE-CANON: absPath via filepath.Join(t.workspace,...), workspace is boot-pinned
-	if err != nil {
-		return nil, fmt.Errorf("FILE_EXTRACT: cannot read %s: %w", target, err)
+	// [LARGE-PROJECT/A] Hot-files cache fast path. Miss → read + cache.
+	var data []byte
+	if t.hotFiles != nil {
+		if cached, ok := t.hotFiles.Get(absPath); ok {
+			data = cached
+		}
+	}
+	if data == nil {
+		var err error
+		data, err = os.ReadFile(absPath) //nolint:gosec // G304-WORKSPACE-CANON: absPath via filepath.Join(t.workspace,...), workspace is boot-pinned
+		if err != nil {
+			return nil, fmt.Errorf("FILE_EXTRACT: cannot read %s: %w", target, err)
+		}
+		if t.hotFiles != nil {
+			t.hotFiles.Put(absPath, data)
+		}
 	}
 	allLines := strings.Split(string(data), "\n")
 	total := len(allLines)
