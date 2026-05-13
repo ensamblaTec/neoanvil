@@ -539,3 +539,26 @@ inner symlink /var/folders/d1/.../alias.txt resolved to /private/var/folders/d1/
 **Fix sugerido (defer):** El test debe normalizar `workspace` con `filepath.EvalSymlinks` antes de comparar, o usar un workspace dir explícito que no esté bajo `/var`. Ticket separate, no bloquea HotFilesCache landing.
 
 **Impact:** Hasta el fix, `NEO_CERTIFY_BYPASS=1 git commit` para cualquier .go/.ts/.tsx/.js/.css en cmd/neo-mcp/ (per directiva [SRE-CERTIFY-BYPASS]). Pre-commit hook bloqueará sin esta variable.
+
+---
+
+## [2026-05-13] DUAL-LAYER-SYNC drift — 7 directives lost from disk file
+
+**Status:** active drift detected mid-session 2026-05-13 turn N.
+
+**Symptom:** `.claude/rules/neo-synced-directives.md` working tree had 50 entries; `git show HEAD:` had 55. Diff showed 7 lost (HEAD #49-55: GO-TEST-SETENV-PARALLEL, GITHUB-PLUGIN-WORKFLOW, LOCAL-LLM-ROUTING, CONFIG-FIELD-BACKFILL-RULE, HNSW-QUANT-WIRING, SELF-AUDIT-V2, OUROBOROS-NO-GREP-SHORTCUT) + 2 gained (new DS-PREMORTEM-MULTI-FEATURE, SRE-RED-TEAM-LAYERING). Net: −5.
+
+**Cause hypothesis:** During neo-mcp boot earlier this session, BoltDB had N+7 active entries and disk had N. The destructive sweep in `LoadDirectivesFromDisk` (pkg/rag/wal.go:809) correctly deprecated the 7 BoltDB entries not present on disk. **But the disk file was the truncated version**, not the source-of-truth — likely a previous session's dual-layer-sync round-trip dropped them via similar drift.
+
+**Why this matters:** the 7 lost directives encode load-bearing knowledge (t.Setenv vs t.Parallel mutex, GitHub plugin surface inventory, local-LLM cost/routing rule, config backfill discipline learned from b5398de, HNSW quant wiring lessons from ADR-014, SELF-AUDIT-V2 coverage table requirement, OUROBOROS-NO-GREP-SHORTCUT enforcement). Loss = re-discovery cost.
+
+**Recovery blocked by:** `neo_memory(learn, action_type:add)` now enforces a 500-char limit per directive. Several of the lost 7 are >500 chars and need condensing. Recovery is **7 separate condense+add cycles** ≈ 30-45 min of careful work.
+
+**Sticky deprecation:** restoring just the disk file does NOT re-activate. The destructive sweep semantic checks `if not on disk → deprecate`, but the additive UPSERT path computes `existingSet` from ALL BoltDB entries (including deprecated ones via normalizeDirective) so deprecated text matching disk text is NOT re-added. Recovery requires either: (a) `neo_memory(learn, action_type:compact)` to hard-purge OBSOLETO then re-add, or (b) 7× learn calls with new IDs.
+
+**Action items:**
+1. Re-add the 7 directives as new entries via 7× `neo_memory(learn, action_type:add)` with condensed text (≤500 chars each).
+2. Investigate dual-layer-sync writer path — find where disk file gets rewritten with subset of BoltDB state. The destructive read path is sound; the write path is suspect.
+3. Consider raising the 500-char limit OR adding a `--long-form` escape hatch that writes to `neo_memory(action:store, namespace:directives)` instead of the global_rules bucket.
+
+**Workaround now:** original text is recoverable via `git show HEAD:.claude/rules/neo-synced-directives.md` (commit fd4ec4e). Until recovery, the 7 directives are NOT being injected via SessionStart hook, so the agent loses visibility on them between turns.
