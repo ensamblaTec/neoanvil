@@ -171,14 +171,6 @@ func certifyResolveWSID(t *CertifyMutationTool) string {
 	return "neoanvil-45913"
 }
 
-// min returns the smaller of a, b. Inlined to avoid import.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // formatDSCertifyCheck returns the certify check entry for the DS pre-check. [371.D]
 func formatDSCertifyCheck(r deepseekPreCheckResult) string {
 	if r.Mode == "off" || !r.IsHot {
