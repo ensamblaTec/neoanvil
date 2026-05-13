@@ -604,3 +604,9 @@ inner symlink /var/folders/d1/.../alias.txt resolved to /private/var/folders/d1/
 **Why not fix now:** the destructive-sync write path is in BoltDB territory and needs DS premortem + regression test, est. 2-3 commits. Scope-limited to a future session focused on directive durability hardening.
 
 **Recovery verification needed at next restart:** confirm the 7 re-added directives survive a `make rebuild-restart` cycle. If they get purged again on boot → boot path has the bug (not user action). If they survive → bug was operator-triggered compact at some point.
+## ~~[2026-05-13 15:59] AST COMPLEXITY in wal.go:809~~ — RESOLVED 2026-05-13 (commit eca89dc)
+
+Auto-tracker logged this finding at 15:59. Resolved 16:05 via refactor in `eca89dc fix(rag): relative-loss guard for destructive sync` — `LoadDirectivesFromDisk` was extracted into 5 helpers (`countActiveDirectivesIn`, `relativeLossPct`, `shouldSkipDestructiveSweep`, `runDestructiveSweep`, `runAdditiveUpsertFromDisk`) and dropped from CC=16 → CC=5. Post-restart AST_AUDIT confirms clean.
+
+---
+
