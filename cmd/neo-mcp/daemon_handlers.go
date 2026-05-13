@@ -346,6 +346,11 @@ func (t *DaemonTool) handleMarkDone(_ context.Context, args map[string]any) (any
 	if err := os.WriteFile(planPath, []byte(strings.Join(lines, "\n")), 0644); err != nil { //nolint:gosec // G306: plan file is not sensitive
 		return nil, fmt.Errorf("MARK_DONE: write failed: %w", err)
 	}
+	// [LARGE-PROJECT/C] Invalidate the planner cache so the next ReadActivePhase
+	// / ReadOpenTasks call sees the freshly-written file. Without this, BRIEFING
+	// would serve stale "Open: N" counts until mtime invalidation kicks in (which
+	// it would — but explicit invalidation is faster and avoids one extra stat).
+	state.InvalidatePlannerCache(t.workspace)
 	log.Printf("[MARK_DONE] Marked %d task(s) as done for epic_id=%q", marked, epicID)
 	return mcpText(fmt.Sprintf("MARK_DONE: %d task(s) marked [x] for %q in master_plan.md", marked, epicID)), nil
 }

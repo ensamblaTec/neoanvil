@@ -159,7 +159,26 @@ func InitPlanner(workspace string) error {
 }
 
 // ReadActivePhase parsea master_plan.md y devuelve SOLO la fase que tiene tareas pendientes [-].
+// [LARGE-PROJECT/C] Result memoized per workspace, invalidated on mtime/size change.
 func ReadActivePhase(workspace string) (string, error) {
+	if entry, ok := lookupCachedPlan(workspace); ok {
+		return entry.activePhase, entry.activePhaseErr
+	}
+	activePhase, activePhaseErr := computeActivePhase(workspace)
+	// Store result in cache only when the file was readable (we stat'd it in
+	// lookupCachedPlan and it existed). Re-stat to capture mtime atomically
+	// with the parse we just completed.
+	if info, statErr := statMasterPlan(workspace); statErr == nil {
+		// Read openTasks now too so the cache covers both views from one stat.
+		openTasks, openTasksErr := computeOpenTasks(workspace)
+		storeCachedPlan(workspace, info, activePhase, activePhaseErr, openTasks, openTasksErr)
+	}
+	return activePhase, activePhaseErr
+}
+
+// computeActivePhase is the un-cached parse — extracted so the cache layer can
+// invoke it on miss while keeping the public ReadActivePhase signature.
+func computeActivePhase(workspace string) (string, error) {
 	planPath := filepath.Join(workspace, ".neo", "master_plan.md")
 	//nolint:gosec // G304-WORKSPACE-CANON: workspace is strictly enforced
 	data, err := os.ReadFile(planPath)
@@ -209,7 +228,24 @@ func ReadActivePhase(workspace string) (string, error) {
 
 // ReadOpenTasks returns only the open (- [ ]) task lines with their parent ## and ###
 // headings — ~13× fewer tokens than ReadActivePhase for the same navigation intent. [318.A]
+// [LARGE-PROJECT/C] Result memoized per workspace alongside ReadActivePhase output;
+// both views are populated from a single parse pass on cache miss.
 func ReadOpenTasks(workspace string) (string, error) {
+	if entry, ok := lookupCachedPlan(workspace); ok {
+		return entry.openTasks, entry.openTasksErr
+	}
+	// Trigger the full cache population path (parses both views) via ReadActivePhase.
+	// On return, the cache should hold the openTasks result.
+	_, _ = ReadActivePhase(workspace)
+	if entry, ok := lookupCachedPlan(workspace); ok {
+		return entry.openTasks, entry.openTasksErr
+	}
+	// Fallback: parse directly if caching path failed to populate (file missing).
+	return computeOpenTasks(workspace)
+}
+
+// computeOpenTasks is the un-cached parse used by the memoization layer.
+func computeOpenTasks(workspace string) (string, error) {
 	planPath := filepath.Join(workspace, ".neo", "master_plan.md")
 	//nolint:gosec // G304-WORKSPACE-CANON: workspace is strictly enforced
 	data, err := os.ReadFile(planPath)
