@@ -462,3 +462,64 @@ agent) can be implemented as a ~50 LOC wrapper over `neo_local_llm` +
 
 ---
 
+## [2026-05-13 02:51] [context-bloat] CLAUDE.md + rules + skills inyectan ~64k tokens upfront — auto-mode degrada doctrina Ouroboros
+
+**Prioridad:** P2
+
+## Problema
+
+Cada sesión inyecta ~64,458 tokens ANTES del primer mensaje del usuario:
+- `CLAUDE.md`: 232 líneas / 28,622 chars / ~7,156 tok (excede ceiling ~200 líneas documentado por Anthropic)
+- `.claude/rules/*.md` (11 archivos): 1,096 líneas / 106,448 chars / ~26,612 tok
+- `.claude/skills/*/SKILL.md` (16, 12 auto-load): 122,767 chars / ~30,691 tok
+
+BRIEFING ya señala `⚠️ DIRECTIVE_INFLATION: 62/60`.
+
+## Síntomas
+
+1. Claude 4.7 en auto-mode tiende a saltarse el flujo Ouroboros (BRIEFING → BLAST_RADIUS → Edit → certify) y responder directamente con conocimiento general.
+2. Evidencia externa (Vercel eval, GitHub anthropics/claude-code#29971, BSWEN/MindStudio/KDnuggets): skills nunca invocadas en 56% de casos cuando >12 auto-load; CLAUDE.md deja de leerse después de ~200 líneas.
+3. Directivas duplicadas/históricas (BLAST_RADIUS_FALLBACK #17 vs #104, etc.) generan ruido sin valor accionable.
+
+## Root cause
+
+Acumulación incremental sin política de poda. 5 archivos `neo-synced-directives*.md` separados que se inyectan todos juntos. 12/16 skills marcadas auto-load por default cuando solo 2-3 son realmente universales.
+
+## Recommended (6 acciones en orden)
+
+- **A.** Reducir `CLAUDE.md` 232 → ≤60 líneas (mantener invariantes core; mover detalle a skills).
+- **B.** Consolidar 5 `neo-synced-directives*.md` en uno solo; eliminar `-history.md` (git preserva).
+- **C.** Reclasificar 8/12 skills `auto-load` → `task-mode` (solo `sre-doctrine` + `sre-troubleshooting` + 1-2 más quedan auto).
+- **D.** Auditar las 62 directivas, marcar duplicados con `supersedes`, bajar a ≤40 vivas.
+- **E.** Mover `neo-gosec-audit.md`, `neo-deadcode-triage.md`, `neo-code-quality.md` a `docs/general/` (referenciados desde skills, no inyectados).
+- **F.** Scope-aware loading: campo `neo.yaml::workspace.scope` (backend|frontend|fullstack) que filtre qué rules carga el SessionStart hook.
+
+## Métrica de éxito
+
+- Upfront context tokens: 64k → ≤20k (medido contando `system-reminder` blocks en sesión limpia).
+- DIRECTIVE_INFLATION: 62/60 → ≤40/60.
+- Sesión nueva ejecuta BRIEFING + BLAST_RADIUS sin recordatorio explícito del usuario en >80% de casos (calibración manual primeras 10 sesiones post-refactor).
+
+## Files afectados
+
+- `/home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/CLAUDE.md`
+- `/home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/.claude/rules/*.md`
+- `/home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/.claude/skills/*/SKILL.md` (frontmatter `trigger` field)
+- `/home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/pkg/config/config.go` (paso F — opcional)
+- `/home/ensamblatec/go/src/github.com/ensamblatec/neoanvil/neo.yaml.example` (paso F — opcional)
+
+## Riesgos
+
+- Bajo: A, B, D, E (puramente reorganización doc, git preserva contenido).
+- Medio: C (skills task-mode no las "ve" el modelo sin invocación explícita — calibrar primeras sesiones).
+- Medio: F (toca pkg/config — requiere certify + tests).
+
+## Referencias externas
+
+- https://docs.bswen.com/blog/2026-04-23-prevent-claudemd-bloat/
+- https://github.com/anthropics/claude-code/issues/29971
+- https://www.mindstudio.ai/blog/context-rot-claude-code-skills-bloated-files
+- Anthropic best-practices Opus 4.7
+
+---
+
