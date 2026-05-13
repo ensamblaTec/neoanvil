@@ -89,23 +89,44 @@ done
 
 [ "$TRIGGER_HITS" -lt 1 ] && exit 0
 
-# Build the reminder context.
-CTX="[ouroboros-hook · DS-PREMORTEM] Prompt sugiere scope multi-file / multi-feature (${TRIGGER_HITS} trigger(s), ${PROMPT_LEN} chars). Aplica directiva [DS-PREMORTEM-MULTI-FEATURE]:
+# Build the reminder context. Árbol de decisión multi-layer red_team:
+# neo expone 4 capas adversariales complementarias — no son redundantes,
+# operan a niveles distintos (AST / runtime / OS-level / semantic LLM).
+# El hook recomienda la capa correcta según pista de prompt.
+CTX="[ouroboros-hook · RED-TEAM-LAYERING] Prompt sugiere scope multi-file / complejo (${TRIGGER_HITS} trigger(s), ${PROMPT_LEN} chars). neo tiene **4 capas adversariales** — no usarlas como sinónimo:
 
-ANTES del primer Edit/Write en este plan, invocar:
+  ┌─────────────────────┬──────────────────────────────────────┬─────────────────────┐
+  │ Capa                │ Cuándo                                │ Cómo invocar        │
+  ├─────────────────────┼──────────────────────────────────────┼─────────────────────┤
+  │ 1. Bouncer (AST)    │ AUTO en cada certify_mutation        │ (nothing — auto)    │
+  │ 2. DreamCycle       │ AUTO en REM sleep (5 min idle)       │ (nothing — auto)    │
+  │ 3. neo_chaos_drill  │ Mutación a surface HTTP / endpoint   │ MANUAL — tool call  │
+  │ 4. DS red_team_audit│ Nuevo subsistema / concurrencia /    │ MANUAL — tool call  │
+  │                     │ SIGTERM / boot / hot-path semántico  │                     │
+  └─────────────────────┴──────────────────────────────────────┴─────────────────────┘
+
+PRE-EDIT (capa 4 — frontier reasoning):
   mcp__neoanvil__deepseek_call(
     action: \"red_team_audit\",
     thread_id: \"ds_thread_e28c2310246d72ed\",  ← reuses cache, 50× cheaper
-    target_prompt: \"<plan concreto: files, design constraints, expected commits>\",
+    target_prompt: \"<plan: files, design constraints, expected commits>\",
     reasoning_effort: \"high\",
     model: \"deepseek-v4-flash\"
   )
 
-DS audit retorna GO / DEFER + hidden complexity / regression risks. Si DEFER → reducir scope o split en sesiones. Si GO → proceder con confianza.
+POST-DEPLOY de mutaciones a HTTP surface (capa 3 — runtime siege):
+  mcp__neoanvil__neo_chaos_drill(
+    target: \"http://127.0.0.1:<port>/<endpoint>\",
+    aggression_level: 5,    ← 5000 goroutines × 10s
+    inject_faults: true     ← packet loss / latency / OOM simulation
+  )
 
-SKIP esta directiva si: bug-fix 1 archivo, doc-only, cosmetic refactor sin lógica. APLICAR si: nuevo subsistema, hot-path concurrencia, SIGTERM/boot/recovery, ≥3 archivos, ≥2 commits planificados.
+DS audit retorna GO / DEFER + hidden complexity. chaos_drill retorna p99 latency + crash signatures. Si ambos pasan → ship. Si DS=DEFER → reducir scope. Si chaos_drill=crash → fix antes de merge.
 
-Lección 2026-05-13: NO invocar DS premortem costó 1 commit incompleto (d8e62c2 → superseded por 2d75c03) + 1 ciclo restart. Saltarse este recordatorio es opt-in al mismo costo."
+SKIP capa 4 si: bug-fix 1 archivo, doc-only, refactor cosmético. APLICAR si: ≥3 archivos, ≥2 commits, hot-path, SIGTERM/boot/recovery, supply-chain, crypto.
+SKIP capa 3 si: edit no toca HTTP/SSE/gRPC/socket surface. APLICAR si: cambia handler, middleware, router, plugin dispatch, Nexus proxy.
+
+Lección 2026-05-13: NO invocar DS premortem costó 1 commit incompleto (d8e62c2 → superseded por 2d75c03) + 1 restart. NO invocar chaos_drill tras mutar surface = riesgo p99 silente hasta producción. Bouncer + DreamCycle son automáticos — confiables. Las 2 manuales son tu responsabilidad."
 
 # Emit JSON envelope via jq (avoids quote-escape hell of inline python).
 jq -nc --arg ctx "$CTX" '{
