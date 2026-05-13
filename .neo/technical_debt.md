@@ -547,7 +547,15 @@ Acumulación incremental sin política de poda. 5 archivos `neo-synced-directive
 ---
 
 
-## [2026-05-13] PRE-EXISTING FLAKE — TestBackgroundIndexFile_SymlinkEscapeRejected (macOS /var symlink)
+## ~~[2026-05-13] PRE-EXISTING FLAKE — TestBackgroundIndexFile_SymlinkEscapeRejected (macOS /var symlink)~~ — RESOLVED 2026-05-13 (commit 096f164)
+
+Test now passes cleanly under `go test -run TestBackgroundIndexFile_SymlinkEscapeRejected -count=1 ./cmd/neo-mcp/` — `096f164 fix(test): macOS /var → /private/var symlink flake — EvalSymlinks workspace` already canonicalized workspace via `filepath.EvalSymlinks` before comparison. NEO_CERTIFY_BYPASS no longer required on Darwin.
+
+---
+
+## ORIGINAL ENTRY (preserved for reference)
+
+### Pre-existing flake on Darwin
 
 `cmd/neo-mcp/background_index_symlink_test.go:66` falla en macOS con:
 ```
@@ -565,7 +573,20 @@ inner symlink /var/folders/d1/.../alias.txt resolved to /private/var/folders/d1/
 
 ---
 
-## [2026-05-13] DUAL-LAYER-SYNC drift — 7 directives lost from disk file
+## ~~[2026-05-13] DUAL-LAYER-SYNC drift — 7 directives lost from disk file~~ — RESOLVED 2026-05-13 (commits b24e4eb + eca89dc + 549dde9)
+
+Recovery + hardening shipped over 3 commits:
+- `b24e4eb` re-added the 7 lost directives (condensed ≤500 chars) — disk back to 57/60
+- `eca89dc` added relative-loss guard (20% threshold) + refactor CC=16→5
+- `549dde9` added `SnapshotDirectives` invoked from `handleCompactDirectives` — pre-destructive recovery beyond git
+
+Writer root-cause investigation remains in the FOLLOW-UP entry below (monitoring for next drift event).
+
+---
+
+## ORIGINAL ENTRY (preserved for reference)
+
+### Drift detection 2026-05-13 mid-session
 
 **Status:** active drift detected mid-session 2026-05-13 turn N.
 
