@@ -111,18 +111,21 @@ Tier ownership: `workspace` | `project` (coord workspace) |
 
 ---
 
-## Specialist tools (7+)
+## Plugins MCP (3)
 
-| Tool | Use |
-|------|-----|
-| `neo_compress_context` | Tras 3+ ediciones o IO >500KB |
-| `neo_apply_migration` | SQL via `dba.Analyzer` con guardrails |
-| `neo_forge_tool` | Hot-compile Go→WASM en runtime |
-| `neo_download_model` | Stream `.wasm`/`.onnx`/`.gguf` a `.neo/models/` |
-| `neo_log_analyzer` | Análisis logs / INC files |
-| `neo_tool_stats` | p50/p95/p99 + errors por tool MCP |
-| `neo_debt` | 5 actions; 4-tier (workspace/project/nexus/org) |
-| `mcp__neoanvil__jira_jira` | **Plugin Jira (PILAR XXIII):** action ∈ {get_context, transition, create_issue, link_issue, attach_artifact} |
+Procesos hijos spawneados por Nexus, separados del binario neo-mcp principal.
+Cada uno expone su propia tool macro con sub-actions y un `__health__` action
+para liveness probing (PILAR XXIII).
+
+| Plugin Tool | Actions | Skill operacional | ADR |
+|---|---|---|---|
+| `mcp__neoanvil__jira_jira` | `get_context` · `transition` · `create_issue` · `link_issue` · `attach_artifact` · `prepare_doc_pack` · `update_issue` | [`/jira-workflow`](../jira-workflow/SKILL.md) | ADR-005..007 |
+| `mcp__neoanvil__deepseek_call` | `distill_payload` · `map_reduce_refactor` · `red_team_audit` · `generate_boilerplate` | [`/deepseek-workflow`](../deepseek-workflow/SKILL.md) | ADR-012 |
+| `mcp__neoanvil__github_github` | 20 actions (PRs:7 · Issues:4 · Repo:4 · Code:3 · Helpers:2) | [`/github-workflow`](../github-workflow/SKILL.md) | ADR-011 |
+
+**Multi-tenant:** credenciales en `~/.neo/credentials.json` (0600). Hash-chain audit
+en `~/.neo/audit-{jira,github}.log` (JSONL). DeepSeek tiene cache fingerprint-based
+50× cheaper en hits — ver `/deepseek-workflow` Regla #2.
 
 ---
 
