@@ -160,7 +160,7 @@ Consolidó brain-state (`commit/learn/rem_sleep/load_snapshot`) + Knowledge Stor
 | Action | Uso | Args extra |
 |--------|-----|------------|
 | `commit` | Entrada episódica en memex_buffer (BoltDB). Consolidado al HNSW durante REM sleep (5 min idle) | `topic`, `scope`, `content` |
-| `learn` | Directiva arquitectónica permanente. **Dual-layer sync:** BoltDB + `.claude/rules/neo-synced-directives.md`. `action_type: add (default), update, delete`. `supersedes: [1, 2]` auto-depreca | `directive`, `action_type`, `directive_id`, `supersedes` |
+| `learn` | Directiva arquitectónica permanente. **Dual-layer sync:** BoltDB + `.claude/rules/neo-synced-directives.md`. `action_type`: `add` (default) · `update` (con `directive_id`) · `delete` (soft, marca `~~OBSOLETO~~`) · `compact` (hard-purge OBSOLETO + dedupe — auto-snapshot pre-destructive a `.neo/db/directives_snapshot.json`) · `restore` (re-add entries from snapshot, fills gaps only — optional `snapshot_path`). `supersedes: [1, 2]` auto-depreca | `directive`, `action_type`, `directive_id`, `supersedes`, `snapshot_path` |
 | `rem_sleep` | Fuerza consolidación del memex_buffer a HNSW | — |
 | `load_snapshot` | Restaura estado neuronal desde Gob (erasure-coded shards) | `snapshot_path` |
 | `store` | Escribe entrada en Knowledge Store del tier | `tier`, `namespace`, `key`, `content`, `tags`, `hot` |

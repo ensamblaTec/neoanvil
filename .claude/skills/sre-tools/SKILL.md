@@ -101,13 +101,20 @@ en el comando para auto-approve.
 | Action | Use |
 |--------|-----|
 | `commit` | Lección episódica (BoltDB memex_buffer) |
-| `learn` | Directiva permanente (dual-layer: BoltDB + .claude/rules/) |
+| `learn` | Directiva permanente (dual-layer: BoltDB + .claude/rules/). `action_type`: `add` (default) · `update` (con `directive_id`) · `delete` (soft) · `compact` (hard-purge OBSOLETO + dedupe; auto-snapshot pre-destructive) · `restore` (re-add missing from snapshot, fills gaps only) |
 | `rem_sleep` | Forzar consolidación |
 | `load_snapshot` | Restaurar Gob |
 | `store/fetch/list/drop/search` | Knowledge Store cross-workspace |
 
 Tier ownership: `workspace` | `project` (coord workspace) |
 `org` | `nexus` (singleton dispatcher).
+
+**Directives durability** (post 2026-05-13 hardening):
+- `compact` writes `.neo/db/directives_snapshot.json` BEFORE the destructive
+  transaction. Recovery via `neo_memory(action:"learn", action_type:"restore")`.
+- Boot path `LoadDirectivesFromDisk` has 2-tier corruption guards:
+  absolute-loss (disk<5 AND BoltDB>50) + relative-loss (BoltDB≥10 AND
+  >20% drift). Either triggers → destructive sweep SKIPPED.
 
 ---
 

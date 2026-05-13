@@ -131,8 +131,8 @@ func (ldt *LearnDirectiveTool) InputSchema() MCPToolSchema {
 			},
 			"action": map[string]any{
 				"type":        "string",
-				"description": "[SRE-77.1] Operation: add (default), update, delete.",
-				"enum":        []string{"add", "update", "delete"},
+				"description": "[SRE-77.1] Operation: add (default), update, delete, compact (hard-purge ~~OBSOLETO~~ + dedupe — writes pre-destructive snapshot to .neo/db/directives_snapshot.json), restore (re-add missing entries from snapshot, fills gaps only).",
+				"enum":        []string{"add", "update", "delete", "compact", "restore"},
 			},
 			"directive_id": map[string]any{
 				"type":        "integer",
@@ -142,6 +142,10 @@ func (ldt *LearnDirectiveTool) InputSchema() MCPToolSchema {
 				"type":        "array",
 				"items":       map[string]any{"type": "integer"},
 				"description": "[SRE-77.5] IDs of directives this new ADD supersedes — auto-deprecates them.",
+			},
+			"snapshot_path": map[string]any{
+				"type":        "string",
+				"description": "Optional for action=restore. Override the default .neo/db/directives_snapshot.json location.",
 			},
 		},
 		Required: []string{},
