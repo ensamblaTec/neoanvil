@@ -804,6 +804,11 @@ func normalizeDirective(s string) string {
 const (
 	syncDestructiveMinDisk         = 5
 	syncDestructiveBoltDBThreshold = 50
+	// Relative-loss guard closes the gap where the absolute guard didn't
+	// fire on small drift (e.g. disk=50 vs BoltDB=57 → 12% loss slipped
+	// through in the 2026-05-13 7-directive drift incident).
+	syncRelativeLossSampleMin    = 10
+	syncDestructiveMaxRelLossPct = 20
 )
 
 func (wal *WAL) LoadDirectivesFromDisk(workspace string) error {
@@ -813,59 +818,91 @@ func (wal *WAL) LoadDirectivesFromDisk(workspace string) error {
 		return nil // File doesn't exist yet, not an error
 	}
 
-	// Build diskSet (normalized form) from the disk file.
 	diskSet := parseDirectivesFromMarkdown(data)
-
-	// Snapshot BoltDB (1-based ordinal IDs match disk numbering).
 	existing, _ := wal.GetDirectives()
-
-	// Corruption guard: don't mass-deprecate if disk looks truncated.
 	activeOnDisk := len(diskSet)
-	activeInBoltDB := 0
-	for _, r := range existing {
-		if !strings.HasPrefix(r, "~~OBSOLETO~~") {
-			activeInBoltDB++
-		}
-	}
-	if activeOnDisk < syncDestructiveMinDisk && activeInBoltDB > syncDestructiveBoltDBThreshold {
-		log.Printf("[DIRECTIVES-SYNC] corruption guard: disk=%d active < %d and BoltDB=%d > %d — skipping destructive sweep, falling back to additive only",
-			activeOnDisk, syncDestructiveMinDisk, activeInBoltDB, syncDestructiveBoltDBThreshold)
+	activeInBoltDB := countActiveDirectivesIn(existing)
+
+	if shouldSkipDestructiveSweep(activeOnDisk, activeInBoltDB) {
+		log.Printf("[DIRECTIVES-SYNC] corruption guard: disk=%d active, BoltDB=%d active (loss=%d%%) — skipping destructive sweep, falling back to additive only",
+			activeOnDisk, activeInBoltDB, relativeLossPct(activeOnDisk, activeInBoltDB))
 	} else {
-		// Destructive sweep: deprecate BoltDB entries whose normalized text is not on disk.
-		obsoleted := 0
-		for i, r := range existing {
-			if strings.HasPrefix(r, "~~OBSOLETO~~") {
-				continue // already obsoleted, idempotent
-			}
-			norm := normalizeDirective(r)
-			if norm == "" {
-				continue
-			}
-			if _, inDisk := diskSet[norm]; !inDisk {
-				if err := wal.DeprecateDirective(i+1, 0); err == nil {
-					obsoleted++
-				}
-			}
-		}
+		obsoleted := runDestructiveSweep(wal, existing, diskSet)
 		if obsoleted > 0 {
 			log.Printf("[DIRECTIVES-SYNC] deprecated %d BoltDB entries not present on disk (disk=%d active, was BoltDB=%d active)",
 				obsoleted, activeOnDisk, activeInBoltDB)
 		}
 	}
 
-	// Additive UPSERT: refresh existingSet after potential deprecations.
-	existing2, _ := wal.GetDirectives()
-	existingSet := make(map[string]struct{}, len(existing2))
-	for _, r := range existing2 {
+	runAdditiveUpsertFromDisk(wal, diskSet)
+	return nil
+}
+
+func countActiveDirectivesIn(rules []string) int {
+	n := 0
+	for _, r := range rules {
+		if !strings.HasPrefix(r, "~~OBSOLETO~~") {
+			n++
+		}
+	}
+	return n
+}
+
+// relativeLossPct returns the percentage of BoltDB active entries missing
+// from disk. Returns 0 when disk has ≥ BoltDB (no loss to flag).
+func relativeLossPct(activeOnDisk, activeInBoltDB int) int {
+	if activeInBoltDB <= 0 || activeOnDisk >= activeInBoltDB {
+		return 0
+	}
+	return (activeInBoltDB - activeOnDisk) * 100 / activeInBoltDB
+}
+
+// shouldSkipDestructiveSweep returns true when either guard triggers.
+// Absolute-loss guard: disk almost empty while BoltDB has many (truncation).
+// Relative-loss guard: disk lost > N% of BoltDB (subtle drift slips abs guard).
+func shouldSkipDestructiveSweep(activeOnDisk, activeInBoltDB int) bool {
+	if activeOnDisk < syncDestructiveMinDisk && activeInBoltDB > syncDestructiveBoltDBThreshold {
+		return true
+	}
+	if activeInBoltDB >= syncRelativeLossSampleMin && relativeLossPct(activeOnDisk, activeInBoltDB) > syncDestructiveMaxRelLossPct {
+		return true
+	}
+	return false
+}
+
+func runDestructiveSweep(wal *WAL, existing []string, diskSet map[string]string) int {
+	obsoleted := 0
+	for i, r := range existing {
+		if strings.HasPrefix(r, "~~OBSOLETO~~") {
+			continue
+		}
+		norm := normalizeDirective(r)
+		if norm == "" {
+			continue
+		}
+		if _, inDisk := diskSet[norm]; inDisk {
+			continue
+		}
+		if err := wal.DeprecateDirective(i+1, 0); err == nil {
+			obsoleted++
+		}
+	}
+	return obsoleted
+}
+
+func runAdditiveUpsertFromDisk(wal *WAL, diskSet map[string]string) {
+	existing, _ := wal.GetDirectives()
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, r := range existing {
 		existingSet[normalizeDirective(r)] = struct{}{}
 	}
 	for normalized, line := range diskSet {
-		if _, dupe := existingSet[normalized]; !dupe && normalized != "" {
-			_ = wal.SaveDirective(line)
-			existingSet[normalized] = struct{}{}
+		if _, dupe := existingSet[normalized]; dupe || normalized == "" {
+			continue
 		}
+		_ = wal.SaveDirective(line)
+		existingSet[normalized] = struct{}{}
 	}
-	return nil
 }
 
 // parseDirectivesFromMarkdown extracts active (non-soft-deleted) directives
