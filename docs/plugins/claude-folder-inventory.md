@@ -176,16 +176,22 @@ Cada archivo es contexto que se añade cuando los paths matcheen.
 ~40k chars per-file. Recomendación: archivos < 30k chars; split por
 dominio si excede.
 
-**neoanvil uso (post ctx-bloat refactor 2026-05-13):** 7 archivos, total ~76 KB.
+**neoanvil uso (post ctx-bloat refactor 2026-05-13, fase 4):** 4 archivos, total ~56 KB en `.claude/rules/`.
 - `neo-synced-directives.md` — 17 KB (51 entries, BoltDB-synced)
 - `neo-sre-doctrine.md` — 22 KB (candidate split a skill futuro)
 - `neo-workflow.md` — 14 KB (candidate migrate a skill futuro)
-- `neo-code-quality.md` — 10 KB
-- `neo-gosec-audit.md` — 5 KB
-- `neo-deadcode-triage.md` — 3 KB
 - `neo-db.md` — 3 KB
 
-Los 4 thematic files (`-deepseek`, `-jira`, `-pilar`, `-history`) se archivaron a `docs/general/directives-archive-*.md` en mayo 2026 — su contenido vive en los skills correspondientes.
+Archivados a `docs/general/` (mayo 2026, content vive en skills):
+- `directives-archive-deepseek.md` ← skill `deepseek-workflow`
+- `directives-archive-jira.md` ← skill `jira-workflow`
+- `directives-archive-pilar.md` ← skill `sre-federation`
+- `code-quality-laws.md` ← skill `sre-quality`
+- `gosec-audit-policy.md` ← skill `sre-quality`
+- `deadcode-policy.md` ← skill `sre-quality`
+- `claude-md-archive-2026-05-13.md` ← snapshot pre-trim de CLAUDE.md (232L)
+
+Deleted: `neo-synced-directives-history.md` (git preserva linaje).
 
 ### 11. Statusline (no carpeta — settings.json + ~/.claude/)
 

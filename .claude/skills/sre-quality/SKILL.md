@@ -9,7 +9,7 @@ paths:
 # Leyes de Calidad SRE
 
 > Constraints duros aplicados a TODO el código de neoanvil.
-> Migrado de `.claude/rules/neo-code-quality.md` (15 leyes) +
+> Migrado de `docs/general/code-quality-laws.md` (15 leyes — archivado 2026-05-13) +
 > directives extracted del `neo-synced-directives.md`.
 
 ---
@@ -182,6 +182,6 @@ Hot-reload via fsnotify sin restart:
 
 - [`sre-doctrine`](../sre-doctrine/SKILL.md) — flujo operativo
 - [`sre-tools`](../sre-tools/SKILL.md) — referencia tools
-- `.claude/rules/neoanvilsec-audit.md` — categorías gosec válidas
-- `.claude/rules/neo-deadcode-triage.md` — política deadcode
-- `.claude/rules/neo-db.md` — doctrina DB scoped
+- [`docs/general/gosec-audit-policy.md`](../../../docs/general/gosec-audit-policy.md) — categorías gosec válidas
+- [`docs/general/deadcode-policy.md`](../../../docs/general/deadcode-policy.md) — política deadcode
+- [`.claude/rules/neo-db.md`](../../rules/neo-db.md) — doctrina DB scoped

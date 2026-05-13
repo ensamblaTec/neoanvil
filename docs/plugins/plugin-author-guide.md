@@ -208,7 +208,7 @@ Each tool exposed via `tools/list` declares an input schema:
 ```
 
 **Critical:** `Required` must be a slice — never `nil`. The MCP SDK silently
-drops tools with `required: null` (LEY 9 in `neo-code-quality.md`).
+drops tools with `required: null` (LEY 9 in `docs/general/code-quality-laws.md`).
 
 ---
 

@@ -508,6 +508,6 @@ Si retorna `"error":"model \"...\" not found"` → cambiar `embedding_model` a u
 - Doctrina de 14 MCP tools (4-tier workspace/project/org/nexus): `neoanvil/.claude/rules/neo-sre-doctrine.md`
 - Guide org-tier PILAR LXVII (`.neo-org/` federation): `neoanvil/docs/pilar-lxvii-org-tier.md`
 - Workflow operativo: `neoanvil/.claude/rules/neo-workflow.md`
-- Leyes de calidad Go/MCP: `neoanvil/.claude/rules/neo-code-quality.md`
+- Leyes de calidad Go/MCP: `neoanvil/docs/general/code-quality-laws.md`
 - Doctrina DB/RAG: `neoanvil/.claude/rules/neo-db.md`
 - Directivas activas (auto-gen): `neoanvil/.claude/rules/neo-synced-directives.md`
