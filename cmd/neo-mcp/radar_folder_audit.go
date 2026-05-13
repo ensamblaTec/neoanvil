@@ -41,7 +41,12 @@ func auditClaudeFolder(workspace string) ([]folderAuditRow, error) {
 	skillFiles, _ := filepath.Glob(skillGlob)
 
 	claudeMD := readFileBytes(filepath.Join(workspace, "CLAUDE.md"))
-	inventoryMD := readFileBytes(filepath.Join(workspace, "docs", "claude-folder-inventory.md"))
+	// Inventory file lives under docs/plugins/ post 2026-05-13 reorg.
+	// Keep legacy docs/ fallback for older workspaces.
+	inventoryMD := readFileBytes(filepath.Join(workspace, "docs", "plugins", "claude-folder-inventory.md"))
+	if inventoryMD == nil {
+		inventoryMD = readFileBytes(filepath.Join(workspace, "docs", "claude-folder-inventory.md"))
+	}
 
 	var rows []folderAuditRow
 	for _, sf := range skillFiles {
@@ -76,8 +81,7 @@ func auditClaudeFolder(workspace string) ([]folderAuditRow, error) {
 			if !filepath.IsAbs(g) {
 				absGlob = filepath.Join(workspace, g)
 			}
-			matches, _ := filepath.Glob(absGlob)
-			if len(matches) == 0 {
+			if !globMatchesAny(absGlob) {
 				row.pathsValid = false
 				break
 			}
@@ -151,6 +155,33 @@ func boolMark(v bool) string {
 		return "✓"
 	}
 	return "✗"
+}
+
+// globMatchesAny reports whether the given glob expression matches at least
+// one path. Supports `**` doublestar (Go's filepath.Glob does not) by checking
+// the prefix directory before the `**` — sufficient for skill `paths:` validation
+// where the question is "does this scope directory exist in the workspace?".
+//
+// Examples:
+//
+//	pkg/dba/**       → checks "pkg/dba/" exists
+//	pkg/**/*.go      → checks "pkg/" exists
+//	**/migrations/** → returns true (root-relative wildcard)
+//	pkg/dba/*.go     → uses filepath.Glob (no doublestar)
+func globMatchesAny(glob string) bool {
+	if strings.Contains(glob, "**") {
+		prefix := strings.SplitN(glob, "**", 2)[0]
+		prefix = strings.TrimRight(prefix, "/")
+		if prefix == "" {
+			return true // leading `**/...` — workspace root is valid by definition
+		}
+		if _, err := os.Stat(prefix); err == nil {
+			return true
+		}
+		return false
+	}
+	matches, _ := filepath.Glob(glob)
+	return len(matches) > 0
 }
 
 // extractFrontmatter returns the raw text between the first pair of --- delimiters. [128.1/128.2]

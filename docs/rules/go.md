@@ -51,7 +51,7 @@ Copiar a `.claude/rules/` del proyecto destino junto con las reglas universales.
 ## Seguridad Go
 
 - Sockets Unix: `os.Chmod(0600)` post-Listen
-- `//nolint:gosec` PROHIBIDO sin categoría + control compensatorio (ver `neoanvilsec-audit.md`)
+- `//nolint:gosec` PROHIBIDO sin categoría + control compensatorio (ver `docs/general/gosec-audit-policy.md`)
 - Sanitizar inputs antes de pasar a `exec.Command`: strip `"`, `&`, `;`, `$`, backticks
 
 ## SIMD Portable (sin CGO)

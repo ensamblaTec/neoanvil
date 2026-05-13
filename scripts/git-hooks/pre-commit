@@ -1,0 +1,78 @@
+#!/bin/bash
+# [SRE-21.3.3] NeoAnvil Pre-Commit SRE Hook — auto-installed by orchestrator
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+LOCK_FILE="$REPO_ROOT/.neo/db/certified_state.lock"
+
+# [SRE-107.B] Binary-staleness warning: if staged .go files are newer than
+# bin/neo-mcp, the running daemon may not have the changes loaded. Warn but
+# never block — staleness is a runtime concern, not a commit concern.
+BIN_MCP="$REPO_ROOT/bin/neo-mcp"
+if [ -f "$BIN_MCP" ]; then
+    STALE_GO=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.go$' | while read -r f; do
+        if [ -f "$REPO_ROOT/$f" ] && [ "$REPO_ROOT/$f" -nt "$BIN_MCP" ]; then
+            echo "$f"
+        fi
+    done)
+    if [ -n "$STALE_GO" ]; then
+        echo "⚠️  bin/neo-mcp is older than staged changes — consider 'make rebuild-restart'"
+        echo "$STALE_GO" | head -5 | sed 's/^/     /'
+    fi
+fi
+
+# [SRE-101.A] Escape hatch: NEO_CERTIFY_BYPASS=1 skips the veto. Warns but
+# does not block — for CI/CD and for when neo-mcp/Nexus is offline. Intended
+# for emergency use; regular workflow should still go through certify.
+if [ "${NEO_CERTIFY_BYPASS}" = "1" ]; then
+    STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(go|ts|tsx|js|jsx|css|rs|py|html)$')
+    if [ -n "$STAGED" ]; then
+        echo "🟡 [SRE BYPASS] NEO_CERTIFY_BYPASS=1 — skipping certification check for:"
+        echo "$STAGED" | sed 's/^/     /'
+        echo "   (regular workflow: run neo_sre_certify_mutation before committing)"
+    fi
+    exit 0
+fi
+
+# [SRE-76.2] TTL from .neo/mode file (written by neo-mcp at boot). Fallback to env var.
+NEO_MODE="${NEO_SERVER_MODE:-$(cat "$REPO_ROOT/.neo/mode" 2>/dev/null)}"
+if [ "$NEO_MODE" = "pair" ]; then
+    STALE_SECONDS=1800  # pair mode TTL
+else
+    STALE_SECONDS=300  # fast/daemon mode TTL
+fi
+
+if [ ! -f "$LOCK_FILE" ]; then
+    CODE_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(go|ts|tsx|js|jsx|css|rs|py|html)$')
+    if [ -n "$CODE_FILES" ]; then
+        echo "🔴 [SRE VETO] Code not certified by NeoAnvil. Run neo_sre_certify_mutation before committing."
+        echo "   Uncertified files:"
+        echo "$CODE_FILES" | sed 's/^/     /'
+        exit 1
+    fi
+    exit 0
+fi
+
+NOW=$(date +%s)
+FAILED=""
+
+for FILE in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(go|ts|tsx|js|jsx|css|rs|py|html)$'); do
+    ABS_FILE="$(git rev-parse --show-toplevel)/$FILE"
+    SEAL=$(grep "^${ABS_FILE}|" "$LOCK_FILE" 2>/dev/null | tail -1)
+    if [ -z "$SEAL" ]; then
+        FAILED="$FAILED\n     $FILE (not certified)"
+    else
+        STAMP=$(echo "$SEAL" | cut -d'|' -f2)
+        AGE=$((NOW - STAMP))
+        if [ "$AGE" -gt "$STALE_SECONDS" ]; then
+            FAILED="$FAILED\n     $FILE (seal expired: ${AGE}s ago)"
+        fi
+    fi
+done
+
+if [ -n "$FAILED" ]; then
+    echo "🔴 [SRE VETO] Code not certified by NeoAnvil. Run neo_sre_certify_mutation before committing."
+    echo -e "   Uncertified files:$FAILED"
+    exit 1
+fi
+
+> "$LOCK_FILE"
+exit 0

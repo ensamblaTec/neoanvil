@@ -96,6 +96,60 @@ func TestFolderAuditBrokenPathGlob(t *testing.T) {
 	}
 }
 
+// TestFolderAuditDoublestarValid verifies that paths globs containing `**`
+// (which Go's filepath.Glob does NOT natively support) are validated by
+// checking the prefix-directory existence. This is the canonical pattern for
+// path-scoped skills (e.g. pkg/dba/**, cmd/**/*.go).
+func TestFolderAuditDoublestarValid(t *testing.T) {
+	dir := t.TempDir()
+	// Create the prefix directory that the doublestar glob should match.
+	if err := os.MkdirAll(filepath.Join(dir, "pkg", "scope"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	fm := "name: scope-skill\ndescription: Doublestar paths test.\npaths:\n  - \"pkg/scope/**\"\n  - \"pkg/**/*.go\""
+	writeSkill(t, dir, "scope-skill", fm, "")
+
+	rows, err := auditClaudeFolder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if !rows[0].pathsValid {
+		t.Error("pathsValid should be true when ** prefix directory exists")
+	}
+}
+
+// TestFolderAuditInventoryAtNewPath verifies that inventory references are
+// detected at the post-2026-05-13 canonical path (docs/plugins/) — not just
+// the legacy docs/ root. [128.3]
+func TestFolderAuditInventoryAtNewPath(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, dir, "doc-skill",
+		"name: doc-skill\ndescription: Skill listed in plugins inventory.", "")
+	// Place inventory in the post-refactor location.
+	pluginsDir := filepath.Join(dir, "docs", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginsDir, "claude-folder-inventory.md"),
+		[]byte("contains doc-skill reference"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := auditClaudeFolder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if !rows[0].inInventory {
+		t.Error("inInventory should be true when inventory is at docs/plugins/")
+	}
+}
+
 // TestFolderAuditBrokenXref verifies that a markdown link pointing to a
 // non-existent file is reported as a broken xref. [128.1]
 func TestFolderAuditBrokenXref(t *testing.T) {

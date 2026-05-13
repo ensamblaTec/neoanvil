@@ -261,7 +261,8 @@ feat(scope): MCPI-N <master_plan_id> — descripción corta
   para auto-marcar `[x]`. El hook Jira detecta `MCPI-N` para `prepare_doc_pack`.
 - `[EPIC-FINAL MCPI-N]` SIEMPRE referencia el ticket Jira real, NUNCA un
   ID del master plan. Si dudas qué `MCPI-N` corresponde a tu épica del
-  master plan, usar `/jira-id <master_plan_id>` o `pkg/jira.ResolveMasterPlanID`.
+  master plan, ejecutar `neo jira-id <master_plan_id>` (CLI subcommand) o
+  llamar `pkg/jira.ResolveMasterPlanID` directamente.
 - En el cuerpo del commit puedes mencionar IDs adicionales — el hook de
   sync solo parsea el subject (evita falsos positivos por regex examples,
   paths, version strings).

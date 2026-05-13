@@ -11,39 +11,51 @@ cuando hace falta ampliar la configuración sin reinventar la estructura.
 
 ---
 
-## Estado actual del repo
+## Estado actual del repo (post skill-first refactor 2026-05-13)
 
 ```
 .claude/
-├── CLAUDE.md               (no presente — usamos /CLAUDE.md root)
-├── settings.json           (no presente)
-├── settings.local.json     ✓ (18 KB · permisos por-usuario, gitignored)
-├── agents/                 ✓ neo-jira-curator.md (creado, requiere restart Claude)
-├── commands/               (no presente — usar skills/)
-├── hooks/                  (no presente — Claude lifecycle hooks; git hooks viven en scripts/git-hooks/)
-├── skills/                 ✓ 13 skills:
-│   ├── brain-doctor/       /brain-doctor Brain Portable health diagnosis
-│   ├── daemon-flow/        /daemon-flow iterative daemon UI (PILAR XXVII)
-│   ├── daemon-trust/       /daemon-trust trust score dashboard
-│   ├── jira-create-pilar/  /jira-create-pilar mass create
-│   ├── jira-doc-from-commit/ /jira-doc-from-commit zero-token doc
-│   ├── jira-id/            /jira-id master_plan → MCPI resolver
-│   ├── jira-workflow/      auto-load doctrina
-│   ├── neo-doc-pack/       /neo-doc-pack manual builder
-│   ├── sre-doctrine/       Ouroboros workflow (auto-load)
-│   ├── sre-federation/     tier ownership + federation (auto-load)
-│   ├── sre-quality/        15 leyes path-scoped (auto-load)
-│   ├── sre-tools/          15 tools reference (auto-load)
-│   └── sre-troubleshooting/ recovery patterns (auto-load)
+├── CLAUDE.md               (no presente — usamos /CLAUDE.md root, 52 líneas)
+├── settings.json           ✓ (SessionStart hook → .claude/hooks/briefing.sh)
+├── settings.local.json     ✓ (permisos por-usuario, gitignored)
+├── agents/                 ✓ neo-jira-curator.md (subagent Jira ↔ master_plan sync)
+├── commands/               (no presente — usar skills/ con frontmatter)
+├── hooks/                  ✓ briefing.sh (auto-BRIEFING SessionStart)
+├── skills/                 ✓ 17 skills (3 auto · 3 paths-scoped · 11 task-mode):
+│   ├── sre-doctrine/        AUTO   Doctrina Ouroboros — laws universales
+│   ├── sre-workflow/        AUTO   Protocolo operativo BOOT → INVESTIGAR → EDITAR → CERTIFICAR
+│   ├── sre-troubleshooting/ AUTO   Recovery patterns + tool degradation
+│   ├── sre-quality/         PATH   pkg/**/*.go, cmd/**/*.go — 15 leyes calidad código
+│   ├── sre-federation/      PATH   pkg/federation/, pkg/nexus/, pkg/cpg/, pkg/auth/, pkg/knowledge/
+│   ├── sre-db/              PATH   pkg/dba/, pkg/rag/, migrations/ — ZERO-ALLOC ACID
+│   ├── sre-tools/           task   /sre-tools — inventario 15 tools MCP + 3 plugins
+│   ├── brain-doctor/        task   /brain-doctor — Brain Portable diagnosis
+│   ├── daemon-flow/         task   /daemon-flow — daemon iterativo UI (PILAR XXVII)
+│   ├── daemon-trust/        task   /daemon-trust — trust score dashboard
+│   ├── deepseek-workflow/   task   /deepseek-workflow — DS plugin doctrine
+│   ├── github-workflow/     task   /github-workflow — GH plugin doctrine
+│   ├── jira-workflow/       task   /jira-workflow — Jira master doctrine
+│   ├── jira-create-pilar/   task   /jira-create-pilar — mass Epic+Stories desde PILAR
+│   ├── jira-doc-from-commit/ task   /jira-doc-from-commit — auto doc-pack
+│   ├── local-llm-workflow/  task   /local-llm-workflow — Ollama routing ADR-013
+│   └── neo-doc-pack/        task   /neo-doc-pack — manual doc-pack builder
 ├── plugins/                (no presente)
 ├── projects/               (auto-generado por Claude Code, no editar)
-├── output-styles/          ✓ neo-sre.md (Ouroboros tone)
-├── rules/                  ✓ 10 archivos legacy (synced-directives 92KB queda como referencia archivada)
+├── output-styles/          ✓ neo-sre.md (Ouroboros tone — disponible, opt-in)
+├── rules/                  ✓ 1 archivo: neo-synced-directives.md
+│                              (BoltDB-managed via pkg/rag/wal.go — el único que no se mueve)
 └── worktrees/              ✓ (git worktrees scratch)
 
-scripts/git-hooks/
-└── post-commit             ✓ auto-doc Jira tickets from commit msg (zero-token)
+scripts/git-hooks/          ✓ 5 archivos (todos source-tracked en repo)
+├── pre-commit              ✓ SRE certify gate (rechaza .go/.ts/.js sin sello)
+├── commit-msg              ✓ valida formato Jira ticket en subject
+├── post-commit             ✓ auto-doc Jira tickets desde commit msg (zero-token)
+├── lib-jira-tickets.sh     ✓ library (parsing helpers)
+└── sync-master-plan.sh     ✓ library (master_plan checkbox sync)
 ```
+
+**Cómo se instalan los git hooks:** `make install-git-hooks` symlink-ea
+todos los `scripts/git-hooks/*` (no-`.sh`) a `.git/hooks/`. Backup auto a `.bak`.
 
 ---
 

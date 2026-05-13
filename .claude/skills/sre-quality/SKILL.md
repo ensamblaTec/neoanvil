@@ -58,7 +58,7 @@ Override: `sre.certify_ttl_minutes` en neo.yaml.
 - Dashboard HUD restringido a 127.0.0.1
 - **`//nolint:gosec` PROHIBIDO sin categoría.** Cada supresión:
   `//nolint:gosec // G304-WORKSPACE-CANON: <control compensatorio>`
-  Categorías válidas en `.claude/rules/neoanvilsec-audit.md`
+  Categorías válidas en [`docs/general/gosec-audit-policy.md`](../../../docs/general/gosec-audit-policy.md)
 
 ## LEY 6 — Certificación obligatoria
 

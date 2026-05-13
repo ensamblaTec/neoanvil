@@ -71,7 +71,7 @@ Al certificar exitosamente, el path se registra en `session_state` BoltDB y se e
 
 ## G15 — SEGURIDAD BASE
 
-HTTP clients: `sre.SafeHTTPClient()` para URLs externas (SSRF guard completo), `sre.SafeInternalHTTPClient(sec)` para tráfico servidor→servidor (solo loopback). PROHIBIDO `http.Client` crudo. Sockets Unix con `os.Chmod(0600)` post-Listen. Phoenix Protocol requiere `SRE_PHOENIX_ARMED=true`. Sanitizar inputs antes de shell (strip `"`, `&`, `;`, `$`, backticks). Dashboard HUD restringido a `127.0.0.1`. **`//nolint:gosec` solo con categoría documentada** (ver `.claude/rules/neoanvilsec-audit.md`): G304-WORKSPACE-CANON, G304-DIR-WALK, G304-CLI-CONSENT, G204-LITERAL-BIN, G204-SHELL-WITH-VALIDATION, G107-WRAPPED-SAFE-CLIENT, G402-STRESS-TEST.
+HTTP clients: `sre.SafeHTTPClient()` para URLs externas (SSRF guard completo), `sre.SafeInternalHTTPClient(sec)` para tráfico servidor→servidor (solo loopback). PROHIBIDO `http.Client` crudo. Sockets Unix con `os.Chmod(0600)` post-Listen. Phoenix Protocol requiere `SRE_PHOENIX_ARMED=true`. Sanitizar inputs antes de shell (strip `"`, `&`, `;`, `$`, backticks). Dashboard HUD restringido a `127.0.0.1`. **`//nolint:gosec` solo con categoría documentada** (ver `docs/general/gosec-audit-policy.md`): G304-WORKSPACE-CANON, G304-DIR-WALK, G304-CLI-CONSENT, G204-LITERAL-BIN, G204-SHELL-WITH-VALIDATION, G107-WRAPPED-SAFE-CLIENT, G402-STRESS-TEST.
 
 ## G16 — PRE-COMMIT HOOK
 

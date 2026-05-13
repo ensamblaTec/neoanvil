@@ -48,7 +48,7 @@ Override TTL via `sre.certify_ttl_minutes` en `neo.yaml`.
 - Phoenix Protocol requiere `SRE_PHOENIX_ARMED=true` para activarse.
 - Sanitizar inputs antes de pasar a shell (strip `"`, `&`, `;`, `$`, `` ` ``).
 - Dashboard HUD restringido a `127.0.0.1` (nunca exponer en red).
-- **`//nolint:gosec` PROHIBIDO sin categoría.** Cada supresión debe tener `//nolint:gosec // G304-WORKSPACE-CANON: <control compensatorio>`. Categorías válidas en `.claude/rules/neoanvilsec-audit.md`. Estado actual: 0 bare supresiones repo-wide.
+- **`//nolint:gosec` PROHIBIDO sin categoría.** Cada supresión debe tener `//nolint:gosec // G304-WORKSPACE-CANON: <control compensatorio>`. Categorías válidas en [`gosec-audit-policy.md`](./gosec-audit-policy.md) (sibling file). Estado actual: 0 bare supresiones repo-wide.
 
 ## LEY 6: CERTIFICACIÓN OBLIGATORIA
 

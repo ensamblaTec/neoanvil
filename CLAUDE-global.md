@@ -165,7 +165,7 @@ Ver `docs/neo-global.md` para el detalle operativo (auto-cargadas). Resumen:
 1. **Zero-Hardcoding** — IPs, puertos, endpoints vienen de config (`neo.yaml` o env), nunca embebidos. Secretos en `.neo/.env` con expansión `${VAR}`.
 2. **Aislamiento I/O en MCP** — nunca `fmt.Print`/`stdout` en código MCP; solo `log.Printf`.
 3. **Zero-Allocation en hot-paths** — `sync.Pool`, slices con `[:0]`, nada de `make()`/`new()` dentro de bucles críticos.
-4. **Seguridad** — Dos clientes HTTP: `sre.SafeHTTPClient()` para URLs externas/configuradas por usuario (SSRF guard completo), `sre.SafeInternalHTTPClient(sec)` para llamadas servidor→servidor a URLs controladas por el proceso. PROHIBIDO `http.Client` crudo. `//nolint:gosec` solo con categoría documentada (ver `.claude/rules/neoanvilsec-audit.md`).
+4. **Seguridad** — Dos clientes HTTP: `sre.SafeHTTPClient()` para URLs externas/configuradas por usuario (SSRF guard completo), `sre.SafeInternalHTTPClient(sec)` para llamadas servidor→servidor a URLs controladas por el proceso. PROHIBIDO `http.Client` crudo. `//nolint:gosec` solo con categoría documentada (ver `docs/general/gosec-audit-policy.md`).
 5. **DB Read-Only** — guard rechaza DROP/DELETE/UPDATE/INSERT/TRUNCATE/ALTER/CREATE/REPLACE. Sin `SELECT *` en tablas >1M filas. `EXPLAIN` antes de queries nuevas.
 6. **Token Budget** — Read nativo prohibido en archivos ≥100 líneas (usar `READ_SLICE`). Máx 3 ediciones seguidas sin `neo_compress_context`.
 7. **Rollback atómico por defecto** — un fallo en el batch revierte TODO el batch. `granular`/`none` solo si hay razón explícita.
