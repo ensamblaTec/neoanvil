@@ -514,35 +514,17 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	hnswGraph.SetAffinityConfig(cfg.SRE.CPUAffinityEnabled, cfg.SRE.CPUAffinityCores) // [367.A]
 
 	// [SRE] Fase 7.2: Protección ACID contra SIGKILL / SIGINT
-	// [BUG-FIX 2026-05-13] Previously this goroutine raced main()'s shutdown
-	// path: main exits before the goroutine reaches SaveHNSWSnapshot, killing
-	// the save mid-flight (no error logged; snapshot file stays stale at
-	// boot-time count instead of shutdown-time count → chronic HNSW:cold).
-	// Fix: HNSW save now runs SYNCHRONOUSLY in main()'s shutdown sequence
-	// below (see persistCachesOnShutdown + saveShutdownHNSWSnapshot). This
-	// goroutine keeps only the bookkeeping it owns (wal.Close, GhostGC,
-	// observability close, exit) — none of which depends on the WAL state.
-	go func() {
-		<-ctx.Done()
-		log.Println("[SRE-SHUTDOWN] OS Signal received. Executing ACID Graceful Teardown...")
-		_ = wal.Sync()
-		// HNSW save is now performed by main() synchronously (line ~1857 area)
-		// to avoid the goroutine-vs-main-exit race. If main() didn't get a
-		// chance to run (e.g. forced kill that bypassed shutdown path), there
-		// is no recovery here — the WAL itself is still the source of truth.
-		_ = wal.Close()
-		// [SRE-58.3] Ghost Mode GC — clean up sandbox artifacts on clean shutdown.
-		if liveCfg := LiveConfig(cfg); liveCfg != nil && liveCfg.Governance.GhostMode {
-			GhostGC(workspace)
-		}
-		// [PILAR-XXVII/243.H] Drain + close observability store before exit
-		// so the final ring-buffer batch lands on disk.
-		if observability.GlobalStore != nil {
-			_ = observability.GlobalStore.Close()
-		}
-		log.Println("[SRE-SHUTDOWN] NeoAnvil safely terminated. NVMe WAL synchronized.")
-		os.Exit(0)
-	}()
+	// [BUG-FIX 2026-05-13 v2] Previously a SIGTERM goroutine ran in parallel
+	// with main()'s own <-ctx.Done() shutdown path. Both fired on signal and
+	// raced — the goroutine called os.Exit(0) which killed the process
+	// BEFORE main()'s synchronous HNSW save could run. Symptom: every boot
+	// detected snapshot stale and rebuilt cold despite HNSW save being
+	// "implemented" twice (in goroutine AND in main). Resolution: the
+	// goroutine is gone; all teardown is consolidated synchronously in
+	// main()'s post-<-ctx.Done() block at the bottom of this function (see
+	// "MCP server is shutting down..." section near end of main). The
+	// `defer cleanupRAG()` registered above still runs wal.Close() when
+	// main returns, so the close order is well-defined.
 
 	log.Println("[BOOT] compute engine (tensorx CPUDevice)")
 	cpuEngine := tensorx.NewCPUDevice(f32Pool)
@@ -1846,7 +1828,9 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	<-ctx.Done()
 
 	log.Println("[SHUTDOWN] MCP server is shutting down...")
+	log.Println("[SRE-SHUTDOWN] OS Signal received. Executing ACID Graceful Teardown...")
 	observability.GlobalMetrics.EmitSummary(workspace)
+	_ = wal.Sync()
 
 	// [PILAR-XXV/201/210/222] Auto-persist all three cache layers via the
 	// consolidated helper. Bounded N per layer (32/16/64). Failures logged,
@@ -1854,12 +1838,12 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	persistCachesOnShutdown(caches, workspace)
 	// [Épica 263.B] Save CPG snapshot on graceful shutdown so next boot is fast.
 	cpgMgr.SaveSnapshot(filepath.Join(workspace, cfg.CPG.PersistPath))
-	// [BUG-FIX 2026-05-13] HNSW snapshot save SYNCHRONOUSLY in main shutdown
-	// path, before defer cleanupRAG fires wal.Close(). Previously this was in
-	// a goroutine that raced main exit and never completed (no log lines for
-	// "saved" or "failed" — silently killed mid-flight). Now: graph state at
-	// shutdown moment is captured to disk before WAL closes, so the next
-	// boot's stale-check sees a matching snapshot and avoids cold rebuild.
+	// [BUG-FIX 2026-05-13 v2] HNSW snapshot save SYNCHRONOUSLY in main shutdown.
+	// Must run BEFORE `defer cleanupRAG()` (wal.Close) and BEFORE return — the
+	// previously-deleted SIGTERM goroutine raced this and exited the process
+	// first, leaving the snapshot frozen at boot-time count. Now: this code
+	// is the SOLE path that writes the shutdown-time snapshot, so the next
+	// boot's stale-check (NodeKeyN comparison) matches and avoids cold rebuild.
 	if cfg.RAG.HNSWPersistPath != "" {
 		persistPath := filepath.Join(workspace, cfg.RAG.HNSWPersistPath)
 		if err := rag.SaveHNSWSnapshot(hnswGraph, wal, persistPath); err != nil {
@@ -1869,6 +1853,18 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 		}
 	}
 
+	// [SRE-58.3] Ghost Mode GC — clean up sandbox artifacts on clean shutdown.
+	// Moved here from the deleted SIGTERM goroutine.
+	if liveCfg := LiveConfig(cfg); liveCfg != nil && liveCfg.Governance.GhostMode {
+		GhostGC(workspace)
+	}
+	// [PILAR-XXVII/243.H] Drain + close observability store before exit
+	// so the final ring-buffer batch lands on disk. Moved here from the
+	// deleted SIGTERM goroutine.
+	if observability.GlobalStore != nil {
+		_ = observability.GlobalStore.Close()
+	}
+
 	// [291.E] Stop all active mock servers to free ports.
 	activeMocksMu.Lock()
 	for id, ms := range activeMocks {
@@ -1876,4 +1872,6 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 		delete(activeMocks, id)
 	}
 	activeMocksMu.Unlock()
+	log.Println("[SRE-SHUTDOWN] NeoAnvil safely terminated. NVMe WAL synchronized.")
+	// Main returns here — defer cleanupRAG() runs wal.Close().
 }
