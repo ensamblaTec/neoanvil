@@ -669,7 +669,7 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	// `action` to the six sub-handlers kept intact as *Tool types (still
 	// individually unit-testable). Replaces 6 previous MCP registrations.
 	mustRegister(&CacheTool{
-		stats:   &CacheStatsTool{queryCache: queryCache, textCache: textCache, embCache: embCache, workspace: workspace, knowledgeStats: hotCache.Stats},
+		stats:   &CacheStatsTool{queryCache: queryCache, textCache: textCache, embCache: embCache, hotFiles: radarTool.hotFiles, workspace: workspace, knowledgeStats: hotCache.Stats},
 		flush:   &CacheFlushTool{graph: hnswGraph},
 		resize:  &CacheResizeTool{queryCache: queryCache, textCache: textCache},
 		warmup:  &CacheWarmupTool{radar: radarTool, queryCache: queryCache, textCache: textCache},

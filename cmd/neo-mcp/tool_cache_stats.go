@@ -24,6 +24,7 @@ import (
 	"github.com/ensamblatec/neoanvil/pkg/cpg"
 	"github.com/ensamblatec/neoanvil/pkg/observability"
 	"github.com/ensamblatec/neoanvil/pkg/rag"
+	"github.com/ensamblatec/neoanvil/pkg/state"
 )
 
 // cacheSnapshotInfo inspects the 3 on-disk snapshot paths under
@@ -61,6 +62,7 @@ type CacheStatsTool struct {
 	queryCache     *rag.QueryCache
 	textCache      *rag.TextCache
 	embCache       *rag.Cache[[]float32] // [199]
+	hotFiles       *rag.HotFilesCache    // [LARGE-PROJECT/A 2026-05-13] per-workspace file content cache
 	workspace      string                // [217] used to render snapshot paths
 	knowledgeStats func() (hot, total int) // [295.E] nil when KnowledgeStore not available
 }
@@ -77,7 +79,7 @@ func (t *CacheStatsTool) InputSchema() MCPToolSchema {
 		Properties: map[string]any{
 			"include": map[string]any{
 				"type":        "array",
-				"description": "[Épica 209] Optional filter. Subset of ['query_cache', 'text_cache', 'embedding_cache', 'search_paths', 'tool_latency', 'knowledge_store']. Empty/absent = all. Use to trim the output when focused on one layer.",
+				"description": "[Épica 209 + LARGE-PROJECT 2026-05-13] Optional filter. Subset of ['query_cache', 'text_cache', 'embedding_cache', 'hot_files', 'planner_cache', 'search_paths', 'tool_latency', 'knowledge_store', 'pagerank_cache']. Empty/absent = all. Use to trim the output when focused on one layer.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"top_n": map[string]any{
@@ -203,6 +205,47 @@ func (t *CacheStatsTool) buildEmbeddingCacheSection() map[string]any {
 	}
 }
 
+// buildHotFilesCacheSection renders the hot_files block — per-workspace
+// LRU file-content cache (LARGE-PROJECT/A 2026-05-13, commit 5d61e2d).
+// Returns nil when unwired. Counters are coherent with the other cache
+// layers' format so dashboards can render them identically.
+func (t *CacheStatsTool) buildHotFilesCacheSection() map[string]any {
+	if t.hotFiles == nil {
+		return nil
+	}
+	s := t.hotFiles.Stats()
+	return map[string]any{
+		"hits":                s.Hits,
+		"misses":              s.Misses,
+		"stale_invalidations": s.Stale,
+		"evictions":           s.Evictions,
+		"entry_count":         s.EntryCount,
+		"total_bytes":         s.TotalBytes,
+		"capacity_bytes":      s.CapBytes,
+		"hit_ratio":           s.HitRatio,
+	}
+}
+
+// buildPlannerCacheSection renders the planner_cache block — per-workspace
+// memoization of ReadActivePhase + ReadOpenTasks (LARGE-PROJECT/C 2026-05-13,
+// commit a141f9a). Package-level cache so no nil-guard needed; always returns
+// a valid map (even if no plans parsed yet).
+func buildPlannerCacheSection() map[string]any {
+	s := state.GetPlannerCacheStats()
+	hits, misses := s.Hits, s.Misses
+	ratio := 0.0
+	if total := hits + misses; total > 0 {
+		ratio = float64(hits) / float64(total)
+	}
+	return map[string]any{
+		"hits":                hits,
+		"misses":              misses,
+		"stale_invalidations": s.Stale,
+		"entries":             s.Entries,
+		"hit_ratio":           ratio,
+	}
+}
+
 // buildPageRankCacheSection exposes the CPG PageRank memoisation
 // counters. [Épica 228]
 func buildPageRankCacheSection() map[string]any {
@@ -274,6 +317,18 @@ func (t *CacheStatsTool) Execute(_ context.Context, args map[string]any) (any, e
 		if s := t.buildEmbeddingCacheSection(); s != nil {
 			out["embedding_cache"] = s
 		}
+	}
+	// [LARGE-PROJECT/A 2026-05-13] HotFilesCache observability — gated on
+	// availability (tool may run pre-RadarTool init where the cache is unwired).
+	if includes("hot_files") {
+		if s := t.buildHotFilesCacheSection(); s != nil {
+			out["hot_files"] = s
+		}
+	}
+	// [LARGE-PROJECT/C 2026-05-13] PlannerCache observability — always available
+	// (pkg-level global). Empty stats are valid output.
+	if includes("planner_cache") {
+		out["planner_cache"] = buildPlannerCacheSection()
 	}
 	if includes("search_paths") {
 		out["search_paths"] = map[string]any{
