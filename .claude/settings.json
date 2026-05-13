@@ -32,6 +32,16 @@
             "timeout": 12
           }
         ]
+      },
+      {
+        "matcher": "mcp__neoanvil__neo_memory",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-memory-supersedes.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -41,6 +51,16 @@
           {
             "type": "command",
             "command": ".claude/hooks/post-edit-cert-reminder.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__neoanvil__neo_radar",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-ast-audit-cache.sh",
             "timeout": 5
           }
         ]
