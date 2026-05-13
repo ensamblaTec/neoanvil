@@ -664,6 +664,12 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	})
 	radarTool.WithSharedGraph(sharedGraph) // [287.E] project shared HNSW tier
 	radarTool.WithGPUInfo(bootGPU)        // [GPU-AWARE] boot-time GPU snapshot for BRIEFING display
+	// [LARGE-PROJECT/A 2026-05-13] Wire HotFilesCache into the persist/load
+	// stack so the cache warms on next boot. RadarTool owns the instance
+	// (initialised in NewRadarTool), the cacheStack just borrows a pointer
+	// for persistCachesOnShutdown to find it at teardown.
+	caches.hotFiles = radarTool.hotFiles
+	warmHotFilesCacheSnapshot(radarTool.hotFiles, workspace)
 	mustRegister(radarTool)
 	// [Épica 239] Unified cache observability + control tool. Dispatches via
 	// `action` to the six sub-handlers kept intact as *Tool types (still

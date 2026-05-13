@@ -30,6 +30,12 @@ const textCacheSnapshotRelPath = ".neo/db/text_cache.snapshot.json"
 // embCacheSnapshotRelPath is the companion path for EmbeddingCache. [Épica 210]
 const embCacheSnapshotRelPath = ".neo/db/embedding_cache.snapshot.json"
 
+// hotFilesCacheSnapshotRelPath holds path+mtime+size of recently-touched
+// files. Persisted on shutdown so the cache warms on next boot. Content
+// itself is NOT persisted — Load re-reads files only when mtime+size
+// still match (so no stale content is served post-restart). [LARGE-PROJECT/A]
+const hotFilesCacheSnapshotRelPath = ".neo/db/hotfile_cache.snapshot.json"
+
 type CachePersistTool struct {
 	queryCache *rag.QueryCache
 	textCache  *rag.TextCache        // [200]

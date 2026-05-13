@@ -3,6 +3,7 @@ package rag
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -197,6 +198,110 @@ func TestHotFilesCache_DisabledCacheSafe(t *testing.T) {
 	}
 	if _, ok := c.Get(path); ok {
 		t.Error("cap=0 cache must miss")
+	}
+}
+
+func TestHotFilesCache_PersistRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a.txt")
+	pathB := filepath.Join(dir, "b.txt")
+	writeFile(t, pathA, "alpha")
+	writeFile(t, pathB, "beta-content")
+
+	src := NewHotFilesCache(1024)
+	src.Put(pathA, []byte("alpha"))
+	src.Put(pathB, []byte("beta-content"))
+
+	snapPath := filepath.Join(dir, "hot.snap.json")
+	if err := src.SaveSnapshotJSON(snapPath, 64); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Fresh cache → Load → expect both entries admitted (files unchanged).
+	dst := NewHotFilesCache(1024)
+	admitted, err := dst.LoadSnapshotJSON(snapPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if admitted != 2 {
+		t.Errorf("admitted=%d want 2", admitted)
+	}
+	if got, ok := dst.Get(pathA); !ok || string(got) != "alpha" {
+		t.Errorf("pathA: ok=%v got=%q", ok, got)
+	}
+	if got, ok := dst.Get(pathB); !ok || string(got) != "beta-content" {
+		t.Errorf("pathB: ok=%v got=%q", ok, got)
+	}
+}
+
+func TestHotFilesCache_PersistSkipsMutatedFiles(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "stable.txt")
+	pathB := filepath.Join(dir, "mutated.txt")
+	writeFile(t, pathA, "stable")
+	writeFile(t, pathB, "v1")
+
+	src := NewHotFilesCache(1024)
+	src.Put(pathA, []byte("stable"))
+	src.Put(pathB, []byte("v1"))
+
+	snapPath := filepath.Join(dir, "hot.snap.json")
+	if err := src.SaveSnapshotJSON(snapPath, 64); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mutate pathB on disk — Load must NOT admit it (avoids serving stale).
+	time.Sleep(15 * time.Millisecond)
+	writeFile(t, pathB, "v2-different-size-content")
+
+	dst := NewHotFilesCache(1024)
+	admitted, err := dst.LoadSnapshotJSON(snapPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admitted != 1 {
+		t.Errorf("expected only the stable file admitted, got %d", admitted)
+	}
+	if _, ok := dst.Get(pathA); !ok {
+		t.Error("stable file should be admitted")
+	}
+	// pathB must miss (not admitted because mtime/size changed since snapshot).
+	if _, ok := dst.Get(pathB); ok {
+		t.Error("mutated file should NOT be admitted — Load served stale content")
+	}
+}
+
+func TestHotFilesCache_PersistMissingFileNoError(t *testing.T) {
+	c := NewHotFilesCache(1024)
+	admitted, err := c.LoadSnapshotJSON("/nonexistent/path/to/snap.json")
+	if err != nil {
+		t.Errorf("missing snapshot must not error: %v", err)
+	}
+	if admitted != 0 {
+		t.Errorf("missing snapshot should admit 0, got %d", admitted)
+	}
+}
+
+func TestHotFilesCache_PersistRespectsTopN(t *testing.T) {
+	dir := t.TempDir()
+	c := NewHotFilesCache(1024)
+	// Insert 5 files; persist only top-3 (most recently used).
+	for i := 1; i <= 5; i++ {
+		p := filepath.Join(dir, "f"+itoa(i)+".txt")
+		writeFile(t, p, "content"+itoa(i))
+		c.Put(p, []byte("content"+itoa(i)))
+	}
+	snapPath := filepath.Join(dir, "snap.json")
+	if err := c.SaveSnapshotJSON(snapPath, 3); err != nil {
+		t.Fatal(err)
+	}
+	// Read back: must have 3 entries.
+	data, _ := os.ReadFile(snapPath)
+	// Quick sanity — count "path" occurrences.
+	want := 3
+	count := strings.Count(string(data), `"path":`)
+	if count != want {
+		t.Errorf("snapshot has %d paths, want %d", count, want)
 	}
 }
 

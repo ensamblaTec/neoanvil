@@ -21,9 +21,10 @@ import (
 // Returned by setupCaches so callers can pass the bundle around (or
 // individual fields) instead of 3 separate args.
 type cacheStack struct {
-	query *rag.QueryCache
-	text  *rag.TextCache
-	emb   *rag.Cache[[]float32]
+	query    *rag.QueryCache
+	text     *rag.TextCache
+	emb      *rag.Cache[[]float32]
+	hotFiles *rag.HotFilesCache // [LARGE-PROJECT/A] optional; set by main when RadarTool wires it
 }
 
 // setupCaches constructs all three cache layers from cfg.RAG capacities,
@@ -58,8 +59,30 @@ func setupCaches(cfg *config.NeoConfig, workspace string, currentGen uint64) cac
 	warm("embedding", func(path string, gen uint64) (int, error) {
 		return s.emb.LoadSnapshotJSON(path, gen, "EMBED|")
 	}, embCacheSnapshotRelPath)
+	// hot_files is wired AFTER RadarTool init in main (caller mutates s.hotFiles
+	// then invokes warmHotFilesCacheSnapshot) — the cache instance does not
+	// exist at this point in the boot sequence.
 
 	return s
+}
+
+// warmHotFilesCacheSnapshot loads the on-disk hot-files snapshot into
+// the provided cache, if any entries' mtime+size still match disk state.
+// Called by main() AFTER RadarTool is constructed (since hotFiles lives
+// on RadarTool, not in the early cacheStack). [LARGE-PROJECT/A 2026-05-13]
+func warmHotFilesCacheSnapshot(cache *rag.HotFilesCache, workspace string) {
+	if cache == nil {
+		return
+	}
+	path := filepath.Join(workspace, hotFilesCacheSnapshotRelPath)
+	n, err := cache.LoadSnapshotJSON(path)
+	if err != nil {
+		log.Printf("[BOOT] hot_files cache snapshot load failed: %v (continuing cold)", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("[BOOT] hot_files cache warm-loaded %d entries from snapshot", n)
+	}
 }
 
 // persistCachesOnShutdown writes all three snapshots to disk. Fixed N
@@ -83,6 +106,11 @@ func persistCachesOnShutdown(s cacheStack, workspace string) {
 		{"embedding", func() error {
 			return s.emb.SaveSnapshotJSON(filepath.Join(workspace, embCacheSnapshotRelPath), 64)
 		}, filepath.Join(workspace, embCacheSnapshotRelPath)},
+	}
+	if s.hotFiles != nil {
+		ops = append(ops, persistOp{"hot_files", func() error {
+			return s.hotFiles.SaveSnapshotJSON(filepath.Join(workspace, hotFilesCacheSnapshotRelPath), 64)
+		}, filepath.Join(workspace, hotFilesCacheSnapshotRelPath)})
 	}
 	for _, op := range ops {
 		if err := op.fn(); err != nil {

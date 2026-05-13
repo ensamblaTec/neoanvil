@@ -22,6 +22,7 @@ package rag
 
 import (
 	"container/list"
+	"encoding/json"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -171,6 +172,105 @@ type HotFilesCacheStats struct {
 	Stale      int64   `json:"stale_invalidations"`
 	Evictions  int64   `json:"evictions"`
 	HitRatio   float64 `json:"hit_ratio"`
+}
+
+// persistedHotFileEntry is the on-disk shape for a single cached file.
+// Content is omitted from disk — only the path + mtime + size are saved.
+// On Load, we re-stat each path; if mtime+size still match disk state,
+// we read the file content fresh and admit. This avoids serving stale
+// content from a snapshot that pre-dates filesystem mutations between
+// shutdown and the next boot.
+type persistedHotFileEntry struct {
+	Path  string    `json:"path"`
+	MTime time.Time `json:"mtime"`
+	Size  int64     `json:"size"`
+}
+
+type persistedHotFilesSnapshot struct {
+	Version int                     `json:"version"`
+	Entries []persistedHotFileEntry `json:"entries"`
+}
+
+const hotFilesSnapshotVersion = 1
+
+// SaveSnapshotJSON writes the top-N most-recently-used paths to path.
+// Only path + mtime + size are persisted — content is re-read on Load
+// (after mtime/size revalidation) to ensure no stale content survives.
+// Skip silently when n<=0 or cache is empty.
+func (c *HotFilesCache) SaveSnapshotJSON(path string, n int) error {
+	if c == nil || n <= 0 {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Walk LRU front-to-back (most-recent first), capped at n.
+	snap := persistedHotFilesSnapshot{
+		Version: hotFilesSnapshotVersion,
+		Entries: make([]persistedHotFileEntry, 0, n),
+	}
+	count := 0
+	for elem := c.lru.Front(); elem != nil && count < n; elem = elem.Next() {
+		entry, ok := elem.Value.(*HotFileEntry)
+		if !ok {
+			continue
+		}
+		snap.Entries = append(snap.Entries, persistedHotFileEntry{
+			Path:  entry.Path,
+			MTime: entry.MTime,
+			Size:  entry.Size,
+		})
+		count++
+	}
+	data, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+// LoadSnapshotJSON reads path and admits each entry whose on-disk file
+// still has the recorded mtime+size. Re-stats each path before admission
+// to prevent serving stale content. Returns the number of admitted entries
+// (0 + nil error when file doesn't exist — first boot is not an error).
+func (c *HotFilesCache) LoadSnapshotJSON(path string) (int, error) {
+	if c == nil {
+		return 0, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var snap persistedHotFilesSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return 0, err
+	}
+	if snap.Version != hotFilesSnapshotVersion {
+		// Future-version snapshot → ignore, don't crash.
+		return 0, nil
+	}
+	admitted := 0
+	// Iterate in REVERSE so the most-recent (snap.Entries[0]) ends up at
+	// the front of the LRU list after sequential Put calls.
+	for i := len(snap.Entries) - 1; i >= 0; i-- {
+		e := snap.Entries[i]
+		info, statErr := os.Stat(e.Path)
+		if statErr != nil {
+			continue // file gone since snapshot
+		}
+		if !info.ModTime().Equal(e.MTime) || info.Size() != e.Size {
+			continue // file mutated since snapshot — skip (will cold-load on first Get)
+		}
+		content, readErr := os.ReadFile(e.Path)
+		if readErr != nil {
+			continue
+		}
+		c.Put(e.Path, content)
+		admitted++
+	}
+	return admitted, nil
 }
 
 // Stats returns a coherent snapshot of current cache state and counters.
