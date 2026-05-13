@@ -478,6 +478,7 @@ Full list in `go.mod`.
 |----------|-------------|
 | [neo-yaml-guide.md](./docs/guide/neo-yaml-guide.md) | Full configuration reference |
 | [neo-project-federation-guide.md](./docs/guide/neo-project-federation-guide.md) | Multi-workspace federation setup |
+| [neo-doctrine-migration-guide.md](./docs/guide/neo-doctrine-migration-guide.md) | **Adopt this doctrine in a new repo** — hooks, settings, durability inheritance |
 | [jira-integration-guide.md](./docs/plugins/jira-integration-guide.md) | Jira plugin setup and workflow |
 | [deepseek-api-reference.md](./docs/plugins/deepseek-api-reference.md) | DeepSeek plugin API reference |
 | [plugin-author-guide.md](./docs/plugins/plugin-author-guide.md) | Writing custom MCP plugins |
@@ -488,6 +489,36 @@ Full list in `go.mod`.
 | [ADR-014](./docs/adr/ADR-014-hnsw-hybrid-quant.md) | HNSW hybrid quantization |
 | [ADR-016](./docs/adr/ADR-016-ouroboros-lifecycle-hooks.md) | Ouroboros lifecycle hooks (PreToolUse/PostToolUse/Stop) |
 | [ADR-017](./docs/adr/ADR-017-directives-durability.md) | Directives durability hardening (this session) |
+
+## Doctrine snapshot — current numbers
+
+What the neoanvil doctrine ships, measured 2026-05-13:
+
+| Layer | Metric |
+|---|---|
+| **Tools MCP** | 15 tools / 60+ operations / 23 `neo_radar` intents / 3 plugins (Jira, DeepSeek, GitHub) |
+| **Lifecycle hooks** | 7 hooks (briefing + 2× PreToolUse + 2× PostToolUse + UserPromptSubmit + Stop) · ~32 KB shell / 818 LOC · bash 3.2 safe |
+| **Skills** | 17 (11 auto-loaded by context / 6 task-mode invocable via `/skill-name`) |
+| **Directives** | 57 / 60 capacity · 500-char/directive limit · 0 outliers · 0 tag duplicates |
+| **Upfront context budget** | ~5,113 tokens (CLAUDE.md 1,015 + rules 4,098) · target was ≤20k · 4× margin |
+| **Directive corruption guards** | 2-tier: absolute (disk<5 AND BoltDB>50) + relative (BoltDB≥10 AND loss>20%) |
+| **Pre-destructive snapshot** | `.neo/db/directives_snapshot.json` written before every `CompactDirectives` |
+| **Restore loop** | `neo_memory(action_type:restore[, snapshot_path:"..."])` — fills gaps, conservative |
+| **Test coverage (durability)** | 10 tests in `pkg/rag/wal_directives_sync_test.go` |
+| **ADRs active** | 11 (ADR-005 → ADR-017, excluding withdrawn/superseded) |
+| **Federation tier** | workspace → project (coord) → org → nexus (singleton) |
+
+## Adopting this doctrine in your own repo
+
+See [`neo-doctrine-migration-guide.md`](./docs/guide/neo-doctrine-migration-guide.md) for the step-by-step:
+
+1. Copy 7 hook shell scripts to `<target>/.claude/hooks/`.
+2. Patch workspace detection in `briefing.sh` + `pre-edit-blast.sh` (2 of 7 hooks).
+3. Copy + adapt `.claude/settings.json` (federation-aware matchers if multi-workspace).
+4. (Optional) Copy `CLAUDE.md`, skills, rules dir.
+5. Validate with bash-syntax check + hook smoke tests.
+
+Total: ~10 min for a single workspace, ~30 min for a federated umbrella project. The canonical migrated example is `/develop/other/` (strategos backend + strategosia_frontend, both ride the same 7 hooks).
 
 ## Contributing
 
