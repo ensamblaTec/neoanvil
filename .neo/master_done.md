@@ -333,3 +333,7 @@ See audit trail in git history.
 **Audited:** DeepSeek + internal review (2026-05-07). 8 findings incorporated.
 ---
 
+<!-- archived: 2026-05-13 -->
+
+---
+
