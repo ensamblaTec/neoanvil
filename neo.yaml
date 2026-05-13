@@ -72,7 +72,7 @@ sre:
     thermal_pressure_check: true
     daemon_backend_mode: auto
     max_directive_chars: 500
-    max_directives: 60
+    max_directives: 80
     deepseek_pre_certify: manual
     deepseek_hot_paths:
         - pkg/brain/crypto.go
