@@ -12,7 +12,7 @@ description: Doctrina operativa del plugin DeepSeek (mcp__neoanvil__deepseek_cal
 Plugin: `cmd/plugin-deepseek/` (4 actions + `__health__`).
 Guía completa: [`docs/plugins/deepseek-api-reference.md`](../../../docs/plugins/deepseek-api-reference.md).
 Decisión arquitectónica: [`docs/adr/ADR-012-deepseek-plugin-design.md`](../../../docs/adr/ADR-012-deepseek-plugin-design.md).
-Directives: 14 entries en `.claude/rules/neo-synced-directives-deepseek.md`.
+Directives archive (read-only): [`docs/general/directives-archive-deepseek.md`](../../../docs/general/directives-archive-deepseek.md) — 14 entries, ya no auto-cargadas como rules; contenido vive en este SKILL.md.
 
 ---
 
@@ -260,7 +260,7 @@ mutación para la peor.
 
 - Guía API completa: [`docs/plugins/deepseek-api-reference.md`](../../../docs/plugins/deepseek-api-reference.md)
 - ADR: [`docs/adr/ADR-012-deepseek-plugin-design.md`](../../../docs/adr/ADR-012-deepseek-plugin-design.md)
-- Directives detalladas: `.claude/rules/neo-synced-directives-deepseek.md`
+- Directives archive (read-only): [`docs/general/directives-archive-deepseek.md`](../../../docs/general/directives-archive-deepseek.md)
 - Hallucination catalog: `~/.claude/projects/.../memory/feedback_deepseek_hallucination_patterns.md`
 - Skill hermano (jira): [`.claude/skills/jira-workflow/SKILL.md`](../jira-workflow/SKILL.md)
 - Skill hermano (github): [`.claude/skills/github-workflow/SKILL.md`](../github-workflow/SKILL.md)

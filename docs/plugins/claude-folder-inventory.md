@@ -176,12 +176,16 @@ Cada archivo es contexto que se añade cuando los paths matcheen.
 ~40k chars per-file. Recomendación: archivos < 30k chars; split por
 dominio si excede.
 
-**neoanvil uso:** 10 archivos, total **194 KB** (post-migración).
-- `neo-synced-directives.md` — 92 KB (PROBLEMA: > cap, candidato split)
-- `neo-synced-directives-history.md` — 33 KB
-- `neo-sre-doctrine.md` — 19 KB
-- `neo-workflow.md` — 14 KB
-- otros 6 más pequeños
+**neoanvil uso (post ctx-bloat refactor 2026-05-13):** 7 archivos, total ~76 KB.
+- `neo-synced-directives.md` — 17 KB (51 entries, BoltDB-synced)
+- `neo-sre-doctrine.md` — 22 KB (candidate split a skill futuro)
+- `neo-workflow.md` — 14 KB (candidate migrate a skill futuro)
+- `neo-code-quality.md` — 10 KB
+- `neo-gosec-audit.md` — 5 KB
+- `neo-deadcode-triage.md` — 3 KB
+- `neo-db.md` — 3 KB
+
+Los 4 thematic files (`-deepseek`, `-jira`, `-pilar`, `-history`) se archivaron a `docs/general/directives-archive-*.md` en mayo 2026 — su contenido vive en los skills correspondientes.
 
 ### 11. Statusline (no carpeta — settings.json + ~/.claude/)
 
@@ -234,13 +238,17 @@ Migrar de `rules/` a `skills/` los archivos que:
 
 | Archivo actual | Acción | Razón |
 |---|---|---|
-| `rules/neo-synced-directives.md` (92 KB) | **Split** en 3-4 skills temáticos | Excede 40k cap |
+| `rules/neo-synced-directives.md` (17 KB, post-compact) | KEEP (BoltDB sync target, hardcoded en `pkg/rag/wal.go`) | Auto-managed |
 | `rules/neo-workflow.md` (14 KB) | Migrar a `skills/sre-workflow/SKILL.md` | Procedimental |
-| `rules/neo-sre-doctrine.md` (19 KB) | Migrar a `skills/sre-doctrine/SKILL.md` | Procedimental |
-| `rules/jira-workflow.md` | ✅ migrado a `skills/jira-workflow/` | hecho hoy |
-| `rules/neo-code-quality.md` (10 KB) | KEEP en rules | Constraints de código |
-| `rules/neoanvilsec-audit.md` (5 KB) | KEEP en rules | Constraints de seguridad |
-| `rules/neo-synced-directives-history.md` (33 KB) | KEEP (read-only audit log) | Histórico |
+| `rules/neo-sre-doctrine.md` (22 KB) | Migrar a `skills/sre-doctrine/SKILL.md` (parcial hoy) | Procedimental |
+| `rules/jira-workflow.md` | ✅ migrado a `skills/jira-workflow/` | hecho 2026-04-28 |
+| `rules/neo-code-quality.md` (10 KB) | Mover a `docs/general/` (step E) | Constraints — referenciable via skill |
+| `rules/neo-gosec-audit.md` (5 KB) | Mover a `docs/general/` (step E) | Policy doc |
+| `rules/neo-deadcode-triage.md` (3 KB) | Mover a `docs/general/` (step E) | Policy doc |
+| ✅ `rules/neo-synced-directives-deepseek.md` | Archivado a `docs/general/directives-archive-deepseek.md` 2026-05-13 | Content vive en `skills/deepseek-workflow/` |
+| ✅ `rules/neo-synced-directives-jira.md` | Archivado a `docs/general/directives-archive-jira.md` 2026-05-13 | Content vive en `skills/jira-workflow/` |
+| ✅ `rules/neo-synced-directives-pilar.md` | Archivado a `docs/general/directives-archive-pilar.md` 2026-05-13 | Content vive en `skills/sre-federation/` |
+| ✅ `rules/neo-synced-directives-history.md` | Deleted 2026-05-13 (lineage en git) | Era 33KB→1.7KB con 2 duplicados |
 
 ### Carpetas nuevas que neoanvil debería abrir
 

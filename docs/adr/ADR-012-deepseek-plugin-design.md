@@ -138,5 +138,5 @@ En la práctica el cache hit rate empuja el costo real a
   `[DEEPSEEK-PROTOCOL-MANDATORY]`, `[DEEPSEEK-PAIR-FEEDBACK-LOOP]`,
   `[DEEPSEEK-ROUND-PATTERNS]`, `[SRE-NEW-CODE-AUDIT-MANDATORY]`,
   `[DEEPSEEK-OPERATIONAL-EFFICIENCY]` en
-  `.claude/rules/neo-synced-directives-deepseek.md`
+  `docs/general/directives-archive-deepseek.md`
 - Hallucination patterns catalog: `feedback_deepseek_hallucination_patterns.md`
