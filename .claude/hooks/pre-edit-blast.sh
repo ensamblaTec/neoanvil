@@ -52,20 +52,36 @@ REPO_ROOT="${NEO_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 # emit_json: wraps a context string in the Claude Code hookSpecificOutput envelope.
 # All output to stdout MUST be valid JSON (any non-JSON stdout makes Claude Code
 # ignore the hook output silently — that was the bug in v1).
+#
+# [LARGE-PROJECT 2026-05-13] Second positional arg DECISION lets callers override
+# the default "allow" — used by the BoltDB-path hard-gate path below to emit
+# "ask" so the operator confirms BEFORE editing transactional code without a
+# preceding AST_AUDIT (enforces directive [AST_AUDIT_BOLTDB]).
 emit_json() {
   local ctx="$1"
-  python3 -c "
-import json, sys
-ctx = sys.argv[1]
-payload = {
-  'hookSpecificOutput': {
-    'hookEventName': 'PreToolUse',
-    'permissionDecision': 'allow',
-    'additionalContext': ctx,
-  }
+  local decision="${2:-allow}"
+  jq -nc \
+    --arg ctx "$ctx" \
+    --arg decision "$decision" \
+    '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: $decision,
+        additionalContext: $ctx
+      }
+    }'
+  return 0
 }
-print(json.dumps(payload))
-" "$ctx"
+
+# is_boltdb_path: returns 0 (true) when $1 matches the transactional code
+# layers that directive [AST_AUDIT_BOLTDB] flags as mandatory-AST_AUDIT.
+# Hard-gates editing those without an AST_AUDIT cache hit in this session.
+is_boltdb_path() {
+  case "$1" in
+    */pkg/state/*.go|*/pkg/dba/*.go|*/pkg/rag/wal.go|*/pkg/rag/wal_*.go|*/pkg/rag/hnsw_persist.go)
+      return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Read JSON from stdin — defensive parsing.
@@ -98,12 +114,51 @@ case "$FILE_PATH_LC" in
   *) exit 0 ;;
 esac
 
-# TTL cache lookup. Format: one JSON object {"<path>": <unix_ts>, ...}.
 CACHE_DIR="${REPO_ROOT}/.neo"
 CACHE_FILE="${CACHE_DIR}/blast_cache.json"
 mkdir -p "$CACHE_DIR" 2>/dev/null
 
 NOW=$(date +%s)
+BASENAME=$(basename "$FILE_PATH")
+
+# [LARGE-PROJECT 2026-05-13] AST_AUDIT_BOLTDB hard gate runs BEFORE the BLAST
+# cache lookup — it's path-based and independent of whether BLAST_RADIUS is
+# already cached. Otherwise editing wal.go after a recent BLAST_RADIUS would
+# silently bypass the AST_AUDIT requirement.
+if is_boltdb_path "$FILE_PATH" && [ "${NEO_BLAST_HOOK_AST_BYPASS:-0}" != "1" ]; then
+  AST_CACHE_FILE="${CACHE_DIR}/ast_audit_cache.json"
+  AST_CACHED=$(AST_CACHE_FILE="$AST_CACHE_FILE" FILE_PATH="$FILE_PATH" TTL="$TTL_SECONDS" NOW="$NOW" python3 <<'PYEOF' 2>/dev/null
+import json, os
+cache_file = os.environ.get("AST_CACHE_FILE","")
+path = os.environ.get("FILE_PATH","")
+ttl = int(os.environ.get("TTL","300"))
+now = int(os.environ.get("NOW","0"))
+try:
+    with open(cache_file) as f:
+        cache = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError, ValueError):
+    cache = {}
+ts = cache.get(path, 0)
+if isinstance(ts, (int, float)) and (now - ts) < ttl:
+    print("HIT")
+else:
+    print("MISS")
+PYEOF
+)
+  if [ "$AST_CACHED" != "HIT" ]; then
+    GATE_CTX="[ouroboros-hook · AST_AUDIT_BOLTDB] 🛑 HARD GATE — \`${BASENAME}\` is transactional code (pkg/state/dba/rag/wal/hnsw_persist). Directive [AST_AUDIT_BOLTDB] mandates AST_AUDIT BEFORE editing to catch cursor iteration bugs, transaction leaks, and CC>15 in callbacks.
+
+REQUIRED ACTION before this Edit:
+  mcp__neoanvil__neo_radar(intent: \"AST_AUDIT\", target: \"${FILE_PATH}\")
+
+If AST_AUDIT returns clean, the cache will record the pass and subsequent Edits within the TTL window (${TTL_SECONDS}s) will not re-gate.
+
+Override (use SPARINGLY): set NEO_BLAST_HOOK_AST_BYPASS=1 in the env. Documented bypass per [SRE-CERTIFY-BYPASS] if AST_AUDIT itself is broken."
+    emit_json "$GATE_CTX" "ask"
+    exit 0
+  fi
+fi
+
 CACHED=$(python3 -c "
 import json, os, sys
 cache_file = '$CACHE_FILE'
@@ -121,8 +176,6 @@ if isinstance(ts, (int, float)) and (now - ts) < ttl:
 else:
     print('MISS')
 " 2>/dev/null)
-
-BASENAME=$(basename "$FILE_PATH")
 
 if [[ "$CACHED" == HIT* ]]; then
   AGE=${CACHED#HIT }
