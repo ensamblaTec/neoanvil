@@ -2,7 +2,7 @@
 
 Reglas universales aplicables a cualquier proyecto orquestado por NeoAnvil.
 Este fichero es una plantilla estable — NO depende del código interno del motor.
-Copiar a `docs/neo-global.md` en proyectos nuevos junto con `CLAUDE-global.md`.
+Copiar a `docs/neo-global.md` en proyectos nuevos como contrato base operativo.
 
 **Versión contrato: V10.6 — 15 tools MCP / 60+ operations / 23 intents radar.**
 

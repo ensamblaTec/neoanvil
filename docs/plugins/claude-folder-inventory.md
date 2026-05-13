@@ -67,9 +67,10 @@ todos los `scripts/git-hooks/*` (no-`.sh`) a `.git/hooks/`. Backup auto a `.bak`
 frontmatter. Convenciones del proyecto, stack, comandos, contexto que
 no cambia.
 
-**neoanvil uso:** `/CLAUDE.md` en root + `/CLAUDE-global.md` para template
-universal. Hay un cap implícito (~200 líneas útiles antes de truncate)
-— por eso el resto vive en `rules/` o `skills/`.
+**neoanvil uso:** `/CLAUDE.md` en root + `docs/general/neo-global.md`
+como plantilla portable (contrato universal V10.6). Hay un cap implícito
+(~200 líneas útiles antes de truncate) — por eso el resto vive en
+`rules/` o `skills/`.
 
 ### 2. `settings.json` + `settings.local.json`
 

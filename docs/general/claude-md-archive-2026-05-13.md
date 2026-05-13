@@ -2,7 +2,7 @@
 
 Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.md vacío (todo archivado en `master_done.md`) · 15 tools MCP / 60+ operations · 3 plugins MCP (Jira, DeepSeek, GitHub) · Local LLM (Qwen 2.5-Coder 7B) via `neo_local_llm` · Native build = Pure Go; Docker stage 3 = CGO enabled (gcc + musl-dev) para tree-sitter parsers**. Estado: GREEN (0 linter findings, 0 CC>15, audit-ci clean). **4 tiers** activos: `workspace` → `project` → `org` → `nexus` (global). **Áreas cerradas en sesión 2026-05-09**: Area 1 Docker + Pattern D híbrido (host bind-mount source + named volumes para state, scoped per-file binds tras DS audit Finding 1), Area 2 GitHub plugin (11 actions MCP, multi-tenant), Area 3 Integration tests (jira mock + docker smoke), Area 4 OpenAPI (`GET /openapi.json` + Swagger UI), Area 5 pkg/notify (Slack/Discord webhooks), Area 6 pkg/otelx (W3C traceparent + RecordingTracer), Phase R multi-tenant (`~/.neo/credentials.json` + audit-{jira,github}.log JSONL hash-chain), Phase S RecordingTracer + AttributeRecorder. **PILAR XXIII–XXVII** entregados previamente: Jira plugin ecosystem, DeepSeek Fan-Out Engine, Daemon V2, PILAR XXVII Daemon iterativo MCP-driven con Trust scoring + Pair feedback loop (`pkg/state/daemon_audit.go` + `daemon_trust.go` + `daemon_results.go` + `pair_audit_events.go`; 5 actions: `execute_next`, `approve`, `reject`, `trust_status`, `pair_audit_emit`). **PILAR XXVI Omni-Mesh**: Brain Portable (`pkg/brain/` — crypto ChaCha20-Poly1305, R2 store, local FS driver, TsnetStore/TsnetServer via Tailscale), Android scaffold. **Lazy lifecycle**: `lazy_prewarm_seconds` + predictive topology wake `wakeProjectSiblings` (ÉPICA 150.M/N).
 
-> **Base universal reusable:** el ciclo operativo, las leyes de calidad y los contratos de las macro-tools están en [`CLAUDE-global.md`](./CLAUDE-global.md) y [`docs/neo-global.md`](./docs/general/neo-global.md). Este fichero solo contiene lo **específico de NeoAnvil** como proyecto.
+> **Base universal reusable:** el ciclo operativo, las leyes de calidad y los contratos de las macro-tools están en [`docs/general/neo-global.md`](./docs/general/neo-global.md). Este fichero solo contiene lo **específico de NeoAnvil** como proyecto.
 
 ---
 
@@ -28,7 +28,7 @@ Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.m
 
 ## 15 tools MCP (60+ operations) — Épica 239 + PILAR LXVI + PILAR LXVII (org tier) + ADR-013 (local LLM)
 
-**7 Macro-Tools** (ver contrato en `CLAUDE-global.md §5` + detalle en `.claude/rules/neo-sre-doctrine.md`):
+**7 Macro-Tools** (ver contrato en `docs/general/neo-global.md` + detalle en `.claude/rules/neo-sre-doctrine.md`):
 
 - `neo_radar` — **23 intents**: BRIEFING, BLAST_RADIUS, SEMANTIC_CODE, DB_SCHEMA, TECH_DEBT_MAP, READ_MASTER_PLAN, SEMANTIC_AST, READ_SLICE, AST_AUDIT, HUD_STATE, FRONTEND_ERRORS, WIRING_AUDIT, COMPILE_AUDIT, GRAPH_WALK, PROJECT_DIGEST, INCIDENT_SEARCH, PATTERN_AUDIT, CONTRACT_QUERY, FILE_EXTRACT, CONTRACT_GAP, INBOX, PLUGIN_STATUS, CLAUDE_FOLDER_AUDIT
 - `neo_sre_certify_mutation` — ACID Guardian (single op): AST + Bouncer + tests + seal TTL
@@ -49,7 +49,7 @@ Motor SRE de orquestación MCP escrito en Go. **Ouroboros V10.6 · master_plan.m
 - `neo_debt` — **5 actions** (PILAR LXVI): list, record, resolve, affecting_me, fetch. 4-tier debt: workspace (technical_debt.md), project (SHARED_DEBT.md), nexus (HTTP a dispatcher), org (reservado PILAR LXVII). Usar `affecting_me` al inicio de sesión para ver issues detectados por Nexus que afectan este workspace.
 - `neo_local_llm` — **ADR-013**: routes prompts a Ollama local (default `qwen2.5-coder:7b`) en GPU del operator. **$0/call**, ~5-30s/audit en RTX 3090, complemento al plugin-deepseek para daemon mode + tareas no-frontier. Routing local-vs-DS lo decide el agent (no server-side). Schema: `prompt` + opcional `model`/`system`/`max_tokens`/`temperature`.
 
-**Cache stack** (ver detalle en `CLAUDE-global.md §5` y README § "Cache stack"):
+**Cache stack** (ver detalle en `docs/general/neo-global.md` y README § "Cache stack"):
 - `QueryCache` (SEMANTIC_CODE node IDs, 54 ns hit)
 - `TextCache` (BLAST_RADIUS/PROJECT_DIGEST/GRAPH_WALK markdown, 33 ns hit)
 - `EmbeddingCache` ([]float32 vectors, skip 30 ms Ollama)
@@ -165,8 +165,7 @@ Binario separado `cmd/neo-nexus` que orquesta múltiples instancias de `neo-mcp`
 
 ## Referencia rápida
 
-- Contrato operativo base: [`CLAUDE-global.md`](./CLAUDE-global.md)
-- Leyes universales (template para nuevos proyectos): [`docs/neo-global.md`](./docs/general/neo-global.md)
+- Contrato operativo base / template universal: [`docs/general/neo-global.md`](./docs/general/neo-global.md)
 - Workflow paso a paso: [`.claude/rules/neo-workflow.md`](./.claude/rules/neo-workflow.md)
 - Doctrina macro-tools (15 tools / 60+ ops, 23 intents): [`.claude/rules/neo-sre-doctrine.md`](./.claude/rules/neo-sre-doctrine.md)
 - Leyes de código específicas Go/MCP: [`.claude/rules/neo-code-quality.md`](./.claude/rules/neo-code-quality.md)

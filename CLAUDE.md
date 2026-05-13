@@ -2,7 +2,7 @@
 
 Motor SRE de orquestación MCP. **Ouroboros V10.6** · 15 tools MCP · 3 plugins (Jira, DeepSeek, GitHub) · Local LLM via Ollama. Pure-Go build (native) / CGO en Docker stage 3 (tree-sitter).
 
-> Snapshot completo pre-refactor: [`docs/general/claude-md-archive-2026-05-13.md`](./docs/general/claude-md-archive-2026-05-13.md). Contrato base reutilizable: [`CLAUDE-global.md`](./CLAUDE-global.md) + [`docs/general/neo-global.md`](./docs/general/neo-global.md).
+> Snapshot completo pre-refactor: [`docs/general/claude-md-archive-2026-05-13.md`](./docs/general/claude-md-archive-2026-05-13.md). Contrato base reutilizable (plantilla portable a otros proyectos): [`docs/general/neo-global.md`](./docs/general/neo-global.md).
 
 ## Build / Audit
 
