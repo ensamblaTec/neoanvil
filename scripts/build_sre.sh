@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/bin"
 
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║  NEO-GO SRE BUILD — Ouroboros V6.3 (PILAR XII)      ║"
+echo "║  NEOANVIL SRE BUILD — Ouroboros V10.6 (PILAR XII)   ║"
 echo "╚══════════════════════════════════════════════════════╝"
 
 # ── Kill stale processes ──────────────────────────────────

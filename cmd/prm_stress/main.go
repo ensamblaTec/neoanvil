@@ -61,7 +61,7 @@ func main() {
 	memStart := getMem()
 
 	log.Println("=========================================================================")
-	log.Println("1. NEO-GO V1 (Base AST Parsing - Solo Lectura)")
+	log.Println("1. NEOANVIL V1 (Base AST Parsing - Solo Lectura)")
 	log.Println("=========================================================================")
 	t1 := time.Now()
 	fset1 := token.NewFileSet()
@@ -79,7 +79,7 @@ func main() {
 	memStart = getMem()
 
 	log.Println("=========================================================================")
-	log.Println("2. NEO-GO V2 (Micro-PRM + Complexity + SSRF Shield S5 + AST Deep Scan)")
+	log.Println("2. NEOANVIL V2 (Micro-PRM + Complexity + SSRF Shield S5 + AST Deep Scan)")
 	log.Println("=========================================================================")
 	t2 := time.Now()
 

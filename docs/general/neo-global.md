@@ -1,4 +1,4 @@
-# NEO-GO GLOBAL RULES (Universal Base)
+# NEOANVIL GLOBAL RULES (Universal Base)
 
 Reglas universales aplicables a cualquier proyecto orquestado por NeoAnvil.
 Este fichero es una plantilla estable — NO depende del código interno del motor.

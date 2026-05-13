@@ -2,7 +2,7 @@
 // PILAR LXIX / Épica 365.A.
 //
 // Problem: the Go GC defaults (GOGC=100, no heap cap) are balanced for
-// general workloads. Neo-go has distinct phases with different characteristics:
+// general workloads. NeoAnvil has distinct phases with different characteristics:
 //
 //   - Idle:           steady-state — balanced default is fine.
 //   - Certify:        AST + Bouncer + tests burst → prefer less GC pauses,

@@ -20,7 +20,7 @@ Completado:
 ```
 
 **Resultado final:** RTX 3090 activa. Ollama usa backend cuda_v13 (CUDA 13.0).
-PyTorch GPU: True. Neo-go embed (11435) también en GPU.
+PyTorch GPU: True. NeoAnvil embed (11435) también en GPU.
 
 ---
 
@@ -204,7 +204,7 @@ curl -s http://127.0.0.1:11435/api/ps | python3 -m json.tool | grep -E "model|si
 # OK: size_vram > 0 (modelo cargado en VRAM)
 ```
 
-### 7. Neo-go — arrancar Nexus y verificar embeddings con GPU
+### 7. NeoAnvil — arrancar Nexus y verificar embeddings con GPU
 ```bash
 cd /home/ensamblatec/go/src/github.com/ensamblatec/neoanvil
 make rebuild-restart
@@ -225,7 +225,7 @@ curl -s http://127.0.0.1:9000/status | python3 -m json.tool | grep -E "status|up
 | PyTorch 2.6.0+cu124 | Mejora esperada | Ninguna |
 | DKMS kernel module | Auto-rebuild | Automático en boot |
 | Ollama 0.17.7 | Fix principal | Ninguna — auto-detecta GPU |
-| Neo-go / Nexus | Embeddings más rápidos | `make rebuild-restart` |
+| NeoAnvil / Nexus | Embeddings más rápidos | `make rebuild-restart` |
 
 ---
 
@@ -237,8 +237,8 @@ curl -s http://127.0.0.1:9000/status | python3 -m json.tool | grep -E "status|up
 | Ollama override | — | — | /etc/systemd/system/ollama.service.d/override.conf |
 | Ollama embed (Nexus) | 11435 | ensamblatec | ~/.neo/nexus.yaml → services.ollama_embed |
 | Docker nvidia runtime | — | root | /etc/docker/daemon.json |
-| Neo-go Nexus | 9000 | ensamblatec | ~/.neo/nexus.yaml |
-| Neo-go workspace | 9142 | ensamblatec | neo.yaml (port determinístico) |
+| NeoAnvil Nexus | 9000 | ensamblatec | ~/.neo/nexus.yaml |
+| NeoAnvil workspace | 9142 | ensamblatec | neo.yaml (port determinístico) |
 
 ---
 
@@ -305,5 +305,5 @@ Ollama inference:     library=cuda, total=24.0 GiB VRAM
 Benchmark TPS:        >40 TPS (vs 4.9 TPS CPU anterior) — mejora ~10x
 PyTorch:              GPU: True | NVIDIA GeForce RTX 3090
 Docker:               RTX 3090 accesible dentro de containers
-Neo-go embeddings:    Más rápidos (Ollama embed en GPU en puerto 11435)
+NeoAnvil embeddings:    Más rápidos (Ollama embed en GPU en puerto 11435)
 ```
