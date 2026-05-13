@@ -468,7 +468,12 @@ func defaultNeoConfig() *NeoConfig {
 			AllowedExtensions: []string{".go", ".ts", ".js", ".py", ".md", ".rs", ".html", ".css", ".yaml"},
 			MaxFileSizeMB:     5,
 			Modules:           map[string]string{"web": "npm run build"}, // [SRE-26.1.2]
-			Scope:             "fullstack",                                // [358.A] default — load everything; see ADR-015
+			// [358.A] Scope is intentionally NOT defaulted here — backfill in
+			// applyWorkspaceDefaults handles it. Setting default in struct literal
+			// would prevent backfill from triggering needsSave=true, so the
+			// write-back to neo.yaml would never fire and the field would never
+			// be persisted to disk for operators to see. See ADR-015 + bug audit
+			// 2026-05-13 post-rebuild validation.
 		},
 		AI: AIConfig{
 			Provider:            "ollama",

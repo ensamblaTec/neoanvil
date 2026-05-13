@@ -1,6 +1,7 @@
 ---
 name: jira-workflow
 description: Doctrina Scrum/Kanban para issues Jira creados desde el plugin neoanvil. Task-mode skill — invoke with `/jira-workflow` when creating issues (Epic, Story, Bug), transitioning ticket status, attaching documentation artifacts, or operating the project board. Covers naming conventions, transition order, story points scale, and the Epic ↔ Story hierarchy invariants.
+disable-model-invocation: true
 ---
 
 # Jira Workflow — Doctrina Scrum/Kanban para neoanvil ↔ Atlassian

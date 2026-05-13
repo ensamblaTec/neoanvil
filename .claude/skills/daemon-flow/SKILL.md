@@ -1,6 +1,7 @@
 ---
 name: daemon-flow
 description: Operator UI for the iterative MCP-driven daemon (PILAR XXVII). Surfaces pending tasks, active task, top-5 trust patterns, and the next daemon suggestion in a compact conversational format. Use when running the daemon manually or auditing what the iterative loop sees. Task-mode skill (invoke with `/daemon-flow`).
+disable-model-invocation: true
 ---
 
 # Daemon Flow — Operator Conversational UI

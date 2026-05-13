@@ -1,6 +1,7 @@
 ---
 name: brain-doctor
 description: Diagnose Brain Portable health for the active workspace — canonical_id resolution, push status, conflict potential, archive size estimate. Use before first push from a new machine, after large `.neo/db` cleanup, or when `neo brain pull` reports a path mismatch. Task-mode skill (invoke with `/brain-doctor`).
+disable-model-invocation: true
 ---
 
 # /brain-doctor

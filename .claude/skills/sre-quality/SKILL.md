@@ -1,6 +1,7 @@
 ---
 name: sre-quality
 description: Leyes de calidad de código para neoanvil — Zero-Allocation, Aislamiento MCP, Safe HTTP, certify TTL, AST audit policy, gosec annotations, deadcode triage, MCP Tool Schema requirements. Task-mode skill — invoke with `/sre-quality` when writing/reviewing Go code, debugging hot-path performance, or hitting SRE veto.
+disable-model-invocation: true
 ---
 
 # Leyes de Calidad SRE

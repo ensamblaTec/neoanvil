@@ -104,6 +104,7 @@ server:
     nexus_dispatcher_port: 9000
     tool_timeout_seconds: 120
 workspace:
+    scope: fullstack
     ignore_dirs:
         - node_modules
         - vendor
