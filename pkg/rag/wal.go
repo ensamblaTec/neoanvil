@@ -773,9 +773,39 @@ func (wal *WAL) SyncDirectivesToDisk(workspace string) error {
 	return os.WriteFile(syncPath, []byte(sb.String()), 0644)
 }
 
+// normalizeDirective strips soft-delete markers for comparison purposes.
+// WAL stores "~~OBSOLETO~~ text"; .md renders "~~text~~". Both normalize to "text".
+// Extracted as a package-level helper so LoadDirectivesFromDisk and the
+// destructive-sync pre-pass can share the same canonicalization.
+func normalizeDirective(s string) string {
+	s = strings.TrimPrefix(s, "~~OBSOLETO~~ ")
+	s = strings.TrimPrefix(s, "~~")
+	s = strings.TrimSuffix(s, "~~")
+	return strings.TrimSpace(s)
+}
+
 // [SRE-23.1.2] Load directives from .claude/rules/ into BoltDB at startup.
 // [SRE-79-FIX] Dedup normalizes both WAL format (~~OBSOLETO~~ prefix) and .md format
 // (~~...~~ wrapping) so soft-deleted entries are never re-imported as new entries.
+// [LARGE-PROJECT/DUAL-LAYER-SYNC FIX 2026-05-13, org-debt c9a9 P1]
+// Destructive sync: disk is the authoritative source. BoltDB entries whose
+// normalized text is NOT present in the disk file get marked ~~OBSOLETO~~
+// (existing soft-delete semantics — recoverable via git revert of disk file
+// or manual SaveDirective). This breaks the chronic inflation loop where
+// BoltDB accumulated entries forever via boot replay union with disk.
+//
+// Safety guard: if disk has < syncDestructiveMinDisk active entries while
+// BoltDB has > syncDestructiveBoltDBThreshold, skip the destructive sweep
+// and log a warning (likely indicates a truncated / corrupted disk file).
+//
+// The additive UPSERT step (disk-only directives → BoltDB) remains so the
+// operator can still hand-add entries to the disk file and have them picked
+// up at next boot.
+const (
+	syncDestructiveMinDisk         = 5
+	syncDestructiveBoltDBThreshold = 50
+)
+
 func (wal *WAL) LoadDirectivesFromDisk(workspace string) error {
 	syncPath := filepath.Join(workspace, ".claude", "rules", "neo-synced-directives.md")
 	data, err := os.ReadFile(syncPath)
@@ -783,42 +813,86 @@ func (wal *WAL) LoadDirectivesFromDisk(workspace string) error {
 		return nil // File doesn't exist yet, not an error
 	}
 
-	// normalizeDirective strips soft-delete markers for comparison purposes.
-	// WAL stores "~~OBSOLETO~~ text"; .md renders "~~text~~". Both normalize to "text".
-	normalizeDirective := func(s string) string {
-		s = strings.TrimPrefix(s, "~~OBSOLETO~~ ")
-		s = strings.TrimPrefix(s, "~~")
-		s = strings.TrimSuffix(s, "~~")
-		return strings.TrimSpace(s)
-	}
+	// Build diskSet (normalized form) from the disk file.
+	diskSet := parseDirectivesFromMarkdown(data)
 
-	// Build existingSet keyed by normalized content.
+	// Snapshot BoltDB (1-based ordinal IDs match disk numbering).
 	existing, _ := wal.GetDirectives()
-	existingSet := make(map[string]struct{}, len(existing))
-	for _, r := range existing {
-		existingSet[normalizeDirective(r)] = struct{}{}
-	}
 
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		// Parse numbered lines: "N. [RULE] ..." or "N. ~~[RULE]~~"
-		if len(line) > 3 && line[0] >= '0' && line[0] <= '9' {
-			idx := strings.Index(line, ". ")
-			if idx > 0 && idx < 5 {
-				rule := line[idx+2:]
-				// Skip soft-deleted entries from disk — they are already in BoltDB.
-				if strings.HasPrefix(rule, "~~") {
-					continue
-				}
-				normalized := normalizeDirective(rule)
-				if _, dupe := existingSet[normalized]; !dupe && normalized != "" {
-					_ = wal.SaveDirective(rule)
-					existingSet[normalized] = struct{}{}
+	// Corruption guard: don't mass-deprecate if disk looks truncated.
+	activeOnDisk := len(diskSet)
+	activeInBoltDB := 0
+	for _, r := range existing {
+		if !strings.HasPrefix(r, "~~OBSOLETO~~") {
+			activeInBoltDB++
+		}
+	}
+	if activeOnDisk < syncDestructiveMinDisk && activeInBoltDB > syncDestructiveBoltDBThreshold {
+		log.Printf("[DIRECTIVES-SYNC] corruption guard: disk=%d active < %d and BoltDB=%d > %d — skipping destructive sweep, falling back to additive only",
+			activeOnDisk, syncDestructiveMinDisk, activeInBoltDB, syncDestructiveBoltDBThreshold)
+	} else {
+		// Destructive sweep: deprecate BoltDB entries whose normalized text is not on disk.
+		obsoleted := 0
+		for i, r := range existing {
+			if strings.HasPrefix(r, "~~OBSOLETO~~") {
+				continue // already obsoleted, idempotent
+			}
+			norm := normalizeDirective(r)
+			if norm == "" {
+				continue
+			}
+			if _, inDisk := diskSet[norm]; !inDisk {
+				if err := wal.DeprecateDirective(i+1, 0); err == nil {
+					obsoleted++
 				}
 			}
 		}
+		if obsoleted > 0 {
+			log.Printf("[DIRECTIVES-SYNC] deprecated %d BoltDB entries not present on disk (disk=%d active, was BoltDB=%d active)",
+				obsoleted, activeOnDisk, activeInBoltDB)
+		}
+	}
+
+	// Additive UPSERT: refresh existingSet after potential deprecations.
+	existing2, _ := wal.GetDirectives()
+	existingSet := make(map[string]struct{}, len(existing2))
+	for _, r := range existing2 {
+		existingSet[normalizeDirective(r)] = struct{}{}
+	}
+	for normalized, line := range diskSet {
+		if _, dupe := existingSet[normalized]; !dupe && normalized != "" {
+			_ = wal.SaveDirective(line)
+			existingSet[normalized] = struct{}{}
+		}
 	}
 	return nil
+}
+
+// parseDirectivesFromMarkdown extracts active (non-soft-deleted) directives
+// from the on-disk neo-synced-directives.md file. Returns map[normalized]rawLine.
+// Soft-deleted entries (~~...~~ wrapping) are skipped — they should remain
+// soft-deleted in BoltDB too and the destructive sweep will handle them.
+func parseDirectivesFromMarkdown(data []byte) map[string]string {
+	out := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		if len(line) <= 3 || line[0] < '0' || line[0] > '9' {
+			continue
+		}
+		idx := strings.Index(line, ". ")
+		if idx <= 0 || idx >= 5 {
+			continue
+		}
+		rule := line[idx+2:]
+		if strings.HasPrefix(rule, "~~") {
+			continue // soft-deleted on disk
+		}
+		norm := normalizeDirective(rule)
+		if norm == "" {
+			continue
+		}
+		out[norm] = rule
+	}
+	return out
 }
 
 func (wal *WAL) GetDirectives() ([]string, error) {
