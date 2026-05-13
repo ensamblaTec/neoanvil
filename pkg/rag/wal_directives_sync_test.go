@@ -400,6 +400,135 @@ func TestSnapshotDirectives_CreatesParentDir(t *testing.T) {
 	}
 }
 
+// TestRestoreDirectivesFromSnapshot_FillsGaps verifies the restore loop:
+// take a snapshot, soft-delete entries, compact them out, then restore from
+// the snapshot — missing entries should be re-added (active count restored).
+func TestRestoreDirectivesFromSnapshot_FillsGaps(t *testing.T) {
+	ws := t.TempDir()
+	wal := openTestWAL(t, ws)
+
+	// Seed 4 entries.
+	for i := 1; i <= 4; i++ {
+		if err := wal.SaveDirective("[TEST] restore rule " + formatI(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := countActiveDirectives(t, wal)
+
+	// Take snapshot (state = before).
+	snapshotPath := filepath.Join(ws, ".neo", "db", "directives_snapshot.json")
+	if err := wal.SnapshotDirectives(snapshotPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate accidental loss: deprecate 2 + compact (hard-purge).
+	all, _ := wal.GetDirectives()
+	deprecated := 0
+	for i, r := range all {
+		if strings.HasPrefix(r, "[TEST] restore rule") && deprecated < 2 {
+			if err := wal.DeprecateDirective(i+1, 0); err == nil {
+				deprecated++
+			}
+		}
+	}
+	if _, _, err := wal.CompactDirectives(); err != nil {
+		t.Fatal(err)
+	}
+	afterLoss := countActiveDirectives(t, wal)
+	if afterLoss >= before {
+		t.Fatalf("setup: expected loss after deprecate+compact, before=%d after=%d", before, afterLoss)
+	}
+
+	// Restore from snapshot.
+	added, err := wal.RestoreDirectivesFromSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatalf("RestoreDirectivesFromSnapshot failed: %v", err)
+	}
+	if added < 1 {
+		t.Errorf("expected ≥1 entry restored, got %d", added)
+	}
+
+	final := countActiveDirectives(t, wal)
+	if final < before {
+		t.Errorf("post-restore: expected active count ≥ pre-loss %d, got %d (added=%d)", before, final, added)
+	}
+}
+
+// TestRestoreDirectivesFromSnapshot_Idempotent verifies a second restore call
+// adds zero entries (all already present).
+func TestRestoreDirectivesFromSnapshot_Idempotent(t *testing.T) {
+	ws := t.TempDir()
+	wal := openTestWAL(t, ws)
+
+	if err := wal.SaveDirective("[TEST] idem rule 1"); err != nil {
+		t.Fatal(err)
+	}
+	snapshotPath := filepath.Join(ws, ".neo", "db", "directives_snapshot.json")
+	if err := wal.SnapshotDirectives(snapshotPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// First restore — should add 0 since everything in snapshot is already present.
+	added1, err := wal.RestoreDirectivesFromSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added1 != 0 {
+		t.Errorf("first restore: expected 0 added (no gap), got %d", added1)
+	}
+
+	// Second restore — same result.
+	added2, err := wal.RestoreDirectivesFromSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added2 != 0 {
+		t.Errorf("second restore: expected 0 added (idempotent), got %d", added2)
+	}
+}
+
+// TestRestoreDirectivesFromSnapshot_SkipsObsoleted verifies that ~~OBSOLETO~~
+// entries in the snapshot are NOT re-activated by restore.
+func TestRestoreDirectivesFromSnapshot_SkipsObsoleted(t *testing.T) {
+	ws := t.TempDir()
+	wal := openTestWAL(t, ws)
+
+	if err := wal.SaveDirective("[TEST] obsoleto rule"); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-seed: deprecate the entry so the snapshot captures the obsoleto marker.
+	all, _ := wal.GetDirectives()
+	for i, r := range all {
+		if strings.Contains(r, "[TEST] obsoleto rule") {
+			if err := wal.DeprecateDirective(i+1, 0); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	snapshotPath := filepath.Join(ws, ".neo", "db", "directives_snapshot.json")
+	if err := wal.SnapshotDirectives(snapshotPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hard-purge the deprecated entry.
+	if _, _, err := wal.CompactDirectives(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restore — should NOT re-introduce the obsoleted entry.
+	added, err := wal.RestoreDirectivesFromSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	postAll, _ := wal.GetDirectives()
+	for _, r := range postAll {
+		if strings.Contains(r, "[TEST] obsoleto rule") {
+			t.Errorf("restore should NOT re-introduce obsoleto entries; found %q after restore (added=%d)", r, added)
+		}
+	}
+}
+
 // TestRelativeLossPct verifies the math helper handles edge cases cleanly.
 func TestRelativeLossPct(t *testing.T) {
 	cases := []struct {

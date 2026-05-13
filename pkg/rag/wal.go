@@ -992,6 +992,52 @@ func (wal *WAL) SnapshotDirectives(snapshotPath string) error {
 	return os.WriteFile(snapshotPath, data, 0600)
 }
 
+// RestoreDirectivesFromSnapshot reads a JSON snapshot (produced by
+// SnapshotDirectives) and adds entries to BoltDB that are NOT already
+// present (by normalized text). Returns the count of entries added.
+//
+// Conservative semantics: does NOT delete or modify existing BoltDB
+// entries; does NOT re-activate ~~OBSOLETO~~ entries from the snapshot
+// (operator can update those explicitly if intended). Only fills gaps
+// — closes the snapshot loop so the file produced by SnapshotDirectives
+// is usable, not write-only.
+func (wal *WAL) RestoreDirectivesFromSnapshot(snapshotPath string) (int, error) {
+	data, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		return 0, fmt.Errorf("RestoreDirectivesFromSnapshot: read: %w", err)
+	}
+	var payload struct {
+		Directives []string `json:"directives"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return 0, fmt.Errorf("RestoreDirectivesFromSnapshot: parse: %w", err)
+	}
+	existing, _ := wal.GetDirectives()
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, r := range existing {
+		existingSet[normalizeDirective(r)] = struct{}{}
+	}
+	added := 0
+	for _, line := range payload.Directives {
+		if strings.HasPrefix(line, "~~OBSOLETO~~") {
+			continue
+		}
+		norm := normalizeDirective(line)
+		if norm == "" {
+			continue
+		}
+		if _, exists := existingSet[norm]; exists {
+			continue
+		}
+		if err := wal.SaveDirective(line); err != nil {
+			return added, fmt.Errorf("RestoreDirectivesFromSnapshot: save: %w", err)
+		}
+		existingSet[norm] = struct{}{}
+		added++
+	}
+	return added, nil
+}
+
 // CompactDirectives hard-purges all ~~OBSOLETO~~ entries and deduplicates
 // the active set. Tag-based dedup keeps the LAST (most recent) entry when
 // multiple entries share the same leading [TAG]. Returns (removed, kept).

@@ -162,9 +162,29 @@ func (ldt *LearnDirectiveTool) Execute(ctx context.Context, args map[string]any)
 		return ldt.handleDeleteDirective(args)
 	case "compact":
 		return ldt.handleCompactDirectives()
+	case "restore":
+		return ldt.handleRestoreSnapshot(args)
 	default:
-		return nil, fmt.Errorf("unknown action '%s': use add, update, delete, or compact", action)
+		return nil, fmt.Errorf("unknown action '%s': use add, update, delete, compact, or restore", action)
 	}
+}
+
+// handleRestoreSnapshot reads a directives snapshot (produced by a prior
+// compact's pre-destructive backup) and re-adds missing entries to BoltDB.
+// Conservative: only fills gaps, never deletes or re-activates OBSOLETO.
+// Optional arg `snapshot_path` overrides the default
+// `.neo/db/directives_snapshot.json` location.
+func (ldt *LearnDirectiveTool) handleRestoreSnapshot(args map[string]any) (any, error) {
+	snapshotPath, _ := args["snapshot_path"].(string)
+	if snapshotPath == "" {
+		snapshotPath = filepath.Join(ldt.workspace, ".neo", "db", "directives_snapshot.json")
+	}
+	added, err := ldt.wal.RestoreDirectivesFromSnapshot(snapshotPath)
+	if err != nil {
+		return nil, fmt.Errorf("[neo_learn_directive] restore failed: %w", err)
+	}
+	syncErr := ldt.syncDirectives()
+	return mcpOK(fmt.Sprintf("Restored: %d directive(s) added from %s.", added, snapshotPath) + syncStatusSuffix(syncErr)), nil
 }
 
 // syncDirectives writes the BoltDB directives to .claude/rules/neo-synced-directives.md
