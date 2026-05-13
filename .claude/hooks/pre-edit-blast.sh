@@ -4,16 +4,24 @@
 # sin requerir invocación manual del agent.
 #
 # Triggered por Claude Code PreToolUse:Edit|Write|MultiEdit. Recibe JSON en stdin
-# con tool_input.file_path. Imprime BLAST_RADIUS markdown a stdout → se inyecta
-# al contexto del agent ANTES de que Edit ejecute.
+# con tool_input.file_path. Imprime JSON con `hookSpecificOutput.additionalContext`
+# (no markdown raw) — el formato oficial de Claude Code para inyectar al contexto
+# del modelo. Ver docs/adr/ADR-016 + https://code.claude.com/docs/en/hooks.
+#
+# Bug raíz descubierto 2026-05-13: imprimir markdown raw a stdout NO inyecta al
+# contexto del agent. Claude Code parsea stdout como JSON y solo inyecta el
+# string en `hookSpecificOutput.additionalContext`. Plain markdown se silencia.
 #
 # Comportamiento:
-#   - Skip silencioso si file_path no es código productivo (.go, .ts, .tsx, .js,
-#     .jsx, .py, .rs, .css) — doc edits (.md/.yaml/.json) salen exit 0 sin output.
+#   - Skip silente para doc-only edits (.md, .yaml, .json, etc) — exit 0 sin output.
 #   - TTL cache 5min en .neo/blast_cache.json — evita re-correr BLAST_RADIUS
-#     en mismo file durante una sesión de edits seguidos.
-#   - Fail-open si Nexus offline o curl falla — imprime warning, exit 0.
-#     NUNCA bloquea el Edit (exit 2 reservado para violaciones explícitas).
+#     en mismo file durante una sesión de edits seguidos. Cache hit: emite
+#     additionalContext minimal recordando el cache, NO re-llama Nexus.
+#   - Cache miss: curl POST BLAST_RADIUS, emite JSON con markdown en
+#     additionalContext, exit 0 con permissionDecision=allow.
+#   - Fail-open si Nexus offline — emite warning en additionalContext, exit 0.
+#     NUNCA bloquea (exit 2 reservado para violaciones explícitas que decidamos
+#     enforcear en una iteración futura del ADR).
 #
 # Env overrides:
 #   NEO_NEXUS_URL              base URL del dispatcher (default 127.0.0.1:9000)
@@ -22,7 +30,7 @@
 #   NEO_BLAST_HOOK_TTL_SECONDS override TTL cache (default 300)
 #   NEO_REPO_ROOT              repo path (default git rev-parse --show-toplevel)
 #
-# Spec: ADR-016.
+# Spec: ADR-016 (revision 2026-05-13: JSON output format).
 
 set -uo pipefail
 
@@ -32,6 +40,25 @@ NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
 WORKSPACE_ID="${NEO_WORKSPACE_ID:-neoanvil-9b272}"
 TTL_SECONDS="${NEO_BLAST_HOOK_TTL_SECONDS:-300}"
 REPO_ROOT="${NEO_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+
+# emit_json: wraps a context string in the Claude Code hookSpecificOutput envelope.
+# All output to stdout MUST be valid JSON (any non-JSON stdout makes Claude Code
+# ignore the hook output silently — that was the bug in v1).
+emit_json() {
+  local ctx="$1"
+  python3 -c "
+import json, sys
+ctx = sys.argv[1]
+payload = {
+  'hookSpecificOutput': {
+    'hookEventName': 'PreToolUse',
+    'permissionDecision': 'allow',
+    'additionalContext': ctx,
+  }
+}
+print(json.dumps(payload))
+" "$ctx"
+}
 
 # Read JSON from stdin — defensive parsing.
 INPUT="$(cat 2>/dev/null)"
@@ -79,15 +106,17 @@ else:
     print('MISS')
 " 2>/dev/null)
 
+BASENAME=$(basename "$FILE_PATH")
+
 if [[ "$CACHED" == HIT* ]]; then
   AGE=${CACHED#HIT }
-  echo "_[ouroboros-hook] BLAST_RADIUS cached (${AGE}s ago, TTL=${TTL_SECONDS}s) for $(basename "$FILE_PATH") — proceed with Edit._"
+  emit_json "[ouroboros-hook] BLAST_RADIUS cached (${AGE}s ago, TTL=${TTL_SECONDS}s) for \`${BASENAME}\`. Proceeding with Edit — agent should recall the prior impact assessment from this session."
   exit 0
 fi
 
 # Probe Nexus liveness — tight timeout, fail-open.
 if ! curl -fsS --max-time 2 -o /dev/null "${NEXUS_URL}/health" 2>/dev/null; then
-  echo "_[ouroboros-hook] Nexus unreachable — BLAST_RADIUS skipped for $(basename "$FILE_PATH"). Investigate manually if change is non-trivial._"
+  emit_json "[ouroboros-hook] ⚠️ Nexus unreachable — BLAST_RADIUS SKIPPED for \`${BASENAME}\`. Agent: investigate impact MANUALLY (Grep callers, check imports) if the change is non-trivial. This is a degraded session."
   exit 0
 fi
 
@@ -108,11 +137,11 @@ print(json.dumps({
     },
 }))
 ")" 2>/dev/null) || {
-  echo "_[ouroboros-hook] BLAST_RADIUS request failed for $(basename "$FILE_PATH") — fail-open, edit proceeds._"
+  emit_json "[ouroboros-hook] BLAST_RADIUS request failed for \`${BASENAME}\` (curl error). Fail-open: edit proceeds. Agent: assess impact manually."
   exit 0
 }
 
-# Extract the Markdown payload. Tolerant of envelope drift.
+# Extract the Markdown payload from the JSON-RPC envelope. Tolerant of shape drift.
 PAYLOAD=$(printf '%s' "$RESP" | python3 -c '
 import sys, json
 try:
@@ -122,7 +151,7 @@ try:
 except Exception:
     sys.exit(1)
 ' 2>/dev/null) || {
-  echo "_[ouroboros-hook] BLAST_RADIUS response malformed for $(basename "$FILE_PATH") — fail-open, edit proceeds._"
+  emit_json "[ouroboros-hook] BLAST_RADIUS response malformed for \`${BASENAME}\`. Fail-open: edit proceeds. Agent: assess impact manually."
   exit 0
 }
 
@@ -144,8 +173,13 @@ with open(cache_file, 'w') as f:
     json.dump(cache, f)
 " 2>/dev/null
 
-# Prepend a header so the agent knows this is hook-injected, not their own action.
-echo "## [ouroboros-hook] Auto-BLAST_RADIUS for \`$(basename "$FILE_PATH")\`"
-echo ""
-echo "$PAYLOAD"
+# Build the context with a header marker so the agent recognizes this as
+# hook-injected (not their own action). The full BLAST_RADIUS markdown
+# follows so the agent has the impact map BEFORE deciding the edit.
+HEADER="[ouroboros-hook] Auto-BLAST_RADIUS for \`${BASENAME}\` (TTL ${TTL_SECONDS}s). Review impact below BEFORE applying the Edit. If callers in another package would break, abort and reconsider."
+FULL_CTX="${HEADER}
+
+${PAYLOAD}"
+
+emit_json "$FULL_CTX"
 exit 0

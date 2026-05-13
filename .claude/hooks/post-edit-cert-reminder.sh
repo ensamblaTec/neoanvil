@@ -4,16 +4,11 @@
 # están sin sellar por neo_sre_certify_mutation.
 #
 # Triggered por Claude Code PostToolUse:Edit|Write|MultiEdit. Recibe JSON en
-# stdin con tool_input.file_path. Imprime un recordatorio one-line al stdout
-# → se inyecta al contexto post-edit del agent.
+# stdin con tool_input.file_path. Output: JSON con `additionalContext` para
+# inyectar el reminder al agent post-edit (el bug en v1 era stdout markdown
+# raw — Claude Code lo silencia, sólo parsea JSON con additionalContext).
 #
-# Comportamiento:
-#   - Skip silencioso si file_path no es código productivo (.go, .ts, etc).
-#   - Append a .neo/session_pending_cert.list (dedupe).
-#   - Imprime: "⏳ pending certify: <file> (TTL <minutes>min)".
-#   - Fail-silent: si /.neo/ no escribible, exit 0 sin error.
-#
-# Spec: ADR-016.
+# Spec: ADR-016 (revision 2026-05-13: JSON output format).
 
 set -uo pipefail
 
@@ -21,6 +16,19 @@ set -uo pipefail
 
 REPO_ROOT="${NEO_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 [ -z "$REPO_ROOT" ] && exit 0
+
+emit_json() {
+  local ctx="$1"
+  python3 -c "
+import json, sys
+print(json.dumps({
+  'hookSpecificOutput': {
+    'hookEventName': 'PostToolUse',
+    'additionalContext': sys.argv[1],
+  }
+}))
+" "$ctx"
+}
 
 INPUT="$(cat 2>/dev/null)"
 [ -z "$INPUT" ] && exit 0
@@ -61,5 +69,7 @@ mkdir -p "$REPO_ROOT/.neo" 2>/dev/null
   echo "$FILE_PATH"
 } > "${PENDING_FILE}.tmp" 2>/dev/null && mv "${PENDING_FILE}.tmp" "$PENDING_FILE" 2>/dev/null
 
-echo "_⏳ [ouroboros-hook] pending certify: \`$(basename "$FILE_PATH")\` (TTL ${TTL_MIN}min in $NEO_MODE mode). Llama \`neo_sre_certify_mutation\` antes del git commit._"
+BASENAME=$(basename "$FILE_PATH")
+COUNT=$(wc -l < "$PENDING_FILE" 2>/dev/null | tr -d ' ')
+emit_json "[ouroboros-hook] ⏳ Pending certify (${COUNT} total in session): \`${BASENAME}\` (TTL ${TTL_MIN}min in ${NEO_MODE} mode). Llama \`mcp__neoanvil__neo_sre_certify_mutation\` antes del próximo git commit. El pre-commit hook bloqueará el commit sin sello."
 exit 0

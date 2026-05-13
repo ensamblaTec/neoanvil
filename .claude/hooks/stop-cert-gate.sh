@@ -4,10 +4,10 @@
 # solo da visibilidad para que el operador no se vaya con edits sin sellar.
 #
 # Triggered por Claude Code Stop event (al final de la conversación).
-# Lee .neo/session_pending_cert.list vs .neo/db/certified_state.lock.
-# Imprime banner si hay diff. Limpia la lista pending al final.
+# Output: JSON con `additionalContext` para inyectar el banner al agent (NO
+# stdout markdown — Claude Code parsea JSON, raw stdout se silencia).
 #
-# Spec: ADR-016.
+# Spec: ADR-016 (revision 2026-05-13: JSON output format).
 
 set -uo pipefail
 
@@ -35,16 +35,27 @@ while IFS= read -r path; do
 done < "$PENDING_FILE"
 
 if [ ${#UNCERTIFIED[@]} -gt 0 ]; then
-  echo ""
-  echo "## ⚠️ [ouroboros-hook] Session ended with ${#UNCERTIFIED[@]} uncertified edit(s)"
-  echo ""
-  echo "Los siguientes archivos fueron editados pero no certificados:"
+  # Build the context message.
+  CTX="[ouroboros-hook] ⚠️ Session ending with ${#UNCERTIFIED[@]} uncertified edit(s):"
   for f in "${UNCERTIFIED[@]}"; do
-    echo "  - \`$(echo "$f" | sed "s|^$REPO_ROOT/||")\`"
+    rel=$(echo "$f" | sed "s|^$REPO_ROOT/||")
+    CTX="${CTX}
+  - ${rel}"
   done
-  echo ""
-  echo "El pre-commit hook **bloqueará** \`git commit\` hasta que se ejecute \`neo_sre_certify_mutation\`."
-  echo "Bypass de emergencia: \`NEO_CERTIFY_BYPASS=1 git commit\` (queda registrado como ⚠️)."
+  CTX="${CTX}
+
+El pre-commit hook bloqueará \`git commit\` hasta que se ejecute \`mcp__neoanvil__neo_sre_certify_mutation\` con la lista de archivos arriba.
+Bypass de emergencia: \`NEO_CERTIFY_BYPASS=1 git commit\` (queda registrado como ⚠️ en TECH_DEBT_MAP)."
+
+  python3 -c "
+import json, sys
+print(json.dumps({
+  'hookSpecificOutput': {
+    'hookEventName': 'Stop',
+    'additionalContext': sys.argv[1],
+  }
+}))
+" "$CTX"
 fi
 
 # Reset pending list for next session (the lock file is authoritative going forward).

@@ -98,19 +98,70 @@ Stop                                    → stop-cert-gate.sh (NUEVO)
 - **Cache file format:** JSON simple `{"/path/to/file.go": 1747095123}`. Eviction de entries > 24h al actualizar.
 - **Test manual:** cada hook acepta JSON simulado vía stdin. Ver tests en `scripts/hook_smoke_test.sh` (TODO follow-up).
 
-## Verification
+## Revision 2026-05-13 — CRITICAL bug: hook output must be JSON, not markdown
 
-Tests manuales ejecutados pre-commit:
-- `pre-edit-blast.sh` con `.md` → skip silente ✓
-- `pre-edit-blast.sh` con `cmd/neo-mcp/main.go` → BLAST_RADIUS markdown impreso ✓
-- `post-edit-cert-reminder.sh` → escribe pending list + imprime reminder ✓
-- `stop-cert-gate.sh` con 1 file pending → banner de warning ✓
+### Empirical observation
+
+Después del commit inicial 6524e0a, validación end-to-end reveló:
+- Hooks **SÍ ejecutan** en respuesta a Edit (state files .neo/blast_cache.json y .neo/session_pending_cert.list se populan correctamente).
+- **PERO** el markdown stdout NO aparece en el contexto del agent (la inyección visible no ocurre).
+
+### Root cause (via WebFetch oficial docs)
+
+Claude Code parsea el stdout del hook como JSON. Si el JSON tiene `hookSpecificOutput.additionalContext`, ese string se inyecta al contexto del modelo. **Plain markdown a stdout se silencia** — el parser falla y el hook se trata como side-effect-only.
+
+Schema oficial PreToolUse hook output:
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow" | "deny" | "ask" | "defer",
+    "permissionDecisionReason": "user-only string (NOT visible to Claude)",
+    "additionalContext": "string injected into Claude's context",
+    "updatedInput": { /* modified tool input */ }
+  }
+}
+```
+
+**Distinción crítica:**
+- `permissionDecisionReason` → visible **al usuario solamente** (permission dialog/notification)
+- `additionalContext` → visible **al modelo (Claude) solamente** (inyectado al context window)
+
+Exit code semantics:
+- `exit 0` + JSON stdout → Claude Code parsea, aplica decision + injection
+- `exit 0` sin output → no-op (proceed silently)
+- `exit 2` → BLOCKING. stderr se inyecta al modelo como error message. PreToolUse cancela el tool call.
+- Cualquier otro exit → non-blocking error, log only.
+
+### Fix aplicado
+
+Los 3 hooks reescritos para emitir JSON en lugar de markdown plain:
+
+- `pre-edit-blast.sh`: wraps el BLAST_RADIUS markdown en `hookSpecificOutput.additionalContext` con `permissionDecision: "allow"`. Doc-only edits siguen siendo skip silente (exit 0 sin output, no JSON, no-op).
+- `post-edit-cert-reminder.sh`: wraps el reminder en `hookSpecificOutput.additionalContext` con `hookEventName: "PostToolUse"`.
+- `stop-cert-gate.sh`: wraps el banner uncertified en `hookSpecificOutput.additionalContext` con `hookEventName: "Stop"`.
+
+### Lección estructural
+
+El feature request anthropics/claude-code#12623 ("Non-blocking PreToolUse hooks that inject context") aún está abierto en la community, lo que sugiere que el patrón de `additionalContext` para inyección no-bloqueante es el path canónico documentado pero todavía evolucionando. La diferencia `permissionDecisionReason` vs `additionalContext` no es obvia desde fuera — el "Claude visibility" del segundo es lo que permite enforcement real.
+
+## Verification (post-revision)
+
+Tests manuales con JSON simulado vía stdin:
+- `pre-edit-blast.sh` con `.md` → exit 0 sin output (skip silente correcto)
+- `pre-edit-blast.sh` con `cmd/neo-mcp/main.go` → JSON válido con `additionalContext` conteniendo BLAST_RADIUS scatter-gather de 3 workspaces + CPG analysis ✓
+- `post-edit-cert-reminder.sh` → JSON con `additionalContext` reminder ✓
+- `stop-cert-gate.sh` → JSON con `additionalContext` banner uncertified ✓
+
+End-to-end validation pendiente: requiere otro Edit en .go productivo post-revision para confirmar que el contexto inyectado SÍ aparece al modelo.
 
 ## Open questions / follow-ups
 
 1. **Cache invalidation:** ¿debe `neo_sre_certify_mutation` invalidar el blast_cache entry del file que certificó? Hoy depende del TTL (5min). Probablemente sí, post-MVP.
 2. **PostToolUse certify auto:** ¿debería el post-edit hook auto-disparar `neo_sre_certify_mutation` batched al final de la sesión? Riesgo: cert prematura si el operador iba a editar más. Defer.
 3. **UserPromptSubmit hook:** podría inyectar un warning si el último N de edits no se certificaron. Probablemente over-engineering — el Stop hook ya cubre el caso.
+4. **Hard enforcement vs soft inject:** si el modelo aún ignora el `additionalContext` por bias auto-mode, escalar a `permissionDecision: "deny"` cuando BLAST_RADIUS detecta `impacted_count > N`. Trade-off: friction al user (tool call falla, requiere retry). Defer hasta ver evidencia de no-compliance post-revision.
+5. **Empirical compliance test:** ¿el agent realmente cambia comportamiento al ver el contexto inyectado? Necesita medir N edits con/sin hook activo, contar cuántos llevaron a manual investigation antes del edit. Post-MVP.
 
 ## References
 
