@@ -15,7 +15,13 @@
 set -uo pipefail
 
 NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
-WORKSPACE_ID="${NEO_WORKSPACE_ID:-neoanvil-9b272}"
+# [bug-fix 2026-05-13] Auto-detect workspace from CWD instead of stale hardcoded
+# `neoanvil-9b272` (non-existent ID — real registered ID is neoanvil-35694).
+case "$PWD" in
+  *neoanvil*) DEFAULT_WS="neoanvil-35694" ;;
+  *)          DEFAULT_WS="neoanvil-35694" ;;
+esac
+WORKSPACE_ID="${NEO_WORKSPACE_ID:-$DEFAULT_WS}"
 
 # Probe Nexus liveness with a tight timeout. Soft-fail on unreachable.
 if ! curl -fsS --max-time 2 -o /dev/null "${NEXUS_URL}/health" 2>/dev/null; then

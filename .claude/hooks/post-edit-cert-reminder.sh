@@ -46,7 +46,10 @@ except Exception:
 [ -z "$FILE_PATH" ] && exit 0
 
 # Filter: only track productive code files.
-case "${FILE_PATH,,}" in
+# [bug-fix 2026-05-13] `${VAR,,}` is bash 4+ only — macOS ships 3.2 by Apple
+# legal constraint. Portable lowercase via tr.
+FILE_PATH_LC=$(printf '%s' "$FILE_PATH" | tr '[:upper:]' '[:lower:]')
+case "$FILE_PATH_LC" in
   *.go|*.ts|*.tsx|*.js|*.jsx|*.css) ;;
   *) exit 0 ;;
 esac

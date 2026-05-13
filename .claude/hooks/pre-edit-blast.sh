@@ -37,7 +37,15 @@ set -uo pipefail
 [ "${NEO_BLAST_HOOK_DISABLE:-0}" = "1" ] && exit 0
 
 NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
-WORKSPACE_ID="${NEO_WORKSPACE_ID:-neoanvil-9b272}"
+# [bug-fix 2026-05-13] Auto-detect workspace from CWD instead of stale
+# hardcoded `neoanvil-9b272` (which doesn't exist in the registry, so the
+# request silently fell back to active-workspace routing — but only when
+# the rest of the hook didn't crash on bash 3.2 first).
+case "$PWD" in
+  *neoanvil*) DEFAULT_WS="neoanvil-35694" ;;
+  *)          DEFAULT_WS="neoanvil-35694" ;;
+esac
+WORKSPACE_ID="${NEO_WORKSPACE_ID:-$DEFAULT_WS}"
 TTL_SECONDS="${NEO_BLAST_HOOK_TTL_SECONDS:-300}"
 REPO_ROOT="${NEO_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 
@@ -77,7 +85,15 @@ except Exception:
 [ -z "$FILE_PATH" ] && exit 0
 
 # Filter: only fire on productive code files. Doc/config edits skip silently.
-case "${FILE_PATH,,}" in
+# [bug-fix 2026-05-13] macOS default bash is 3.2 (Apple legal — won't ship
+# GPL-licensed bash 4+). `${VAR,,}` lowercase is bash 4.0+. Use portable tr
+# pipeline. Without this fix the script aborts at this line with
+# "bad substitution" — silently for the agent (set -uo pipefail does NOT
+# include -e here so it doesn't propagate exit code), but every Edit/Write
+# emits "[ouroboros-hook] BLAST_RADIUS request failed (curl error)" with
+# the misleading curl error because the script never reaches the curl.
+FILE_PATH_LC=$(printf '%s' "$FILE_PATH" | tr '[:upper:]' '[:lower:]')
+case "$FILE_PATH_LC" in
   *.go|*.ts|*.tsx|*.js|*.jsx|*.py|*.rs|*.css) ;;
   *) exit 0 ;;
 esac
@@ -121,22 +137,31 @@ if ! curl -fsS --max-time 2 -o /dev/null "${NEXUS_URL}/health" 2>/dev/null; then
 fi
 
 # Run BLAST_RADIUS via MCP message endpoint.
-RESP=$(curl -fsS --max-time 10 \
-  -H "Content-Type: application/json" \
-  -H "X-Neo-Workspace: ${WORKSPACE_ID}" \
-  -X POST "${NEXUS_URL}/mcp/message" \
-  -d "$(python3 -c "
-import json
+# [bug-fix 2026-05-13] Original used nested $(python3 -c "...") inside $(curl -d "...")
+# which broke under bash 3.2 quoting — multi-line python heredoc collapsed to one
+# line per invocation, producing SyntaxError on every Edit. Replaced with python
+# heredoc that builds the JSON body once into a variable, then curl reads it via
+# argument. The body itself is also small enough to inline as bash string, but the
+# heredoc path lets python handle the JSON escaping of $FILE_PATH (which may contain
+# quotes or special chars).
+JSON_BODY=$(FILE_PATH="$FILE_PATH" python3 <<'PYEOF'
+import json, os
 print(json.dumps({
     'jsonrpc': '2.0',
     'id': 1,
     'method': 'tools/call',
     'params': {
         'name': 'neo_radar',
-        'arguments': {'intent': 'BLAST_RADIUS', 'target': '$FILE_PATH'},
+        'arguments': {'intent': 'BLAST_RADIUS', 'target': os.environ.get('FILE_PATH', '')},
     },
 }))
-")" 2>/dev/null) || {
+PYEOF
+)
+RESP=$(curl -fsS --max-time 10 \
+  -H "Content-Type: application/json" \
+  -H "X-Neo-Workspace: ${WORKSPACE_ID}" \
+  -X POST "${NEXUS_URL}/mcp/message" \
+  -d "$JSON_BODY" 2>/dev/null) || {
   emit_json "[ouroboros-hook] BLAST_RADIUS request failed for \`${BASENAME}\` (curl error). Fail-open: edit proceeds. Agent: assess impact manually."
   exit 0
 }
