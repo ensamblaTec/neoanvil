@@ -562,3 +562,22 @@ inner symlink /var/folders/d1/.../alias.txt resolved to /private/var/folders/d1/
 3. Consider raising the 500-char limit OR adding a `--long-form` escape hatch that writes to `neo_memory(action:store, namespace:directives)` instead of the global_rules bucket.
 
 **Workaround now:** original text is recoverable via `git show HEAD:.claude/rules/neo-synced-directives.md` (commit fd4ec4e). Until recovery, the 7 directives are NOT being injected via SessionStart hook, so the agent loses visibility on them between turns.
+
+---
+
+## [2026-05-13] FOLLOW-UP — Writer root cause for DUAL-LAYER-SYNC drift (commit b24e4eb closed the symptom)
+
+**Status:** symptom resolved via mass re-add. Root cause not patched.
+
+**Recovered:** 7 directives re-added in b24e4eb (condensed ≤500 chars). Disk now 57/60.
+
+**Open questions for the next investigation:**
+1. **Who called CompactDirectives?** Only operator-driven path (`neo_memory(learn, action_type:compact)`) hard-purges entries. No auto-trigger exists. Search `.neo/logs/mcp.log` archive for `name=neo_memory id=... action_type=compact` events to identify the moment of loss. If no such call, there's an unknown removal path — investigate further.
+2. **Should destructive-sync corruption guard be stricter?** Current guard at pkg/rag/wal.go:830:
+   `if activeOnDisk < syncDestructiveMinDisk && activeInBoltDB > syncDestructiveBoltDBThreshold` — both conditions must hold (5 / 50). A 7-entry delta slips through. Proposal: also refuse destructive if `activeOnDisk < 0.8 × activeInBoltDB` (20% relative loss).
+3. **Should SyncDirectivesToDisk emit `.neo/db/directives_snapshot.json` backup before each write?** Cheap (BoltDB read is already done) and gives recovery option independent of git.
+4. **Should `CompactDirectives` require `confirm:true` arg?** Right now any `action_type:compact` call is destructive. A confirmation arg would prevent accidental purge.
+
+**Why not fix now:** the destructive-sync write path is in BoltDB territory and needs DS premortem + regression test, est. 2-3 commits. Scope-limited to a future session focused on directive durability hardening.
+
+**Recovery verification needed at next restart:** confirm the 7 re-added directives survive a `make rebuild-restart` cycle. If they get purged again on boot → boot path has the bug (not user action). If they survive → bug was operator-triggered compact at some point.
