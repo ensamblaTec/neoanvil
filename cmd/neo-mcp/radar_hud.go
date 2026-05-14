@@ -13,7 +13,6 @@ import (
 	"github.com/ensamblatec/neoanvil/pkg/cpg"
 	"github.com/ensamblatec/neoanvil/pkg/incidents"
 	"github.com/ensamblatec/neoanvil/pkg/kanban"
-	"github.com/ensamblatec/neoanvil/pkg/observability"
 	"github.com/ensamblatec/neoanvil/pkg/rag"
 	"github.com/ensamblatec/neoanvil/pkg/sre"
 )
@@ -95,25 +94,19 @@ func collectHUDCacheMetrics(t *RadarTool) string {
 }
 
 func collectHUDLatencyMetrics() string {
-	if observability.GlobalToolLatency == nil {
-		return ""
-	}
-	tools := observability.GlobalToolLatency.Tools()
-	if len(tools) == 0 {
+	rows := collectToolRows() // persisted Store first, in-memory ring fallback
+	if len(rows) == 0 {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("\n\nTool Latency (p50/p95/p99, last 512 calls):")
-	for _, name := range tools {
-		p50, p95, p99, n := observability.GlobalToolLatency.Percentiles(name)
-		total := observability.GlobalToolLatency.TotalCalls(name)
-		errs := observability.GlobalToolLatency.ErrorCount(name)
+	sb.WriteString("\n\nTool Latency (p50/p95/p99, persisted across restarts):")
+	for _, r := range rows {
 		fmt.Fprintf(&sb, "\n  %-34s p50=%-8s p95=%-8s p99=%-8s (n=%d total=%d errs=%d)",
-			name,
-			p50.Truncate(time.Microsecond),
-			p95.Truncate(time.Microsecond),
-			p99.Truncate(time.Microsecond),
-			n, total, errs)
+			r.Name,
+			r.P50.Truncate(time.Microsecond),
+			r.P95.Truncate(time.Microsecond),
+			r.P99.Truncate(time.Microsecond),
+			r.Window, r.Lifetime, r.Errors)
 	}
 	return sb.String()
 }

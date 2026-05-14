@@ -125,10 +125,35 @@ func collectTokenRows() []tokenRow {
 	return rows
 }
 
-// collectToolRows walks the observability tracker and builds one row per
-// registered tool. Returns an empty slice when the tracker is unwired so
-// the caller never needs to nil-guard. [Épica 228]
+// collectToolRows builds one row per registered tool. It is the single source
+// of truth for per-tool latency across neo_tool_stats, HUD_STATE and
+// neo_cache's tool_latency section.
+//
+// It PREFERS the observability Store's persisted aggregates — P50/P95/P99
+// survive neo-mcp restarts there (bucketToolAggregate), so cross-session perf
+// data is actually visible. It falls back to the in-memory ring only when the
+// Store is unwired or has no samples yet, so a fresh process still reports the
+// current session. Returns an empty slice when neither source has data.
 func collectToolRows() []toolRow {
+	if observability.GlobalStore != nil {
+		if aggs := observability.GlobalStore.ToolAggregates(); len(aggs) > 0 {
+			rows := make([]toolRow, 0, len(aggs))
+			for name, a := range aggs {
+				rows = append(rows, toolRow{
+					Name:      name,
+					P50:       time.Duration(a.P50Ns),
+					P95:       time.Duration(a.P95Ns),
+					P99:       time.Duration(a.P99Ns),
+					Window:    a.Calls,
+					Lifetime:  a.Calls,
+					Errors:    a.Errors,
+					ErrorRate: a.ErrorRate(),
+				})
+			}
+			return rows
+		}
+	}
+	// Fallback: in-memory ring (Store unwired, or no persisted samples yet).
 	if observability.GlobalToolLatency == nil {
 		return nil
 	}
@@ -136,13 +161,12 @@ func collectToolRows() []toolRow {
 	rows := make([]toolRow, 0, len(names))
 	for _, name := range names {
 		p50, p95, p99, window := observability.GlobalToolLatency.Percentiles(name)
-		lifetime := observability.GlobalToolLatency.TotalCalls(name)
-		errs := observability.GlobalToolLatency.ErrorCount(name)
-		rate := observability.GlobalToolLatency.ErrorRate(name)
 		rows = append(rows, toolRow{
 			Name: name, P50: p50, P95: p95, P99: p99,
-			Window: window, Lifetime: lifetime,
-			Errors: errs, ErrorRate: rate,
+			Window:    window,
+			Lifetime:  observability.GlobalToolLatency.TotalCalls(name),
+			Errors:    observability.GlobalToolLatency.ErrorCount(name),
+			ErrorRate: observability.GlobalToolLatency.ErrorRate(name),
 		})
 	}
 	return rows

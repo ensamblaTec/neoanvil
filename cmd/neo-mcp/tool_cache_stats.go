@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/cpg"
-	"github.com/ensamblatec/neoanvil/pkg/observability"
 	"github.com/ensamblatec/neoanvil/pkg/rag"
 	"github.com/ensamblatec/neoanvil/pkg/state"
 )
@@ -261,26 +260,21 @@ func buildPageRankCacheSection() map[string]any {
 	}
 }
 
-// buildToolLatencySection emits per-tool latency percentiles. Returns an
-// empty map when the observability singleton is unwired — still a valid
-// JSON object for dashboards. [Épica 228]
+// buildToolLatencySection emits per-tool latency percentiles. Sources from
+// collectToolRows (persisted Store first, in-memory ring fallback) so the
+// numbers survive neo-mcp restarts. Returns an empty — still valid — JSON
+// object when no source has data. [Épica 228]
 func buildToolLatencySection() map[string]any {
 	latency := map[string]any{}
-	if observability.GlobalToolLatency == nil {
-		return latency
-	}
-	for _, name := range observability.GlobalToolLatency.Tools() {
-		p50, p95, p99, n := observability.GlobalToolLatency.Percentiles(name)
-		total := observability.GlobalToolLatency.TotalCalls(name)
-		errCount := observability.GlobalToolLatency.ErrorCount(name)
-		latency[name] = map[string]any{
-			"p50_ns":         p50.Nanoseconds(),
-			"p95_ns":         p95.Nanoseconds(),
-			"p99_ns":         p99.Nanoseconds(),
-			"window_count":   n,
-			"lifetime_count": total,
-			"error_count":    errCount,
-			"error_rate":     observability.GlobalToolLatency.ErrorRate(name),
+	for _, r := range collectToolRows() {
+		latency[r.Name] = map[string]any{
+			"p50_ns":         r.P50.Nanoseconds(),
+			"p95_ns":         r.P95.Nanoseconds(),
+			"p99_ns":         r.P99.Nanoseconds(),
+			"window_count":   r.Window,
+			"lifetime_count": r.Lifetime,
+			"error_count":    r.Errors,
+			"error_rate":     r.ErrorRate,
 		}
 	}
 	return latency
