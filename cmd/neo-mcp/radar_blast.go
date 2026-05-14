@@ -719,6 +719,23 @@ func formatActivationContext(g *cpg.Graph, normEnergy, ranks map[cpg.NodeID]floa
 // Returns astBreakdown when the fallback is "ast" so the formatter can
 // surface symbol-level vs package-level scope counts independently.
 // [Sprint package-level fix]
+// impactedFromEdges returns every source node with an edge into target — the
+// reverse lookup over the forward edges map GetAllGraphEdges already produced.
+// Result is sorted so BLAST_RADIUS output stays deterministic across calls.
+func impactedFromEdges(edges map[string][]string, target string) []string {
+	var impacted []string
+	for src, targets := range edges {
+		for _, tgt := range targets {
+			if tgt == target {
+				impacted = append(impacted, src)
+				break
+			}
+		}
+	}
+	sort.Strings(impacted)
+	return impacted
+}
+
 func (t *RadarTool) resolveImpactedNodes(ctx context.Context, target string) (
 	impacted []string, fallbackUsed, graphStatus string, grepDepLines []dependentLine,
 	astBreakdown astImpactBreakdown, err error,
@@ -728,24 +745,14 @@ func (t *RadarTool) resolveImpactedNodes(ctx context.Context, target string) (
 		return nil, "", "", nil, astImpactBreakdown{}, fmt.Errorf("failed to get graph edges: %w", edgeErr)
 	}
 
-	var wg sync.WaitGroup
-	var pageRank map[string]float32
-	var err1, err2 error
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		impacted, err1 = rag.GetImpactedNodes(t.wal, target)
-	}()
-	go func() {
-		defer wg.Done()
-		pageRank, err2 = graph.CalculatePageRank(ctx, t.cpu, t.pool, edges)
-	}()
-	wg.Wait()
-	if err1 != nil {
-		return nil, "", "", nil, astImpactBreakdown{}, err1
-	}
-	if err2 != nil {
-		return nil, "", "", nil, astImpactBreakdown{}, err2
+	// [perf] Derive the impacted set from the edges map already in hand. The
+	// dedicated rag.GetImpactedNodes call was a second full BoltDB scan +
+	// JSON unmarshal of the same GRAPH_EDGES bucket on every BLAST_RADIUS;
+	// the reverse lookup is the same data. PageRank stays the heavy step.
+	impacted = impactedFromEdges(edges, target)
+	pageRank, prErr := graph.CalculatePageRank(ctx, t.cpu, t.pool, edges)
+	if prErr != nil {
+		return nil, "", "", nil, astImpactBreakdown{}, prErr
 	}
 
 	// [SRE-60.2 + sprint package-level fix] graph_status with explicit
