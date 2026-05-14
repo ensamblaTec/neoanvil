@@ -303,6 +303,23 @@ func (t *CacheStatsTool) Execute(_ context.Context, args map[string]any) (any, e
 	if t.workspace != "" {
 		out["snapshots"] = cacheSnapshotInfo(t.workspace)
 	}
+	t.addRadarCacheSections(out, includes, topN)
+	t.addGlobalCacheSections(out, includes)
+
+	buf, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"content": []map[string]any{{"type": "text", "text": string(buf)}},
+	}, nil
+}
+
+// addRadarCacheSections appends the RadarTool-owned cache sections (query /
+// text / embedding / hot-files) — each gated by `includes` and omitted when its
+// builder returns nil (the tool may run pre-RadarTool init). Extracted from
+// Execute to keep it under the CC limit.
+func (t *CacheStatsTool) addRadarCacheSections(out map[string]any, includes func(string) bool, topN int) {
 	if includes("query_cache") {
 		if s := t.buildQueryCacheSection(topN); s != nil {
 			out["query_cache"] = s
@@ -325,6 +342,12 @@ func (t *CacheStatsTool) Execute(_ context.Context, args map[string]any) (any, e
 			out["hot_files"] = s
 		}
 	}
+}
+
+// addGlobalCacheSections appends the package-global cache sections (planner /
+// search-paths / pagerank / tool-latency / knowledge-store) — always available,
+// each gated by `includes`. Extracted from Execute to keep it under the CC limit.
+func (t *CacheStatsTool) addGlobalCacheSections(out map[string]any, includes func(string) bool) {
 	// [LARGE-PROJECT/C 2026-05-13] PlannerCache observability — always available
 	// (pkg-level global). Empty stats are valid output.
 	if includes("planner_cache") {
@@ -352,12 +375,4 @@ func (t *CacheStatsTool) Execute(_ context.Context, args map[string]any) (any, e
 			"cold":  total - hot,
 		}
 	}
-
-	buf, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"content": []map[string]any{{"type": "text", "text": string(buf)}},
-	}, nil
 }

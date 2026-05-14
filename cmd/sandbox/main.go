@@ -38,18 +38,7 @@ func main() {
 	// Init Ficticio Múltiple (HAL Abstraction)
 	rapl, _ := finops.MountRAPL()
 
-	workspace, _ := os.Executable()
-	for {
-		if _, err := os.Stat(filepath.Join(workspace, "neo.yaml")); err == nil {
-			break
-		}
-		parent := filepath.Dir(workspace)
-		if parent == workspace {
-			log.Fatalf("No se encontró neo.yaml")
-		}
-		workspace = parent
-	}
-	workspace, _ = filepath.Abs(workspace)
+	workspace := findSandboxWorkspace()
 
 	cfgPath := filepath.Join(workspace, "neo.yaml")
 	cfg, err := config.LoadConfig(cfgPath)
@@ -106,22 +95,7 @@ func main() {
 	serverCertPath := resolvePath(cfg.PKI.ServerCertPath)
 	serverKeyPath := resolvePath(cfg.PKI.ServerKeyPath)
 
-	filesToVerify := []string{caPath, serverCertPath, serverKeyPath}
-	for _, f := range filesToVerify {
-		if _, err := os.Stat(f); os.IsNotExist(err) {
-			log.Fatalf("[SRE-FATAL] Material mTLS faltante: %s", f)
-		}
-	}
-	// [147.G] Enforce private-key file permissions — key must not be world/group readable.
-	if fi, err := os.Stat(serverKeyPath); err == nil {
-		if fi.Mode().Perm()&0o077 != 0 {
-			if chmodErr := os.Chmod(serverKeyPath, 0o600); chmodErr != nil {
-				log.Fatalf("[SRE-FATAL] Servidor private key %q tiene permisos inseguros (%s) y no se pudo corregir: %v",
-					serverKeyPath, fi.Mode().Perm(), chmodErr)
-			}
-			log.Printf("[SANDBOX] private key %q permissions tightened to 0600", serverKeyPath)
-		}
-	}
+	verifyMTLSMaterial(caPath, serverCertPath, serverKeyPath)
 
 	tlsConfig, err := sre.LoadMTLSConfig(caPath)
 	if err != nil {
@@ -214,4 +188,47 @@ func main() {
 		log.Fatalf("[SANDBOX-FATAL] ⚠️ [SRE-VETO] El Teardown sobrepasó el Límite Crítico (Timeout). Forzando Caída.\\n")
 	}
 
+}
+
+// findSandboxWorkspace walks up from the executable's path until it finds the
+// directory containing neo.yaml, returning its absolute path. Fatal if none is
+// found before reaching the filesystem root. Extracted from main to keep its CC
+// under the limit.
+func findSandboxWorkspace() string {
+	workspace, _ := os.Executable()
+	for {
+		if _, err := os.Stat(filepath.Join(workspace, "neo.yaml")); err == nil {
+			break
+		}
+		parent := filepath.Dir(workspace)
+		if parent == workspace {
+			log.Fatalf("No se encontró neo.yaml")
+		}
+		workspace = parent
+	}
+	abs, _ := filepath.Abs(workspace)
+	return abs
+}
+
+// verifyMTLSMaterial fatals if any of the mTLS files is missing, and tightens
+// the server private key to 0600 when its permissions are too open. [147.G]
+// Extracted from main to keep its CC under the limit.
+func verifyMTLSMaterial(caPath, serverCertPath, serverKeyPath string) {
+	for _, f := range []string{caPath, serverCertPath, serverKeyPath} {
+		if _, err := os.Stat(f); os.IsNotExist(err) {
+			log.Fatalf("[SRE-FATAL] Material mTLS faltante: %s", f)
+		}
+	}
+	fi, err := os.Stat(serverKeyPath)
+	if err != nil {
+		return
+	}
+	if fi.Mode().Perm()&0o077 == 0 {
+		return
+	}
+	if chmodErr := os.Chmod(serverKeyPath, 0o600); chmodErr != nil {
+		log.Fatalf("[SRE-FATAL] Servidor private key %q tiene permisos inseguros (%s) y no se pudo corregir: %v",
+			serverKeyPath, fi.Mode().Perm(), chmodErr)
+	}
+	log.Printf("[SANDBOX] private key %q permissions tightened to 0600", serverKeyPath)
 }

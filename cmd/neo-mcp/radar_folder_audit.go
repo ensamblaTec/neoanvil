@@ -50,63 +50,72 @@ func auditClaudeFolder(workspace string) ([]folderAuditRow, error) {
 
 	var rows []folderAuditRow
 	for _, sf := range skillFiles {
-		skillDir := filepath.Dir(sf)
-		name := filepath.Base(skillDir)
-		body, _ := os.ReadFile(sf) //nolint:gosec // G304-DIR-WALK: path from filepath.Glob within workspace
-
-		row := folderAuditRow{
-			skillName:   name,
-			exists:      true,
-			inCLAUDE:    claudeMD != nil && strings.Contains(string(claudeMD), name),
-			inInventory: inventoryMD != nil && strings.Contains(string(inventoryMD), name),
-			pathsValid:  true,
-		}
-
-		// Verify paths: globs from frontmatter — prefer YAML list, fall back to
-		// inline value. pathsValid stays true when no paths: field is present.
-		globs := collectYAMLListItems(string(body), "paths")
-		if len(globs) == 0 {
-			// Try inline value: "paths: pkg/**/*.go"
-			fm := parseFrontmatterKV(extractFrontmatter(string(body)))
-			if v, ok := fm["paths"]; ok && v != "" {
-				globs = []string{v}
-			}
-		}
-		for _, g := range globs {
-			g = strings.TrimSpace(g)
-			if g == "" {
-				continue
-			}
-			absGlob := g
-			if !filepath.IsAbs(g) {
-				absGlob = filepath.Join(workspace, g)
-			}
-			if !globMatchesAny(absGlob) {
-				row.pathsValid = false
-				break
-			}
-		}
-
-		// Verify See also: / markdown cross-refs in body.
-		for _, m := range reMarkdownLink.FindAllStringSubmatch(string(body), -1) {
-			ref := m[2]
-			if strings.HasPrefix(ref, "http") {
-				continue
-			}
-			// Resolve relative to the skill dir.
-			abs := ref
-			if !filepath.IsAbs(ref) {
-				abs = filepath.Join(skillDir, ref)
-			}
-			if _, statErr := os.Stat(abs); statErr != nil {
-				row.brokenXrefs = append(row.brokenXrefs, ref)
-			}
-		}
-
-		rows = append(rows, row)
+		rows = append(rows, auditOneSkill(workspace, sf, claudeMD, inventoryMD))
 	}
-
 	return rows, nil
+}
+
+// auditOneSkill builds the audit row for a single SKILL.md: presence in
+// CLAUDE.md / inventory, paths: glob validity, and markdown cross-ref health.
+func auditOneSkill(workspace, sf string, claudeMD, inventoryMD []byte) folderAuditRow {
+	skillDir := filepath.Dir(sf)
+	name := filepath.Base(skillDir)
+	body, _ := os.ReadFile(sf) //nolint:gosec // G304-DIR-WALK: path from filepath.Glob within workspace
+	return folderAuditRow{
+		skillName:   name,
+		exists:      true,
+		inCLAUDE:    claudeMD != nil && strings.Contains(string(claudeMD), name),
+		inInventory: inventoryMD != nil && strings.Contains(string(inventoryMD), name),
+		pathsValid:  skillPathsValid(workspace, string(body)),
+		brokenXrefs: brokenSkillXrefs(skillDir, string(body)),
+	}
+}
+
+// skillPathsValid reports whether every `paths:` glob in the skill frontmatter
+// matches ≥1 file. Returns true when there is no paths: field (prefers the YAML
+// list form, falls back to an inline "paths: pkg/**/*.go" value).
+func skillPathsValid(workspace, body string) bool {
+	globs := collectYAMLListItems(body, "paths")
+	if len(globs) == 0 {
+		fm := parseFrontmatterKV(extractFrontmatter(body))
+		if v, ok := fm["paths"]; ok && v != "" {
+			globs = []string{v}
+		}
+	}
+	for _, g := range globs {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		absGlob := g
+		if !filepath.IsAbs(g) {
+			absGlob = filepath.Join(workspace, g)
+		}
+		if !globMatchesAny(absGlob) {
+			return false
+		}
+	}
+	return true
+}
+
+// brokenSkillXrefs returns the markdown cross-ref targets in body that do not
+// resolve to a file on disk (relative to skillDir). HTTP links are skipped.
+func brokenSkillXrefs(skillDir, body string) []string {
+	var broken []string
+	for _, m := range reMarkdownLink.FindAllStringSubmatch(body, -1) {
+		ref := m[2]
+		if strings.HasPrefix(ref, "http") {
+			continue
+		}
+		abs := ref
+		if !filepath.IsAbs(ref) {
+			abs = filepath.Join(skillDir, ref)
+		}
+		if _, statErr := os.Stat(abs); statErr != nil {
+			broken = append(broken, ref)
+		}
+	}
+	return broken
 }
 
 // renderFolderAuditTable formats the audit results as a Markdown table. [128.1]
