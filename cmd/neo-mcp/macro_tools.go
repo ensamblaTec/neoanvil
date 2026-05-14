@@ -1481,6 +1481,24 @@ func (t *CertifyMutationTool) certifyOneFile(ctx context.Context, filename, comp
 		}
 	}(filename, src)
 
+	// [BLAST_RADIUS dep-graph fix 2/3] Refresh this file's file→file edges in
+	// the GRAPH_EDGES bucket so BLAST_RADIUS impact stays fresh between full
+	// re-indexes. Its own goroutine — independent of the embed path above, so a
+	// failed embed never skips the dep-graph update. ReplaceFileEdges is
+	// idempotent: a dropped import leaves no stale edge.
+	go func(fname string, source []byte) {
+		rel, relErr := filepath.Rel(t.workspace, fname)
+		if relErr != nil {
+			return
+		}
+		relSlash := filepath.ToSlash(rel)
+		edges := fileDepEdges(t.workspace, workspaceModulePath(t.workspace), relSlash,
+			extractImports(string(source), filepath.Ext(fname)))
+		if err := rag.ReplaceFileEdges(t.wal, relSlash, edges); err != nil {
+			log.Printf("[SRE-WARN] dep-graph edges for %s: %v", relSlash, err)
+		}
+	}(filename, src)
+
 	stampCertifiedFile(projectRootOf(filename), filename)
 	// [159.A] Record certified mutation in AST_HEATMAP for TECH_DEBT_MAP hotspot tracking.
 	if hmErr := telemetry.RecordMutation(filename); hmErr != nil {
