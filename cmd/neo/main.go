@@ -27,6 +27,7 @@ import (
 
 	"github.com/ensamblatec/neoanvil/pkg/auth"
 	"github.com/ensamblatec/neoanvil/pkg/config"
+	"github.com/ensamblatec/neoanvil/pkg/rag"
 	"github.com/ensamblatec/neoanvil/pkg/sre"
 )
 
@@ -661,6 +662,7 @@ func workspaceCmd() *cobra.Command {
 		workspaceListCmd(),
 		workspaceSelectCmd(),
 		workspaceMigrateCmd(),
+		workspaceCompactCmd(), // [D5] reclaim BoltDB free pages in hnsw.db
 		workspaceExportCmd(),
 		workspaceImportCmd(),
 		workspaceDBauditCmd(),
@@ -877,6 +879,55 @@ func workspaceMigrateCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would change without writing")
 	return cmd
+}
+
+// workspaceCompactCmd offline-compacts a workspace's HNSW WAL (hnsw.db) to
+// reclaim BoltDB free pages. [D5] BoltDB files only ever grow; this is the
+// manual counterpart to the boot-time auto-compaction in neo-mcp. The target
+// workspace's neo-mcp must be stopped — the exclusive bbolt lock makes a
+// running workspace an error here.
+func workspaceCompactCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "compact [workspace-id-or-name]",
+		Short: "Offline-compact a workspace's HNSW WAL (hnsw.db) — workspace must be stopped",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := loadWorkspaceRegistry()
+			if err != nil {
+				return err
+			}
+			var entry *workspaceEntry
+			if len(args) > 0 {
+				for i := range r.Workspaces {
+					if r.Workspaces[i].ID == args[0] || r.Workspaces[i].Name == args[0] {
+						entry = &r.Workspaces[i]
+						break
+					}
+				}
+				if entry == nil {
+					return fmt.Errorf("workspace %q not found in registry", args[0])
+				}
+			} else {
+				entry = activeEntry(r)
+				if entry == nil {
+					return fmt.Errorf("no active workspace — pass a workspace id/name or run `neo workspace select`")
+				}
+			}
+			dbPath := filepath.Join(entry.Path, ".neo", "db", "hnsw.db")
+			if _, statErr := os.Stat(dbPath); statErr != nil {
+				return fmt.Errorf("hnsw.db not found at %s: %w", dbPath, statErr)
+			}
+			fmt.Printf("Compacting %s — %s\n", entry.Name, dbPath)
+			oldSize, newSize, cErr := rag.CompactWAL(dbPath)
+			if cErr != nil {
+				return cErr
+			}
+			fmt.Printf("%s %s: %.1f MB → %.1f MB (reclaimed %.1f MB)\n",
+				green("✓"), entry.Name,
+				float64(oldSize)/(1<<20), float64(newSize)/(1<<20), float64(oldSize-newSize)/(1<<20))
+			return nil
+		},
+	}
 }
 
 // workspaceExportCmd packages workspace DBs + registry into a portable tar.gz. [Épica 281.A]

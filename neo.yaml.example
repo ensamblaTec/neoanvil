@@ -127,6 +127,11 @@ ai:
 rag:
   # Ruta del archivo fisico para el Grafo Vectorial HNSW
   db_path: ".neo/db/hnsw.db"
+  # [D5] Compactacion offline de hnsw.db (BoltDB) en boot cuando el fichero
+  # supera este tamano en MB. BoltDB nunca encoge solo — sin esto el WAL de un
+  # workspace longevo se infla hasta que el boot excede el timeout de Nexus.
+  # <=0 desactiva la auto-compactacion (usar `neo workspace compact` a mano).
+  wal_compact_threshold_mb: 256
   # Tamano del fragmento de texto (en bytes/caracteres)
   chunk_size: 3000
   # Superposicion de fragmentos para no perder contexto semantico

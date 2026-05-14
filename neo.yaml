@@ -165,6 +165,10 @@ rag:
     hnsw_batch_max_size: 0
     hnsw_persist_path: .neo/db/hnsw.bin
     hnsw_persist_interval_minutes: 30
+    # [D5] Boot-time offline compaction of hnsw.db (BoltDB) triggers when the
+    # file exceeds this size in MB. BoltDB never shrinks on its own. <=0 disables
+    # auto-compaction (use `neo workspace compact` manually). Default 256.
+    wal_compact_threshold_mb: 256
 cognitive:
     strictness: 0.75
     arena_size: 100000

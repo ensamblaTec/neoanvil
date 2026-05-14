@@ -156,6 +156,12 @@ type RAGConfig struct {
 	// for 3.3 GB). Stale guard via (WAL file size, bbolt Tx.ID) in header.
 	HNSWPersistPath            string `yaml:"hnsw_persist_path"`            // default ".neo/db/hnsw.bin"; relative paths joined with workspace
 	HNSWPersistIntervalMinutes int    `yaml:"hnsw_persist_interval_minutes"` // default 30; 0 = disable periodic save (only SIGTERM hook saves)
+	// [D5] WALCompactThresholdMB — boot-time offline compaction of hnsw.db
+	// (BoltDB) kicks in when the file exceeds this many MB. BoltDB never
+	// shrinks on its own; without this a long-lived workspace's WAL bloats
+	// until boot exceeds the Nexus startup timeout. Default 256. A value
+	// <= 0 disables auto-compaction (use `neo workspace compact` manually).
+	WALCompactThresholdMB int `yaml:"wal_compact_threshold_mb"`
 }
 
 type CognitiveConfig struct {
@@ -502,6 +508,7 @@ func defaultNeoConfig() *NeoConfig {
 			// [ÉPICA 149] HNSW fast-boot snapshot defaults — see comment at field decl.
 			HNSWPersistPath:            ".neo/db/hnsw.bin",
 			HNSWPersistIntervalMinutes: 30,
+			WALCompactThresholdMB:      256,
 		},
 		Cognitive: CognitiveConfig{
 			Strictness:  0.75,
@@ -802,6 +809,12 @@ func applyRAGDefaults(cfg *NeoConfig, ns *bool) {
 	// the 30-minute default via defaultNeoConfig() + write-back.
 	if cfg.RAG.HNSWPersistPath == "" {
 		cfg.RAG.HNSWPersistPath = ".neo/db/hnsw.bin"
+		*ns = true
+	}
+	// [D5] WAL compaction threshold backfill. 0 (unset) → 256 MB default.
+	// A negative value set in neo.yaml survives backfill and disables it.
+	if cfg.RAG.WALCompactThresholdMB == 0 {
+		cfg.RAG.WALCompactThresholdMB = 256
 		*ns = true
 	}
 }

@@ -42,6 +42,23 @@ func bootRAG(ctx context.Context, cfg *config.NeoConfig, workspace string) (wal 
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		log.Fatalf("[SRE-FATAL] failed to create db directory: %v", err)
 	}
+	// [D5] Auto-compact a bloated WAL before opening it. BoltDB files only
+	// grow; without this a long-lived workspace's hnsw.db balloons (strategos
+	// hit 5.3 GB) until boot exceeds the Nexus startup timeout. Runs only when
+	// the file exceeds cfg.RAG.WALCompactThresholdMB — healthy workspaces no-op.
+	if compacted, oldSz, newSz, cErr := rag.CompactWALIfOversized(walFile, cfg.RAG.WALCompactThresholdMB); cErr != nil {
+		log.Printf("[D5-COMPACT] skipped for %s: %v", walFile, cErr)
+	} else if compacted {
+		log.Printf("[D5-COMPACT] %s: %.0f MB → %.0f MB (reclaimed %.0f MB)",
+			walFile, float64(oldSz)/(1<<20), float64(newSz)/(1<<20), float64(oldSz-newSz)/(1<<20))
+		// The hnsw.bin fast-boot snapshot's (WAL file size) stale-guard no
+		// longer matches the compacted WAL — drop it so boot does a clean cold
+		// rebuild from the now-small WAL instead of a confusing "stale" reject.
+		snap := filepath.Join(workspace, cfg.RAG.HNSWPersistPath)
+		if rmErr := os.Remove(snap); rmErr != nil && !os.IsNotExist(rmErr) {
+			log.Printf("[D5-COMPACT] could not drop stale snapshot %s: %v", snap, rmErr)
+		}
+	}
 	var err error
 	wal, err = rag.OpenWAL(walFile)
 	if err != nil {
