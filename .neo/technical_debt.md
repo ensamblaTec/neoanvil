@@ -8,7 +8,7 @@
 
 ## Active deferred items
 
-### [scaffold-broken] `neo_forge_tool` — non-functional since initial commit (2026-05-10)
+### ~~[scaffold-broken] `neo_forge_tool` — non-functional since initial commit (2026-05-10)~~ — RESOLVED 2026-05-12 (commit 5884ea6, Option A: deleted)
 
 E2E audit (test `cmd/neo-mcp/forge_e2e_test.go::TestForgeTool_E2E_PipelineState`)
 demonstrated TWO independent failure modes:
@@ -46,7 +46,7 @@ the operator-facing contract is fictional.
 Recommended: A. The test stays as the audit record; if option B
 ever lands, the test becomes the regression gate.
 
-### [deadcode-candidate] `cmd/neo evolve` — Darwin Engine never iterated
+### ~~[deadcode-candidate] `cmd/neo evolve` — Darwin Engine never iterated~~ — RESOLVED 2026-05-12 (commit 5884ea6, deleted)
 
 `cmd/neo/evolve.go` (Darwin Engine — genetic evolution of Go
 functions, SRE-93). Single commit since initial: `fd99a39`.
@@ -58,7 +58,7 @@ mutations") never materialised in workflow.
 **Triage:** confirm with operator, then `git rm cmd/neo/evolve.go`
 + remove `evolveCmd` from `cmd/neo/main.go`'s rootCmd assembly.
 
-### [deadcode-candidate] `cmd/neo ask` / `chat` — Voice of Leviathan unused
+### ~~[deadcode-candidate] `cmd/neo ask` / `chat` — Voice of Leviathan unused~~ — RESOLVED 2026-05-12 (commit 5884ea6, deleted)
 
 `cmd/neo/ask.go` (Natural-language CLI via Ollama, SRE-95.B).
 Same status as evolve: single commit `fd99a39`, zero references
@@ -628,6 +628,20 @@ Writer root-cause investigation remains in the FOLLOW-UP entry below (monitoring
 ## ~~[2026-05-13 15:59] AST COMPLEXITY in wal.go:809~~ — RESOLVED 2026-05-13 (commit eca89dc)
 
 Auto-tracker logged this finding at 15:59. Resolved 16:05 via refactor in `eca89dc fix(rag): relative-loss guard for destructive sync` — `LoadDirectivesFromDisk` was extracted into 5 helpers (`countActiveDirectivesIn`, `relativeLossPct`, `shouldSkipDestructiveSweep`, `runDestructiveSweep`, `runAdditiveUpsertFromDisk`) and dropped from CC=16 → CC=5. Post-restart AST_AUDIT confirms clean.
+
+---
+
+## [2026-05-14 08:29] HNSW WAL (hnsw.db) sin compactación BoltDB — crecimiento ilimitado bloquea boot de workspaces
+
+**Prioridad:** P1
+
+SÍNTOMA: strategos-32492 y strategosia-frontend-82899 no arrancan via Nexus — child_boot_timeout 30s, orphan killed, status=stopped permanente (restarts:0 porque nunca alcanzan 'running'). El child se cuelga en main.go:511 [BOOT] long-term memory subsystem (RAG WAL).
+
+CAUSA RAÍZ: pkg/rag/wal.go usa BoltDB para hnsw.db. Los ficheros BoltDB crecen de forma monótona (high-water mark) y requieren bbolt.Compact() explícito para reclamar páginas libres. NO existe NINGUNA llamada a bbolt.Compact en todo el repo (grep -rn 'bbolt.Compact|NoFreelistSync|FreelistType' = 0 hits). OpenWAL (wal.go:64) no compacta; WAL.Close (wal.go:1179) no compacta; WAL.Vacuum (wal.go:1126) solo purga bucketDocs (ghost files) y ni siquiera eso reduce el fichero. Resultado: hnsw.db acumula churn de cada sesión (directive sync, session-state, SaveDocMeta/Scar/Weights, re-ingesta) sin reclamar jamás.
+
+EVIDENCIA: strategos .neo/db/hnsw.db = 5.3GB, hnsw.bin = 2.4GB (workspace creado 2026-04-21, ~3 semanas). strategosia-frontend .neo/db = 12GB (mismo created_at). neoanvil = 105MB hnsw.db (creado 2026-05-11, 3 días). El bloat escala con edad × churn — time bomb para todos los workspaces. Boot previo de strategos: [OOM-GUARD] Heap 8226 MB > threshold 512 MB al hacer LoadGraph del bucketVectors inflado.
+
+FIX RECOMENDADO: añadir bbolt.Compact() — opción preferida: tarea de mantenimiento idle ([SRE-HOMEOSTASIS] ya corre en idle, main.go:1643) con trigger por ratio de freelist o tamaño de fichero. bbolt.Compact escribe a fichero fresco y hace swap — requiere ~2× disco transitorio y DB quiescente. Alternativas: compactar en WAL.Close durante teardown SIGTERM, o en OpenWAL si supera umbral (lento al boot). Adicional: subir startup_timeout_seconds en nexus.yaml y hacer que el watchdog reintente boot-timeouts. Workaround inmediato: mover hnsw.db + hnsw.bin a backup → boot limpio + re-ingesta.
 
 ---
 
