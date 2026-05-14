@@ -28,9 +28,12 @@
 #   every boot (workspace_utils.go::installPreCommitHook).
 #
 # USAGE
-#   scripts/neo-onboard.sh <target-workspace-path> [--dry-run] [--force]
-#     --dry-run  print what would change, write nothing
-#     --force    re-apply even if the target already has neo hooks
+#   scripts/neo-onboard.sh <target-workspace-path> [--dry-run] [--force] [--no-skills]
+#     --dry-run    print what would change, write nothing
+#     --force      re-apply even if the target already has neo hooks
+#     --no-skills  port hooks + directive seed only — skip layer 2. Use when the
+#                  target already carries the doctrine (e.g. older .claude/rules/
+#                  files) and copying skills would just duplicate it.
 #
 # REQUIRES: jq; target is a git repo; ideally the target is already registered
 # in ~/.neo/workspaces.json (the script warns, does not fail, if not).
@@ -39,6 +42,7 @@ set -euo pipefail
 SRC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DRY_RUN=0
 FORCE=0
+NO_SKILLS=0
 TARGET=""
 
 # Skills that are NOT portable verbatim — sre-db's auto-load path globs
@@ -48,10 +52,11 @@ SKILL_EXCLUDE="sre-db"
 
 for arg in "$@"; do
 	case "$arg" in
-		--dry-run) DRY_RUN=1 ;;
-		--force)   FORCE=1 ;;
-		-*)        echo "neo-onboard: unknown flag: $arg" >&2; exit 2 ;;
-		*)         TARGET="$arg" ;;
+		--dry-run)   DRY_RUN=1 ;;
+		--force)     FORCE=1 ;;
+		--no-skills) NO_SKILLS=1 ;;
+		-*)          echo "neo-onboard: unknown flag: $arg" >&2; exit 2 ;;
+		*)           TARGET="$arg" ;;
 	esac
 done
 
@@ -179,12 +184,20 @@ note "settings: merge neo hooks block into $TGT_SETTINGS"
 if [ -n "$TGT_MCP_NAME" ] && [ "$TGT_MCP_NAME" != "neoanvil" ]; then
 	note "         (retargeting mcp__neoanvil__* matchers → mcp__${TGT_MCP_NAME}__*)"
 fi
-note "skills : ${#PORT_SKILLS[@]} → $TGT_SKILLS/  (excluded: $SKILL_EXCLUDE)"
+if [ "$NO_SKILLS" -eq 1 ]; then
+	note "skills : SKIPPED (--no-skills)"
+else
+	note "skills : ${#PORT_SKILLS[@]} → $TGT_SKILLS/  (excluded: $SKILL_EXCLUDE; pre-existing target skills are backed up, not clobbered)"
+fi
 note "directives: seed copy → $TGT_DIR_SEED  (NOT auto-active — operator curates)"
 
 if [ "$DRY_RUN" -eq 1 ]; then
 	note "--- DRY RUN — nothing written. ---"
-	note "skills that would be copied: ${PORT_SKILLS[*]}"
+	if [ "$NO_SKILLS" -eq 1 ]; then
+		note "skills: SKIPPED (--no-skills)"
+	else
+		note "skills that would be copied: ${PORT_SKILLS[*]}"
+	fi
 	note "merged settings.json would be:"
 	printf '%s\n' "$MERGED"
 	exit 0
@@ -205,12 +218,31 @@ printf '%s\n' "$MERGED" > "$TGT_SETTINGS"
 note "wrote merged settings → $TGT_SETTINGS"
 
 # --- apply: layer 2 (skills) -------------------------------------------------
-mkdir -p "$TGT_SKILLS"
-for name in "${PORT_SKILLS[@]}"; do
-	rm -rf "${TGT_SKILLS:?}/$name"
-	cp -R "$SRC_SKILLS/$name" "$TGT_SKILLS/$name"
-done
-note "copied ${#PORT_SKILLS[@]} skills → $TGT_SKILLS/  (omitted neoanvil-specific: $SKILL_EXCLUDE)"
+# Non-destructive: a pre-existing target skill that DIFFERS is moved to
+# <name>.bak.<ts> before being replaced (identical ones are left untouched) —
+# the target may carry its own customised version. --no-skills skips the layer
+# entirely, for targets that already hold the doctrine as .claude/rules/ files.
+if [ "$NO_SKILLS" -eq 1 ]; then
+	note "skills: skipped (--no-skills)"
+else
+	mkdir -p "$TGT_SKILLS"
+	skills_new=0
+	skills_replaced=0
+	for name in "${PORT_SKILLS[@]}"; do
+		dst="$TGT_SKILLS/$name"
+		if [ -e "$dst" ]; then
+			if diff -rq "$SRC_SKILLS/$name" "$dst" >/dev/null 2>&1; then
+				continue  # identical — leave it
+			fi
+			mv "$dst" "$dst.bak.$(date +%s)"
+			skills_replaced=$((skills_replaced + 1))
+		else
+			skills_new=$((skills_new + 1))
+		fi
+		cp -R "$SRC_SKILLS/$name" "$dst"
+	done
+	note "skills: $skills_new new, $skills_replaced replaced (prior version → .bak.*) → $TGT_SKILLS/"
+fi
 
 # --- apply: layer 3 (directive seed) ----------------------------------------
 # Copied to a NON-active path on purpose: many directives are neoanvil-

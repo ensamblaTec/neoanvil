@@ -83,12 +83,17 @@ What it does:
    MCP server name (read from its `.mcp.json`) — otherwise those hooks would
    never fire on the target.
 5. Injects `env.NEO_WORKSPACE_ID` so the hooks target the right workspace.
-6. Copies the curated skill set into `.claude/skills/`.
+6. Copies the curated skill set into `.claude/skills/` — **non-destructively**: a
+   pre-existing target skill that differs is moved to `<name>.bak.<ts>` before
+   being replaced; identical ones are left untouched.
 7. Seeds `.claude/neo-directives-seed.md` for the operator to curate.
 
 `--dry-run` prints the merged `settings.json` + the skill list, writes nothing.
 `--force` re-applies even when the target already carries neo hooks (idempotency
 is keyed on `briefing.sh` being present in the target settings).
+`--no-skills` ports hooks + the directive seed only — use it when the target
+already holds the doctrine as older `.claude/rules/` files, so copying skills
+would just duplicate it (this is the right mode for strategos today).
 
 What it deliberately does **not** do: install the git pre-commit hook (neo-mcp
 self-installs it); register the workspace in `~/.neo/workspaces.json` (boot the
