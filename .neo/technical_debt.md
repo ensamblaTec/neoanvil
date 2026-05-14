@@ -609,9 +609,39 @@ Writer root-cause investigation remains in the FOLLOW-UP entry below (monitoring
 
 ---
 
-## [2026-05-13] FOLLOW-UP — Writer root cause for DUAL-LAYER-SYNC drift (commit b24e4eb closed the symptom)
+## ~~[2026-05-13] FOLLOW-UP — Writer root cause for DUAL-LAYER-SYNC drift (commit b24e4eb closed the symptom)~~ — RESOLVED 2026-05-14 (writer race + crash-atomicity fixed)
 
-**Status:** ✅ ROOT CAUSE FOUND 2026-05-14 (investigation only — fix deferred per operator). Symptom previously resolved via mass re-add (b24e4eb).
+**Status:** ✅ RESOLVED 2026-05-14. Root cause found, then the writer race and
+crash-atomicity gap both fixed in `pkg/rag/wal.go`. Symptom previously resolved
+via mass re-add (b24e4eb); the root-cause fix below stops it recurring.
+
+### FIX SHIPPED — `pkg/rag/wal.go`
+
+- **Race closed:** new `WAL.directivesMu sync.Mutex` is `Lock`/`defer Unlock`-ed
+  at the top of `SyncDirectivesToDisk`, so the `GetDirectives()` snapshot read
+  and the file write are one atomic unit. A stale snapshot can no longer
+  overwrite a fresher one — the last Sync to acquire the lock always reads the
+  freshest BoltDB state, so disk converges to BoltDB. The "minimum" scope from
+  the recommendation below is provably sufficient: every mutating handler calls
+  `SyncDirectivesToDisk` *after* its `SaveDirective`, so that Sync acquires the
+  lock after the commit and always includes its own directive; the serialized
+  last writer wins with latest-or-equal state. No `tools.go` change needed.
+- **Crash-atomicity closed:** `os.WriteFile` (truncate-then-write) replaced with
+  a new `atomicWriteFile` helper — hidden sibling temp file + `Write` + `fsync`
+  + `Chmod` + `os.Rename` + parent-dir `fsync`. A crash/SIGKILL/disk-full before
+  the rename leaves `neo-synced-directives.md` fully intact. Same pattern as
+  `CompactWAL` (0374cee) and `SaveHNSWSnapshot`. Temp name `.<name>.tmp-*` is
+  hidden so a `*.md` glob never picks it up mid-write.
+- **MCP concurrency model:** the mutex is cheap insurance regardless of whether
+  tool calls are serialized within one child — the crash-atomicity gap was real
+  independent of the race.
+- **Regression test:** `wal_directives_sync_test.go::TestSyncDirectivesToDisk_ConcurrentWritesRaceFree`
+  (24 goroutines hammering Save+Sync, asserts every committed directive lands on
+  disk) + `TestAtomicWriteFile_OverwriteLeavesNoTemp`. Both pass under `-race`.
+  DS premortem attempted (v4-pro/max) but timed out — same DeepSeek API
+  instability noted in 0374cee; self-premortem covered the interleavings,
+  deadlock risk (none — single non-reentrant Lock, no nested directive calls),
+  and temp-file glob collision.
 
 **Recovered:** 7 directives re-added in b24e4eb (condensed ≤500 chars). Disk now 57/60.
 
@@ -656,7 +686,7 @@ the non-idempotent `append` in `SaveDirective` is never double-applied, and
 coalesced fns see each other's Puts within the one txn. (`db.Update` would be
 the more idiomatic choice for a shared-key RMW, but it is not a correctness bug.)
 
-### Recommended fix (deferred — needs DS premortem + regression test, ~2 commits)
+### Recommended fix (IMPLEMENTED 2026-05-14 — see "FIX SHIPPED" above)
 
 - Serialize the writer: a `WAL.directivesMu sync.Mutex` held across the
   mutate-then-sync unit (or at minimum across `GetDirectives`+`os.WriteFile`

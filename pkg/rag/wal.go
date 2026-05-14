@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.etcd.io/bbolt"
@@ -59,6 +60,13 @@ type DocMeta struct {
 
 type WAL struct {
 	db *bbolt.DB
+	// directivesMu serializes the read-snapshot-then-write-file unit in
+	// SyncDirectivesToDisk. Without it, two concurrent neo_learn_directive
+	// calls can interleave so a goroutine reads the BoltDB snapshot BEFORE a
+	// peer commits its SaveDirective, yet its file write lands AFTER the
+	// peer's — clobbering the disk file with a stale snapshot that drops the
+	// peer's directive. [D4 / technical_debt 2026-05-13 DUAL-LAYER-SYNC drift]
+	directivesMu sync.Mutex
 }
 
 func OpenWAL(dbPath string) (*WAL, error) {
@@ -752,12 +760,19 @@ func (wal *WAL) DeprecateDirective(id int, deprecatedBy int) error {
 
 // [SRE-23.1.1] Sync directives to .claude/rules/ for dual-layer persistence.
 func (wal *WAL) SyncDirectivesToDisk(workspace string) error {
+	// [D4] Serialize the read-then-write unit so a stale GetDirectives snapshot
+	// can never overwrite a fresher one. See the directivesMu field doc.
+	wal.directivesMu.Lock()
+	defer wal.directivesMu.Unlock()
+
 	rules, err := wal.GetDirectives()
 	if err != nil || len(rules) == 0 {
 		return err
 	}
 	syncPath := filepath.Join(workspace, ".claude", "rules", "neo-synced-directives.md")
-	_ = os.MkdirAll(filepath.Dir(syncPath), 0755)
+	if mkErr := os.MkdirAll(filepath.Dir(syncPath), 0755); mkErr != nil {
+		return fmt.Errorf("SyncDirectivesToDisk: mkdir: %w", mkErr)
+	}
 
 	var sb strings.Builder
 	sb.WriteString("# NeoAnvil Synced Directives (auto-generated)\n\n")
@@ -770,7 +785,52 @@ func (wal *WAL) SyncDirectivesToDisk(workspace string) error {
 			fmt.Fprintf(&sb, "%d. %s\n", i+1, rule)
 		}
 	}
-	return os.WriteFile(syncPath, []byte(sb.String()), 0644)
+	// [D4] Crash-atomic write: os.WriteFile truncates the target before
+	// writing, so a crash mid-write leaves neo-synced-directives.md truncated.
+	return atomicWriteFile(syncPath, []byte(sb.String()), 0644)
+}
+
+// atomicWriteFile writes data to a sibling temp file, fsyncs it, and renames it
+// over path — the rename is atomic on POSIX within one filesystem. A crash,
+// disk-full, or SIGKILL before the rename leaves the original file fully intact
+// (os.WriteFile, by contrast, truncates the target first). The parent directory
+// is fsynced so the rename itself survives a power loss. The temp file is a
+// hidden sibling (".<name>.tmp-*") so a *.md glob never picks it up mid-write.
+// [D4 — same crash-safety pattern as CompactWAL in wal_compact.go]
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("atomicWriteFile: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, wErr := tmp.Write(data); wErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: write: %w", wErr)
+	}
+	if sErr := tmp.Sync(); sErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: fsync: %w", sErr)
+	}
+	if cErr := tmp.Close(); cErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: close: %w", cErr)
+	}
+	if chErr := os.Chmod(tmpPath, perm); chErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: chmod: %w", chErr)
+	}
+	if rErr := os.Rename(tmpPath, path); rErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: rename: %w", rErr)
+	}
+	if d, dErr := os.Open(dir); dErr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 // normalizeDirective strips soft-delete markers for comparison purposes.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -527,6 +528,98 @@ func TestRestoreDirectivesFromSnapshot_SkipsObsoleted(t *testing.T) {
 			t.Errorf("restore should NOT re-introduce obsoleto entries; found %q after restore (added=%d)", r, added)
 		}
 	}
+}
+
+// assertNoTempLeftovers fails if any atomicWriteFile temp sibling (".<name>.tmp-*")
+// survived in dir — a leaked temp file means a write path returned without
+// cleanup.
+func assertNoTempLeftovers(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("temp file leaked into %s: %s", dir, e.Name())
+		}
+	}
+}
+
+// TestSyncDirectivesToDisk_ConcurrentWritesRaceFree is the D4 regression test.
+// Before the directivesMu serialization, two concurrent neo_learn_directive
+// calls could interleave so a goroutine read its BoltDB snapshot BEFORE a peer
+// committed SaveDirective, yet its file write landed AFTER the peer's —
+// silently dropping the peer's directive from disk (the 2026-05-13 -5 drift).
+// With the mutex, the last Sync to acquire the lock always reads the freshest
+// BoltDB state, so disk converges to BoltDB. Run under -race.
+func TestSyncDirectivesToDisk_ConcurrentWritesRaceFree(t *testing.T) {
+	ws := t.TempDir()
+	wal := openTestWAL(t, ws)
+
+	const n = 24
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 1; i <= n; i++ {
+		go func(id int) {
+			defer wg.Done()
+			// Mirror the tools.go handler unit: mutate BoltDB, then sync to disk.
+			if err := wal.SaveDirective("[TEST] concurrent rule " + formatI(id)); err != nil {
+				t.Errorf("SaveDirective %d: %v", id, err)
+				return
+			}
+			if err := wal.SyncDirectivesToDisk(ws); err != nil {
+				t.Errorf("SyncDirectivesToDisk %d: %v", id, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Every committed [TEST] directive must be present on disk — the last
+	// serialized Sync reads the full BoltDB state, so disk == BoltDB.
+	diskPath := filepath.Join(ws, ".claude", "rules", "neo-synced-directives.md")
+	body, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("disk file unreadable: %v", err)
+	}
+	for i := 1; i <= n; i++ {
+		want := "[TEST] concurrent rule " + formatI(i)
+		if !strings.Contains(string(body), want) {
+			t.Errorf("directive %q committed to BoltDB but missing from disk — writer race lost it", want)
+		}
+	}
+	assertNoTempLeftovers(t, filepath.Dir(diskPath))
+}
+
+// TestAtomicWriteFile_OverwriteLeavesNoTemp verifies atomicWriteFile replaces
+// content in place, preserves the requested perm, and never leaves a
+// ".<name>.tmp-*" sibling behind.
+func TestAtomicWriteFile_OverwriteLeavesNoTemp(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "neo-synced-directives.md")
+
+	if err := atomicWriteFile(target, []byte("first version\n"), 0644); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := atomicWriteFile(target, []byte("second version — longer payload\n"), 0644); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "second version — longer payload\n" {
+		t.Errorf("overwrite produced %q, want the second version", string(got))
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0644 {
+		t.Errorf("file perm = %o, want 0644", perm)
+	}
+	assertNoTempLeftovers(t, dir)
 }
 
 // TestRelativeLossPct verifies the math helper handles edge cases cleanly.
