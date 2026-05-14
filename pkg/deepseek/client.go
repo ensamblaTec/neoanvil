@@ -48,6 +48,16 @@ const (
 	checkpointTTL        = 3600
 	autoDistillThreshold = 30000
 
+	// defaultHTTPTimeoutSec bounds a single DeepSeek API request. Overridable
+	// via Config.HTTPTimeoutSeconds (env DEEPSEEK_HTTP_TIMEOUT_SECONDS) — raise
+	// it for v4-pro + reasoning_effort:max workloads. [worst-tool audit 2026-05-14]
+	defaultHTTPTimeoutSec = 120
+	// v4ProMaxMinTimeoutSec is the minimum HTTP budget the v4-pro +
+	// reasoning_effort:max combo needs — it produces 3-5× the reasoning tokens
+	// and routinely runs 120-300s. Below this, a synchronous call is rejected
+	// fast (ExceedsSyncBudget) instead of hanging until the timeout fires.
+	v4ProMaxMinTimeoutSec = 240
+
 	// ModelV4Flash and ModelV4Pro are the canonical model IDs as of 2026-04-26.
 	// `deepseek-chat` and `deepseek-reasoner` are deprecated aliases that map to
 	// V4Flash with thinking disabled / enabled respectively. Prefer canonical IDs
@@ -99,6 +109,7 @@ type Config struct {
 	RateLimitTPM        int64          // tokens per minute; 0 = 60000 (deepseek.rate_limit_tokens_per_minute)
 	RateLimitBurst      int64          // burst capacity; 0 = 10000 (deepseek.burst)
 	MaxTokensPerSession int64          // [131.J] session billing circuit breaker; 0 = 500000
+	HTTPTimeoutSeconds  int            // per-request HTTP timeout; 0 = defaultHTTPTimeoutSec (120s)
 }
 
 // Client is a long-lived DeepSeek API client.
@@ -157,6 +168,36 @@ type CallResponse struct {
 	ModelUsed         string `json:"model_used,omitempty"`           // server-echoed model id (may differ from Config.Model when alias)
 }
 
+// HTTPTimeout returns the per-request HTTP timeout the client was built with.
+// Tools derive their context deadline from this so a stuck upstream call is
+// bounded and returns a clean context error instead of a raw http timeout.
+func (c *Client) HTTPTimeout() time.Duration { return c.http.Timeout }
+
+// ExceedsSyncBudget reports whether the model + thinking combo routinely
+// exceeds this client's HTTP timeout when run synchronously. The v4-pro +
+// reasoning_effort:max combo produces 3-5× the reasoning tokens and commonly
+// runs 120-300s. When true, a synchronous tool call should fail fast (see
+// SyncBudgetExceededHint) instead of hanging until the timeout fires.
+func (c *Client) ExceedsSyncBudget(model string, thinking *ThinkingConfig) bool {
+	if model != ModelV4Pro || thinking == nil || thinking.ReasoningEffort != ReasoningEffortMax {
+		return false
+	}
+	return c.cfg.HTTPTimeoutSeconds < v4ProMaxMinTimeoutSec
+}
+
+// SyncBudgetExceededHint returns the operator-facing remediation message for a
+// call that ExceedsSyncBudget — empty when the combo fits the budget. Keeps the
+// model/timeout knowledge in one place so every tool surfaces the same guidance.
+func (c *Client) SyncBudgetExceededHint(model string, thinking *ThinkingConfig) string {
+	if !c.ExceedsSyncBudget(model, thinking) {
+		return ""
+	}
+	return fmt.Sprintf("model=%s + reasoning_effort=max routinely exceeds the %ds sync budget — "+
+		"re-call with background:true so the caller isn't blocked, and set "+
+		"DEEPSEEK_HTTP_TIMEOUT_SECONDS≥%d. See directive #54.",
+		model, c.cfg.HTTPTimeoutSeconds, v4ProMaxMinTimeoutSec)
+}
+
 // New creates a DeepSeek client. Opens BoltDB when cfg.DBPath is non-empty.
 func New(cfg Config) (*Client, error) {
 	if cfg.APIKey == "" {
@@ -182,9 +223,12 @@ func New(cfg Config) (*Client, error) {
 	if cfg.MaxTokensPerSession <= 0 {
 		cfg.MaxTokensPerSession = 500000
 	}
+	if cfg.HTTPTimeoutSeconds <= 0 {
+		cfg.HTTPTimeoutSeconds = defaultHTTPTimeoutSec
+	}
 	c := &Client{
 		cfg:     cfg,
-		http:    &http.Client{Timeout: 120 * time.Second},
+		http:    &http.Client{Timeout: time.Duration(cfg.HTTPTimeoutSeconds) * time.Second},
 		limiter: ratelimit.New(burst, tpm), // [131.B]
 	}
 

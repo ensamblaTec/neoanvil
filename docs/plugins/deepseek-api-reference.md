@@ -203,10 +203,19 @@ CoT triggers HTTP 400 "reasoning_content not allowed in input". Our
 
 ### Currently hardcoded
 
-`defaultModel = "deepseek-chat"` (client.go:43). Per-action override is a
+`defaultModel = "deepseek-v4-flash"` (client.go). Per-action override is a
 future enhancement; expose `Config.ModelOverrides map[string]string` and
 sanitize the payload (strip `temperature` etc.) when the resolved model is
 `deepseek-reasoner`.
+
+### Environment variables (injected by Nexus from `~/.neo/credentials.json`)
+
+| Var | Required | Default | Purpose |
+|---|---|---|---|
+| `DEEPSEEK_API_KEY` | yes | — | DeepSeek API key |
+| `DEEPSEEK_BASE_URL` | no | `https://api.deepseek.com/v1` | API base URL (integration-test override) |
+| `DEEPSEEK_DB_PATH` | no | `~/.neo/db/deepseek.db` | BoltDB path for thread/billing/checkpoint state |
+| `DEEPSEEK_HTTP_TIMEOUT_SECONDS` | no | `120` | Per-request HTTP timeout. **Raise to ≥240 for `v4-pro` + `reasoning_effort:max` workloads** — that combo produces 3-5× the reasoning tokens and routinely runs 120-300s. Below 240s, a synchronous `red_team_audit` with that combo is rejected fast (`-32602`) with a hint to use `background:true`, instead of hanging until the timeout fires. [worst-tool audit 2026-05-14] |
 
 ---
 

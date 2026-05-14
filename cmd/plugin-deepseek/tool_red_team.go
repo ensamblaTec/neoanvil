@@ -130,16 +130,16 @@ func resolveExistingThread(store *session.ThreadStore, tracker *cache.CacheKeyTr
 	return t, files, nil
 }
 
-// redTeamAuditWithDB is the testable variant that accepts an explicit dbPath.
-func redTeamAuditWithDB(s *state, id any, args map[string]any, dbPath string) map[string]any {
-	focus, _ := args["audit_focus"].(string)
+// parseRedTeamArgs pulls the red_team_audit inputs out of the MCP arg map:
+// audit focus (falls back to target_prompt), thread ID, follow-up text, and the
+// file list. Extracted to keep redTeamAuditWithDB under the CC limit.
+func parseRedTeamArgs(args map[string]any) (focus, threadID, followUp string, files []string) {
+	focus, _ = args["audit_focus"].(string)
 	if focus == "" {
 		focus, _ = args["target_prompt"].(string)
 	}
-	threadID, _ := args["thread_id"].(string)
-	followUp, _ := args["follow_up"].(string)
-
-	var files []string
+	threadID, _ = args["thread_id"].(string)
+	followUp, _ = args["follow_up"].(string)
 	if raw, ok := args["files"].([]any); ok {
 		for _, f := range raw {
 			if p, ok := f.(string); ok {
@@ -147,6 +147,12 @@ func redTeamAuditWithDB(s *state, id any, args map[string]any, dbPath string) ma
 			}
 		}
 	}
+	return focus, threadID, followUp, files
+}
+
+// redTeamAuditWithDB is the testable variant that accepts an explicit dbPath.
+func redTeamAuditWithDB(s *state, id any, args map[string]any, dbPath string) map[string]any {
+	focus, threadID, followUp, files := parseRedTeamArgs(args)
 
 	if s.client == nil {
 		return ok(id, textContent(fmt.Sprintf(
@@ -215,7 +221,18 @@ func redTeamAuditWithDB(s *state, id any, args map[string]any, dbPath string) ma
 
 	fullPrompt := builder.AssemblePrompt(block1, userMsg)
 	model, thinking := parseModelAndThinking(args)
-	resp, err := s.client.Call(context.Background(), deepseek.CallRequest{
+	// [worst-tool audit 2026-05-14] Fail fast on the v4-pro+reasoning_effort:max
+	// combo when the HTTP budget is too small — it routinely runs past the
+	// timeout, and a synchronous hang is worse than an actionable error.
+	if hint := s.client.SyncBudgetExceededHint(model, thinking); hint != "" {
+		return rpcErr(id, -32602, "red_team_audit: "+hint)
+	}
+	// Bound the call with an explicit deadline derived from the configured HTTP
+	// timeout — was context.Background() (no deadline), relying solely on the
+	// http.Client timeout. The explicit context yields a clean cancellation.
+	callCtx, cancel := context.WithTimeout(context.Background(), s.client.HTTPTimeout())
+	defer cancel()
+	resp, err := s.client.Call(callCtx, deepseek.CallRequest{
 		Action:   "red_team_audit",
 		Prompt:   fullPrompt,
 		Mode:     deepseek.SessionModeThreaded,

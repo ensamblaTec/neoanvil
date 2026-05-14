@@ -149,7 +149,10 @@ func refactorOneFile(s *state, mr mapReduceArgs, builder *cache.StructuralCacheB
 	for _, chunk := range chunks {
 		assembled := builder.AssemblePrompt(block1,
 			fmt.Sprintf("%s\n\n---FILE: %s---\n%s", mr.instructions, path, chunk.Body))
-		resp, callErr := s.client.Call(context.Background(), deepseek.CallRequest{
+		// Bound each chunk call with the configured HTTP budget (was
+		// context.Background() — no deadline). [worst-tool audit 2026-05-14]
+		callCtx, cancel := context.WithTimeout(context.Background(), s.client.HTTPTimeout())
+		resp, callErr := s.client.Call(callCtx, deepseek.CallRequest{
 			Action:    "map_reduce_refactor",
 			Prompt:    assembled,
 			Mode:      deepseek.SessionModeEphemeral,
@@ -157,6 +160,7 @@ func refactorOneFile(s *state, mr mapReduceArgs, builder *cache.StructuralCacheB
 			Model:     mr.model,
 			Thinking:  mr.thinking,
 		})
+		cancel()
 		if callErr != nil {
 			sb.WriteString(fmt.Sprintf("[chunk error: %v]\n", callErr))
 			continue

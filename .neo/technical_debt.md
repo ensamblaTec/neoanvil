@@ -756,3 +756,12 @@ FIX RECOMENDADO: añadir bbolt.Compact() — opción preferida: tarea de manteni
 
 ---
 
+## ~~[2026-05-14 12:48] AST COMPLEXITY in tool_red_team.go:134~~ — RESOLVED 2026-05-14 (same session)
+
+Auto-tracker fired on a stale snapshot. The DS-timeout fix added one fail-fast
+branch to `redTeamAuditWithDB` (CC 15→16); the arg-parsing block was immediately
+extracted into `parseRedTeamArgs`, dropping it back to CC≈12. Post-refactor
+`AST_AUDIT` clean. Zombie entry — closed in the commit that introduced it.
+
+---
+

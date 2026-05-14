@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -112,9 +113,10 @@ func buildState() (*state, error) {
 	// Build the DeepSeek client. DBPath is optional; without it threads are in-memory only.
 	// BaseURL: Area 3.2.A integration-test override; empty falls back to defaultBaseURL.
 	c, err := deepseek.New(deepseek.Config{
-		APIKey:  key,
-		DBPath:  os.Getenv("DEEPSEEK_DB_PATH"),
-		BaseURL: os.Getenv("DEEPSEEK_BASE_URL"),
+		APIKey:             key,
+		DBPath:             os.Getenv("DEEPSEEK_DB_PATH"),
+		BaseURL:            os.Getenv("DEEPSEEK_BASE_URL"),
+		HTTPTimeoutSeconds: envInt("DEEPSEEK_HTTP_TIMEOUT_SECONDS"),
 	})
 	if err == nil {
 		st.client = c
@@ -372,4 +374,19 @@ func rpcErr(id any, code int, msg string) map[string]any {
 		"id":      id,
 		"error":   map[string]any{"code": code, "message": msg},
 	}
+}
+
+// envInt reads an integer env var, returning 0 when unset or unparseable so
+// the consumer's own default backfill applies. Used for optional numeric
+// tuning knobs injected by Nexus (e.g. DEEPSEEK_HTTP_TIMEOUT_SECONDS).
+func envInt(name string) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
