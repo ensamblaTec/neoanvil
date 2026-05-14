@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/ensamblatec/neoanvil/pkg/config"
+	"github.com/ensamblatec/neoanvil/pkg/rag"
 )
 
 // mkFile creates an empty file at workspace-relative rel, making parent dirs.
@@ -107,5 +110,64 @@ func TestRelativeImportToFile(t *testing.T) {
 				t.Errorf("relativeImportToFile(%q, %q) = %q, want %q", tc.srcRel, tc.imp, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestBackfillDepGraph covers the snapshot-boot safety net [1966953] + the
+// cache-invalidation gen bump [71498e0]: a cold GRAPH_EDGES bucket must get
+// populated from an import-only walk, graph.Gen must bump exactly once, and a
+// second run over an already-populated graph must no-op (no re-bump).
+func TestBackfillDepGraph(t *testing.T) {
+	ws := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		abs := filepath.Join(ws, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("go.mod", "module example.com/bf\n")
+	writeFile("pkg/lib/lib.go", "package lib\n\nvar X = 1\n") // leaf — import target
+	writeFile("cmd/app/main.go",
+		"package main\n\nimport (\n\t\"fmt\"\n\t\"example.com/bf/pkg/lib\"\n)\n\nfunc main() { fmt.Println(lib.X) }\n")
+
+	dbDir := filepath.Join(ws, ".neo", "db")
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	wal, err := rag.OpenWAL(filepath.Join(dbDir, "hnsw.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = wal.Close() })
+	if err := rag.InitGraphRAG(wal); err != nil {
+		t.Fatal(err)
+	}
+
+	graph := &rag.Graph{}
+	cfg := &config.NeoConfig{}
+	cfg.Workspace.AllowedExtensions = []string{".go"}
+
+	// First run: empty GRAPH_EDGES → backfill populates + bumps the gen.
+	backfillDepGraph(ws, wal, graph, cfg)
+
+	edges, err := rag.GetAllGraphEdges(wal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps := edges["cmd/app/main.go"]; len(deps) != 1 || deps[0] != "pkg/lib/lib.go" {
+		t.Errorf("backfill edges for cmd/app/main.go = %v, want [pkg/lib/lib.go]", deps)
+	}
+	if g := graph.Gen.Load(); g != 1 {
+		t.Errorf("graph.Gen after backfill = %d, want 1 (radar-cache invalidation bump)", g)
+	}
+
+	// Second run: graph already populated → no-op, gen must NOT re-bump.
+	backfillDepGraph(ws, wal, graph, cfg)
+	if g := graph.Gen.Load(); g != 1 {
+		t.Errorf("graph.Gen after no-op backfill = %d, want 1 (must not re-bump a populated graph)", g)
 	}
 }
