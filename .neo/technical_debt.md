@@ -678,9 +678,43 @@ Auto-tracker logged this finding at 15:59. Resolved 16:05 via refactor in `eca89
 
 ---
 
-## [2026-05-14 08:29] HNSW WAL (hnsw.db) sin compactación BoltDB — crecimiento ilimitado bloquea boot de workspaces
+## ~~[2026-05-14 08:29] HNSW WAL (hnsw.db) sin compactación BoltDB — crecimiento ilimitado bloquea boot de workspaces~~ — RESOLVED 2026-05-14 (commit 0374cee)
 
 **Prioridad:** P1
+
+### RESOLUCIÓN — `feat(rag): offline WAL compaction` (0374cee)
+
+`bbolt.Compact()` ahora existe en el repo. Shipped:
+
+- `pkg/rag/wal_compact.go::CompactWAL` — compactación offline crash-safe: abre el
+  fichero source read-only, copia páginas vivas a un temp sibling con txn de
+  64 MiB (heap plano), y hace `os.Rename` atómico. Cualquier fallo antes del
+  rename (SIGKILL, disk-full, lock timeout) deja el original intacto.
+  `CompactWALIfOversized` aplica el gate por `thresholdMB` (≤0 = opt-out).
+- `cmd/neo-mcp/boot_helpers.go::bootRAG` — auto-compactación boot-time ANTES de
+  `OpenWAL`, solo cuando el fichero supera `cfg.RAG.WALCompactThresholdMB`;
+  workspaces sanos no-op. Dropea el snapshot `hnsw.bin` stale para forzar cold
+  rebuild limpio en vez de un reject confuso por stale-guard.
+- `cmd/neo/main.go::workspaceCompactCmd` — `neo workspace compact [ws]` manual
+  (workspace debe estar parado — el lock exclusivo de bbolt lo garantiza).
+- `pkg/config/config.go` — `RAGConfig.WALCompactThresholdMB` (default 256) +
+  backfill en `applyRAGDefaults` (config.go:816) + `neo.yaml` + `neo.yaml.example`.
+- `~/.neo/nexus.yaml` — `startup_timeout_seconds` 30 → 240 (headroom para la
+  compactación one-time de un hnsw.db multi-GB + carga HNSW 500k+ nodos).
+
+Decisión de hook: boot-time, NO `WAL.Close()` (`make rebuild-restart` SIGKILLea
+children a 5s, demasiado corto para una compactación multi-GB) y NO la tarea idle
+`[SRE-HOMEOSTASIS]` recomendada originalmente (boot-time es unbounded y ataca el
+caso real — un workspace que no puede ni arrancar). Verificado: `go build ./...`
+limpio, `go test -short ./pkg/rag/` OK (27s, incl. concurrency/crash-safety/
+disk-full/lock-conflict en `wal_compact_test.go`), `AST_AUDIT` limpio.
+
+**Workaround inmediato pendiente (acción operador, no código):** mover
+`hnsw.db` + `hnsw.bin` a backup en strategos-32492 y strategosia-frontend-82899
+→ boot limpio + re-ingesta. La auto-compactación los rescata en el siguiente
+boot una vez que el binario actualizado esté desplegado en esos workspaces.
+
+### ORIGINAL ENTRY (preserved for reference)
 
 SÍNTOMA: strategos-32492 y strategosia-frontend-82899 no arrancan via Nexus — child_boot_timeout 30s, orphan killed, status=stopped permanente (restarts:0 porque nunca alcanzan 'running'). El child se cuelga en main.go:511 [BOOT] long-term memory subsystem (RAG WAL).
 
