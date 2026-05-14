@@ -765,3 +765,50 @@ extracted into `parseRedTeamArgs`, dropping it back to CC≈12. Post-refactor
 
 ---
 
+## ~~[2026-05-14] BLAST_RADIUS dep-graph never populated — always degraded to AST fallback~~ — RESOLVED 2026-05-14 (commits 6265dd7 + 441ba54 + 1966953)
+
+**Prioridad:** P1 (afectaba toda sesión, en todos los workspaces)
+
+SÍNTOMA: `BLAST_RADIUS` reportaba `graph_status: empty` / `pagerank_used: false`
+en todas las sesiones — corría permanentemente en `fallback: ast`,
+`confidence: medium`, sin el call-graph real ni el ranking PageRank de impacto.
+
+CAUSA RAÍZ (doble): (1) `rag.SaveGraphEdges` — el ÚNICO escritor del bucket
+`GRAPH_EDGES` que `BLAST_RADIUS` lee vía `GetAllGraphEdges`/`GetImpactedNodes` —
+tenía **cero callers**. El grafo se inicializaba vacío y nada lo poblaba jamás.
+(2) `bootstrapWorkspace` poblaba un bucket DISTINTO (`hnsw_deps` vía
+`SaveDependencies`) con import-strings como claves — mismatch estructural con
+las queries por file-path, y además `GetDependents` (su lector) tampoco tiene
+callers. Las dos mitades nunca se conectaron.
+
+FIX (3 commits):
+- `6265dd7` — `rag.ReplaceFileEdges` (reemplazo idempotente per-file vía prefijo
+  `<source>->`) + resolver `fileDepEdges`/`goImportToFiles`/`workspaceModulePath`
+  (imports → archivos reales del workspace, file→file, agnóstico de lenguaje).
+  `bootstrapWorkspace` ahora escribe `GRAPH_EDGES` real.
+- `441ba54` — wire en `neo_sre_certify_mutation`: cada certify refresca los edges
+  del archivo mutado (mantenimiento incremental, goroutine independiente).
+- `1966953` — `backfillDepGraph`: red de seguridad boot-time — walk import-only
+  barato (sin embeddings) cuando `GRAPH_EDGES` está vacío (caso snapshot-boot).
+
+Verificado: build limpio, tests (ReplaceFileEdges idempotency/prefix-isolation/
+topology + resolver matrix), AST_AUDIT limpio, certify FEATURE_ADD ok. **Toma
+efecto tras restart de neo-mcp.** DS premortem intentado en background mode (fix
+de eb3c4c7) — self-premortem aplicado (ver abajo).
+
+### Follow-ups detectados (no bloqueantes)
+- `radar_semantic.go:137` aún escribe al bucket huérfano `hnsw_deps` vía
+  `SaveDependencies` — `SaveDependencies`/`GetDependents`/`bucketDeps` son ahora
+  efectivamente dead code; redirigir a `GRAPH_EDGES` o eliminar.
+- `GetImpactedNodes`/`GetAllGraphEdges` hacen full-scan O(N) del bucket +
+  unmarshal JSON por edge en cada `BLAST_RADIUS` — OK mientras el grafo es chico,
+  pero con un workspace grande totalmente poblado conviene indexar por target.
+- DS `red_team_audit` con `background:true` retorna `task_id` pero ese id NO es
+  consultable por la interfaz del tool (`task_id` está documentado solo para
+  `generate_boilerplate`) — el resultado del audit en background es irretrievable.
+- `cmd/neo-mcp/main.go::main` CC=18 (límite 15) — **pre-existente**, no
+  introducido por estos commits (se añadió 1 statement `go ...`, 0 ramas); el
+  Bouncer lo tolera (grandfathered). Refactor de `main` queda como deuda aparte.
+
+---
+
