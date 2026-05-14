@@ -79,6 +79,9 @@ What it does:
 4. **Merges** the neo `hooks` block into `.claude/settings.json` — target-owned
    hooks and other keys (`permissions`, `env`, …) are preserved; neo's
    matcher-groups are *appended*, not substituted; a timestamped backup first.
+   The two `mcp__neoanvil__*` hook matchers are **retargeted** to the target's
+   MCP server name (read from its `.mcp.json`) — otherwise those hooks would
+   never fire on the target.
 5. Injects `env.NEO_WORKSPACE_ID` so the hooks target the right workspace.
 6. Copies the curated skill set into `.claude/skills/`.
 7. Seeds `.claude/neo-directives-seed.md` for the operator to curate.
@@ -112,10 +115,11 @@ target's neo-mcp once); activate the directive seed (operator curates first).
   `*neoanvil*`; other workspaces rely on `NEO_WORKSPACE_ID` (which `neo-onboard.sh`
   sets in `settings.json` env). If that env is missing the hook briefs the
   wrong workspace.
-- **Display strings** — `post-edit-cert-reminder.sh` hardcodes
-  `mcp__neoanvil__neo_sre_certify_mutation` in its operator-facing message. The
-  *gate* still works (path/state based, not MCP-name based) but the hint text
-  names neoanvil's MCP server — a cosmetic mismatch, follow-up.
+- **Hook-script display strings** — `post-edit-cert-reminder.sh` hardcodes
+  `mcp__neoanvil__neo_sre_certify_mutation` in its operator-facing *message*
+  text. The settings.json *matchers* are retargeted by the script, and the
+  *gate* itself is path/state based, so behaviour is correct — only the hint
+  text names neoanvil's MCP server. Cosmetic; follow-up to template it.
 - The hook scripts invoke neo via `curl` to the Nexus dispatcher
   (`NEO_NEXUS_URL`, default `http://127.0.0.1:9000`) — the target must be a
   Nexus-managed workspace for the hooks to reach a live MCP.

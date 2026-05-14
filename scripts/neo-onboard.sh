@@ -85,17 +85,26 @@ TGT_DIR_SEED="$TGT_CLAUDE/neo-directives-seed.md"
 # project .mcp.json is a warning, not a hard fail: the server may live in the
 # operator's global ~/.claude.json instead.
 TGT_MCP="$TARGET/.mcp.json"
-if [ -f "$TGT_MCP" ] && jq -e '
-	(.mcpServers // {}) | to_entries[]
-	| ((.value.url // "") | test("/mcp/sse|127\\.0\\.0\\.1:9000"))
-	  or ((.value.command // "") | test("neo-mcp"))
-' "$TGT_MCP" >/dev/null 2>&1; then
-	note "layer-0 OK: $TGT_MCP references a neo MCP server"
+TGT_MCP_NAME=""
+if [ -f "$TGT_MCP" ]; then
+	# The MCP server's NAME (the mcpServers key) — the agent's neo tools are
+	# exposed as mcp__<name>__neo_radar etc. We need it to rewrite the two hook
+	# matchers that neoanvil hardcodes as mcp__neoanvil__* (a matcher that
+	# doesn't match = a dead hook on the target).
+	TGT_MCP_NAME="$(jq -r '
+		(.mcpServers // {}) | to_entries[]
+		| select(((.value.url // "") | test("/mcp/sse|127\\.0\\.0\\.1:9000"))
+		         or ((.value.command // "") | test("neo-mcp")))
+		| .key' "$TGT_MCP" 2>/dev/null | head -n1 || true)"
+fi
+if [ -n "$TGT_MCP_NAME" ]; then
+	note "layer-0 OK: $TGT_MCP wires a neo MCP server (\"$TGT_MCP_NAME\")"
 else
 	note "🛑 LAYER-0 WARNING: no neo MCP server found in $TGT_MCP"
 	note "   Without the MCP connected the agent has NO neo tools — the hooks +"
 	note "   skills below are inert until it is wired. Confirm the neo MCP is in"
 	note "   the target's Claude Code config (.mcp.json or global ~/.claude.json)."
+	note "   (mcp__neoanvil__* hook matchers can't be retargeted without it.)"
 fi
 
 # --- resolve the target's workspace ID from ~/.neo/workspaces.json -----------
@@ -126,17 +135,28 @@ fi
 
 # --- compute the merged settings.json ---------------------------------------
 # Deep-merge: for each neo hook type, APPEND neo's matcher groups to whatever
-# the target already has (target's own hooks are preserved). Inject
-# env.NEO_WORKSPACE_ID when resolved.
+# the target already has (target's own hooks are preserved). Then:
+#   - retarget the mcp__neoanvil__* hook matchers to the target's MCP server
+#     name (else those two hooks would never fire on the target);
+#   - inject env.NEO_WORKSPACE_ID when resolved.
+# The gsub is a no-op on the target's own matchers — only mcp__neoanvil__*
+# strings are rewritten.
 EXISTING="{}"
 [ -f "$TGT_SETTINGS" ] && EXISTING="$(cat "$TGT_SETTINGS")"
 
 MERGED="$(printf '%s' "$EXISTING" | jq \
 	--slurpfile neo "$SRC_SETTINGS" \
-	--arg wsid "$WS_ID" '
+	--arg wsid "$WS_ID" \
+	--arg tgtmcp "$TGT_MCP_NAME" '
 	. as $tgt
 	| reduce ($neo[0].hooks | keys[]) as $k ($tgt;
 		.hooks[$k] = ((.hooks[$k] // []) + ($neo[0].hooks[$k])))
+	| if ($tgtmcp != "" and $tgtmcp != "neoanvil")
+	  then .hooks |= map_values(map(
+		if has("matcher")
+		then .matcher |= gsub("mcp__neoanvil__"; "mcp__" + $tgtmcp + "__")
+		else . end))
+	  else . end
 	| if $wsid != "" then .env = ((.env // {}) + {"NEO_WORKSPACE_ID": $wsid}) else . end
 ')"
 
@@ -156,6 +176,9 @@ note "source : $SRC_ROOT"
 note "target : $TARGET"
 note "hooks  : $(ls "$SRC_HOOKS"/*.sh 2>/dev/null | wc -l | tr -d ' ') scripts → $TGT_HOOKS/"
 note "settings: merge neo hooks block into $TGT_SETTINGS"
+if [ -n "$TGT_MCP_NAME" ] && [ "$TGT_MCP_NAME" != "neoanvil" ]; then
+	note "         (retargeting mcp__neoanvil__* matchers → mcp__${TGT_MCP_NAME}__*)"
+fi
 note "skills : ${#PORT_SKILLS[@]} → $TGT_SKILLS/  (excluded: $SKILL_EXCLUDE)"
 note "directives: seed copy → $TGT_DIR_SEED  (NOT auto-active — operator curates)"
 
