@@ -108,7 +108,7 @@ func goImportToFiles(workspace, modulePath, importPath string) []string {
 // per-certify refresh populated it) — so the only redundant run is the very
 // first cold boot, where bootstrapWorkspace populates concurrently with
 // identical content. Meant to run in its own goroutine; never blocks boot.
-func backfillDepGraph(workspace string, wal *rag.WAL, cfg *config.NeoConfig) {
+func backfillDepGraph(workspace string, wal *rag.WAL, graph *rag.Graph, cfg *config.NeoConfig) {
 	if existing, err := rag.GetAllGraphEdges(wal); err == nil && len(existing) > 0 {
 		return // dep-graph already populated — nothing to backfill
 	}
@@ -155,7 +155,14 @@ func backfillDepGraph(workspace string, wal *rag.WAL, cfg *config.NeoConfig) {
 		log.Printf("[SRE-WARN] dep-graph backfill walk: %v", walkErr)
 	}
 	if indexed > 0 {
-		log.Printf("[BLAST_RADIUS] dep-graph backfill: %d files → GRAPH_EDGES", indexed)
+		// Bump the graph generation so any radar-cache entry computed during
+		// the backfill window (GRAPH_EDGES still empty/partial) is invalidated.
+		// The TextCache/QueryCache gen-guard tracks graph.Gen; a dep-graph write
+		// otherwise leaves it untouched, so a BLAST_RADIUS that lands mid-boot
+		// would cache a stale `empty` result for the whole session. One-time at
+		// boot — the radar caches are cold then, so over-invalidation is free.
+		graph.Gen.Add(1)
+		log.Printf("[BLAST_RADIUS] dep-graph backfill: %d files → GRAPH_EDGES (cache gen bumped)", indexed)
 	}
 }
 

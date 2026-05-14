@@ -1435,7 +1435,7 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	// GRAPH_EDGES dep-graph from a cheap import-only walk when it is empty, so
 	// BLAST_RADIUS doesn't stay on graph_status:empty after a fast-boot that
 	// re-embeds nothing. No-ops once the graph is populated.
-	go backfillDepGraph(workspace, wal, cfg)
+	go backfillDepGraph(workspace, wal, hnswGraph, cfg)
 
 	// [Épica 330.C] Archive INC-*.md older than sre.inc_archive_days BEFORE indexing
 	// so BM25 and HNSW only see the recent corpus. Synchronous, cheap (mtime scan + rename).
