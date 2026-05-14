@@ -611,20 +611,67 @@ Writer root-cause investigation remains in the FOLLOW-UP entry below (monitoring
 
 ## [2026-05-13] FOLLOW-UP — Writer root cause for DUAL-LAYER-SYNC drift (commit b24e4eb closed the symptom)
 
-**Status:** symptom resolved via mass re-add. Root cause not patched.
+**Status:** ✅ ROOT CAUSE FOUND 2026-05-14 (investigation only — fix deferred per operator). Symptom previously resolved via mass re-add (b24e4eb).
 
 **Recovered:** 7 directives re-added in b24e4eb (condensed ≤500 chars). Disk now 57/60.
 
-**Open questions for the next investigation:**
-1. **Who called CompactDirectives?** Only operator-driven path (`neo_memory(learn, action_type:compact)`) hard-purges entries. No auto-trigger exists. Search `.neo/logs/mcp.log` archive for `name=neo_memory id=... action_type=compact` events to identify the moment of loss. If no such call, there's an unknown removal path — investigate further.
-2. **Should destructive-sync corruption guard be stricter?** Current guard at pkg/rag/wal.go:830:
-   `if activeOnDisk < syncDestructiveMinDisk && activeInBoltDB > syncDestructiveBoltDBThreshold` — both conditions must hold (5 / 50). A 7-entry delta slips through. Proposal: also refuse destructive if `activeOnDisk < 0.8 × activeInBoltDB` (20% relative loss).
-3. **Should SyncDirectivesToDisk emit `.neo/db/directives_snapshot.json` backup before each write?** Cheap (BoltDB read is already done) and gives recovery option independent of git.
-4. **Should `CompactDirectives` require `confirm:true` arg?** Right now any `action_type:compact` call is destructive. A confirmation arg would prevent accidental purge.
+### ROOT CAUSE — read-then-write race in `SyncDirectivesToDisk` (pkg/rag/wal.go:754)
 
-**Why not fix now:** the destructive-sync write path is in BoltDB territory and needs DS premortem + regression test, est. 2-3 commits. Scope-limited to a future session focused on directive durability hardening.
+The on-disk file `.claude/rules/neo-synced-directives.md` is written ONLY by
+`SyncDirectivesToDisk`, called from the 5 `neo_learn_directive` handler paths
+(cmd/neo-mcp/tools.go:200 `syncDirectives`). It does three NON-atomic steps with
+no serialization:
+  1. `rules := GetDirectives()` — read the full BoltDB `global_rules` snapshot
+  2. build the markdown string
+  3. `os.WriteFile(syncPath, ...)` — overwrite the whole file
 
-**Recovery verification needed at next restart:** confirm the 7 re-added directives survive a `make rebuild-restart` cycle. If they get purged again on boot → boot path has the bug (not user action). If they survive → bug was operator-triggered compact at some point.
+If two `neo_learn_directive` calls run concurrently, goroutine A can read its
+snapshot at step 1 BEFORE goroutine B commits its `SaveDirective`, yet A's
+`os.WriteFile` at step 3 can land AFTER B's — clobbering the file with A's stale
+snapshot that is missing B's directive (and anything else committed inside A's
+read→write window). Directives silently vanish from disk; next boot,
+`LoadDirectivesFromDisk`'s destructive sweep sees them "not on disk" and
+deprecates them in BoltDB too. Exactly the documented −5 net symptom.
+
+The boot path CANNOT cause this: `LoadDirectivesFromDisk` only READS the file —
+it never writes it. The loss is 100% in the writer, as action item #2 suspected.
+
+### Open questions — answered
+
+1. **Who called CompactDirectives?** — Almost certainly nobody. The loss was the
+   `SyncDirectivesToDisk` write race, not a compact. Stop hunting a destructive caller.
+2. **Stricter corruption guard?** — Already shipped (eca89dc, 20% relative-loss
+   guard). It is a SAFETY NET on the read path; it does not fix the writer race.
+3. **Snapshot before write?** — `SnapshotDirectives` exists (549dde9) but is only
+   wired into `handleCompactDirectives`, NOT `SyncDirectivesToDisk`. Fixing the
+   race is the real fix; a snapshot there would only be a fallback.
+4. **`CompactDirectives` confirm:true?** — Low priority; not the loss vector.
+
+### `db.Batch` audit — NOT the bug (cleared)
+
+`SaveDirective`/`UpdateDirective`/`DeprecateDirective`/`CompactDirectives` use
+`db.Batch` for read-modify-write on the single `global_rules` key. Audited as
+SAFE: bbolt rolls the whole batch txn back on any fn error before retrying, so
+the non-idempotent `append` in `SaveDirective` is never double-applied, and
+coalesced fns see each other's Puts within the one txn. (`db.Update` would be
+the more idiomatic choice for a shared-key RMW, but it is not a correctness bug.)
+
+### Recommended fix (deferred — needs DS premortem + regression test, ~2 commits)
+
+- Serialize the writer: a `WAL.directivesMu sync.Mutex` held across the
+  mutate-then-sync unit (or at minimum across `GetDirectives`+`os.WriteFile`
+  inside `SyncDirectivesToDisk`), so a stale snapshot can never overwrite newer state.
+- Make the write crash-atomic: temp file + `os.Rename`, same pattern as the new
+  `CompactWAL` (commit 0374cee). A crash mid-`os.WriteFile` currently truncates
+  the file outright.
+- Confirm the MCP child's tool-call concurrency model — if tool calls are
+  strictly serialized within one child the race window narrows, but the
+  crash-atomicity gap remains; the mutex is cheap insurance either way.
+
+**Recovery verification (still valid):** confirm the 7 re-added directives
+survive a `make rebuild-restart` cycle. The current synced file shows 1-57 — if
+they persist across restarts, the read-path guards (eca89dc) are holding the
+line until the writer race is fixed.
 ## ~~[2026-05-13 15:59] AST COMPLEXITY in wal.go:809~~ — RESOLVED 2026-05-13 (commit eca89dc)
 
 Auto-tracker logged this finding at 15:59. Resolved 16:05 via refactor in `eca89dc fix(rag): relative-loss guard for destructive sync` — `LoadDirectivesFromDisk` was extracted into 5 helpers (`countActiveDirectivesIn`, `relativeLossPct`, `shouldSkipDestructiveSweep`, `runDestructiveSweep`, `runAdditiveUpsertFromDisk`) and dropped from CC=16 → CC=5. Post-restart AST_AUDIT confirms clean.
