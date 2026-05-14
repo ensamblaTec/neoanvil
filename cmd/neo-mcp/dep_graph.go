@@ -9,10 +9,13 @@
 package main
 
 import (
+	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/ensamblatec/neoanvil/pkg/config"
 	"github.com/ensamblatec/neoanvil/pkg/rag"
 )
 
@@ -94,6 +97,66 @@ func goImportToFiles(workspace, modulePath, importPath string) []string {
 		files = append(files, filepath.ToSlash(filepath.Join(rel, name)))
 	}
 	return files
+}
+
+// backfillDepGraph populates the GRAPH_EDGES bucket from a cheap import-only
+// walk of the workspace — no embeddings, just file read + regex + path stat.
+// It is the snapshot-boot safety net: bootstrapWorkspace only writes edges for
+// files it (re)embeds, and on a fast-boot from the hnsw.bin snapshot it embeds
+// nothing, so without this BLAST_RADIUS would stay on graph_status:empty
+// forever. No-ops when GRAPH_EDGES already has edges (a prior cold boot or the
+// per-certify refresh populated it) — so the only redundant run is the very
+// first cold boot, where bootstrapWorkspace populates concurrently with
+// identical content. Meant to run in its own goroutine; never blocks boot.
+func backfillDepGraph(workspace string, wal *rag.WAL, cfg *config.NeoConfig) {
+	if existing, err := rag.GetAllGraphEdges(wal); err == nil && len(existing) > 0 {
+		return // dep-graph already populated — nothing to backfill
+	}
+	modulePath := workspaceModulePath(workspace)
+	var indexed int
+	walkErr := filepath.WalkDir(workspace, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			for _, ignore := range cfg.Workspace.IgnoreDirs {
+				if name == ignore || name == ".neo" {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		ext := filepath.Ext(path)
+		if !isSupportedExt(ext, cfg.Workspace.AllowedExtensions) {
+			return nil
+		}
+		data, readErr := os.ReadFile(path) //nolint:gosec // G304-WORKSPACE-CANON
+		if readErr != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(workspace, path)
+		if relErr != nil {
+			return nil
+		}
+		relSlash := filepath.ToSlash(rel)
+		edges := fileDepEdges(workspace, modulePath, relSlash, extractImports(string(data), ext))
+		if len(edges) == 0 {
+			return nil
+		}
+		if err := rag.ReplaceFileEdges(wal, relSlash, edges); err != nil {
+			log.Printf("[SRE-WARN] dep-graph backfill %s: %v", relSlash, err)
+			return nil
+		}
+		indexed++
+		return nil
+	})
+	if walkErr != nil {
+		log.Printf("[SRE-WARN] dep-graph backfill walk: %v", walkErr)
+	}
+	if indexed > 0 {
+		log.Printf("[BLAST_RADIUS] dep-graph backfill: %d files → GRAPH_EDGES", indexed)
+	}
 }
 
 // relativeImportToFile resolves a TS/JS/Python relative import against the
