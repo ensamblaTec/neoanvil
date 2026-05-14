@@ -801,9 +801,13 @@ de eb3c4c7) — self-premortem aplicado (ver abajo).
   `GetDependents`/`bucketDeps` dead code~~ — RESOLVED 2026-05-14 (commit 41b1e69):
   `saveIndexDependencies` redirigido a `fileDepEdges`+`ReplaceFileEdges`, las 2
   funciones + el bucket + refs del sanitizer eliminados (−54 LOC).
-- `GetImpactedNodes`/`GetAllGraphEdges` hacen full-scan O(N) del bucket +
-  unmarshal JSON por edge en cada `BLAST_RADIUS` — OK mientras el grafo es chico,
-  pero con un workspace grande totalmente poblado conviene indexar por target.
+- ~~`GetImpactedNodes` era un 2º full-scan redundante del bucket en cada
+  `BLAST_RADIUS`~~ — PARCIAL 2026-05-14 (commit cb27b69): `resolveImpactedNodes`
+  ahora deriva el impacted set del mapa de `GetAllGraphEdges` ya cargado
+  (`impactedFromEdges`) — 1 scan en vez de 2. Queda el scan único de
+  `GetAllGraphEdges`: con un workspace grande totalmente poblado convendría
+  indexar por target, pero no medido como problema — diferir per doctrina
+  [option-D] (medir antes de optimizar).
 - DS `red_team_audit` con `background:true` retorna `task_id` pero ese id NO es
   consultable por la interfaz del tool (`task_id` está documentado solo para
   `generate_boilerplate`) — el resultado del audit en background es irretrievable.
