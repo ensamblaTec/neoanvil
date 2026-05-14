@@ -348,3 +348,7 @@ _Last distillation: 2026-05-13 23:20 UTC_
 - **hooks-no-cover-investigation-tools** (`SRE`): Self-audit 2026-05-13 session: ratio neo:native = 22.5% (~30 vs ~103). Hooks ATRAPAN bien mutation flow (BRIEFING auto, …
 ---
 
+<!-- archived: 2026-05-14 -->
+
+---
+
