@@ -797,9 +797,10 @@ efecto tras restart de neo-mcp.** DS premortem intentado en background mode (fix
 de eb3c4c7) — self-premortem aplicado (ver abajo).
 
 ### Follow-ups detectados (no bloqueantes)
-- `radar_semantic.go:137` aún escribe al bucket huérfano `hnsw_deps` vía
-  `SaveDependencies` — `SaveDependencies`/`GetDependents`/`bucketDeps` son ahora
-  efectivamente dead code; redirigir a `GRAPH_EDGES` o eliminar.
+- ~~`radar_semantic.go:137` escribe el bucket huérfano `hnsw_deps`; `SaveDependencies`/
+  `GetDependents`/`bucketDeps` dead code~~ — RESOLVED 2026-05-14 (commit 41b1e69):
+  `saveIndexDependencies` redirigido a `fileDepEdges`+`ReplaceFileEdges`, las 2
+  funciones + el bucket + refs del sanitizer eliminados (−54 LOC).
 - `GetImpactedNodes`/`GetAllGraphEdges` hacen full-scan O(N) del bucket +
   unmarshal JSON por edge en cada `BLAST_RADIUS` — OK mientras el grafo es chico,
   pero con un workspace grande totalmente poblado conviene indexar por target.
