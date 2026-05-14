@@ -46,6 +46,27 @@ func makeRadarToolForPluginsTest(t *testing.T, nexusPort int) *RadarTool {
 	return &RadarTool{cfg: cfg}
 }
 
+// mcpTextOf extracts the text payload from the mcpText() envelope returned by
+// handlePluginStatus: map[string]any{"content": []map[string]any{{"type":"text","text":...}}}.
+// Radar handlers MUST return this MCP CallToolResult shape — a bare string is
+// silently rejected by the MCP SDK and hangs the client.
+func mcpTextOf(t *testing.T, out any) string {
+	t.Helper()
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected mcpText envelope (map[string]any), got %T", out)
+	}
+	content, ok := m["content"].([]map[string]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("expected non-empty content array, got %#v", m["content"])
+	}
+	text, ok := content[0]["text"].(string)
+	if !ok {
+		t.Fatalf("expected text string in content[0], got %T", content[0]["text"])
+	}
+	return text
+}
+
 func TestHandlePluginStatus_DisabledRendersDisabled(t *testing.T) {
 	body := `{"enabled":false,"reason":"nexus.plugins.enabled is false"}`
 	_, port := newPluginStatusServer(t, http.StatusOK, body)
@@ -55,10 +76,7 @@ func TestHandlePluginStatus_DisabledRendersDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handlePluginStatus: %v", err)
 	}
-	md, ok := out.(string)
-	if !ok {
-		t.Fatalf("expected string output, got %T", out)
-	}
+	md := mcpTextOf(t, out)
 	if !strings.Contains(md, "disabled") {
 		t.Errorf("disabled status not surfaced:\n%s", md)
 	}
@@ -82,7 +100,7 @@ func TestHandlePluginStatus_EnabledWithPlugins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handlePluginStatus: %v", err)
 	}
-	md := out.(string)
+	md := mcpTextOf(t, out)
 
 	mustContain := []string{
 		"enabled — manifest_version=1",
@@ -110,7 +128,7 @@ func TestHandlePluginStatus_ErrorsSection(t *testing.T) {
 	_, port := newPluginStatusServer(t, http.StatusOK, body)
 	rt := makeRadarToolForPluginsTest(t, port)
 	out, _ := rt.handlePluginStatus(context.Background(), nil)
-	md := out.(string)
+	md := mcpTextOf(t, out)
 	if !strings.Contains(md, "## Errors") {
 		t.Errorf("errors section missing:\n%s", md)
 	}
@@ -127,7 +145,7 @@ func TestHandlePluginStatus_NexusUnreachable(t *testing.T) {
 	if err != nil {
 		t.Errorf("handler should never return error (fail-soft): %v", err)
 	}
-	md, _ := out.(string)
+	md := mcpTextOf(t, out)
 	if !strings.Contains(md, "unreachable") {
 		t.Errorf("unreachable status not surfaced:\n%s", md)
 	}
@@ -140,7 +158,7 @@ func TestHandlePluginStatus_NexusReturns500(t *testing.T) {
 	if err != nil {
 		t.Errorf("handler should never return error: %v", err)
 	}
-	md := out.(string)
+	md := mcpTextOf(t, out)
 	if !strings.Contains(md, "Nexus returned 500") {
 		t.Errorf("status code not surfaced:\n%s", md)
 	}
@@ -153,7 +171,7 @@ func TestHandlePluginStatus_NexusReturnsBadJSON(t *testing.T) {
 	if err != nil {
 		t.Errorf("handler should never return error: %v", err)
 	}
-	md := out.(string)
+	md := mcpTextOf(t, out)
 	if !strings.Contains(md, "decode") {
 		t.Errorf("decode error not surfaced:\n%s", md)
 	}

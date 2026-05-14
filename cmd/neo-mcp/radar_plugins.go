@@ -86,19 +86,19 @@ func (t *RadarTool) handlePluginStatus(ctx context.Context, _ map[string]any) (a
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return renderPluginStatusError(fmt.Sprintf("contacting Nexus: %v", err)), nil
+		return mcpText(renderPluginStatusError(fmt.Sprintf("contacting Nexus: %v", err))), nil
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return renderPluginStatusError(fmt.Sprintf("Nexus returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))), nil
+		return mcpText(renderPluginStatusError(fmt.Sprintf("Nexus returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))), nil
 	}
 	var status pluginStatusResponse
 	if err := json.Unmarshal(body, &status); err != nil {
-		return renderPluginStatusError(fmt.Sprintf("decode response: %v", err)), nil
+		return mcpText(renderPluginStatusError(fmt.Sprintf("decode response: %v", err))), nil
 	}
-	return renderPluginStatusMarkdown(&status), nil
+	return mcpText(renderPluginStatusMarkdown(&status)), nil
 }
 
 // nexusBaseURL resolves the dispatcher URL: env override > config > default.
