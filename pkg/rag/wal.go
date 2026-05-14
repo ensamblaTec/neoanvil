@@ -23,7 +23,6 @@ var (
 	bucketEdges      = []byte("hnsw_edges")
 	bucketVectors    = []byte("hnsw_vectors")
 	bucketDocs       = []byte("hnsw_docs")
-	bucketDeps       = []byte("hnsw_deps")
 	bucketScars      = []byte("hnsw_scars")
 	bucketWeights    = []byte("hnsw_weights")
 	bucketDirectives = []byte("hnsw_directives")
@@ -86,9 +85,6 @@ func OpenWAL(dbPath string) (*WAL, error) {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists(bucketDocs); err != nil {
-			return err
-		}
-		if _, err := tx.CreateBucketIfNotExists(bucketDeps); err != nil {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists(bucketScars); err != nil {
@@ -526,62 +522,6 @@ func (w *WAL) LoadGraph(ctx context.Context) (*Graph, error) {
 		Vectors: allVectors,
 		VecDim:  vecDim,
 	}, nil
-}
-
-func (wal *WAL) SaveDependencies(targetPath string, dependentPaths []string) error {
-	return wal.db.Batch(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(bucketDeps)
-		if bucket == nil {
-			return fmt.Errorf("bucket_deps not found")
-		}
-
-		key := []byte(targetPath)
-		var existing []string
-		if current := bucket.Get(key); current != nil {
-			if err := json.Unmarshal(current, &existing); err != nil {
-				log.Printf("[SRE] Error: %v", err)
-			}
-		}
-
-		seen := make(map[string]bool)
-		for _, e := range existing {
-			seen[e] = true
-		}
-
-		var updated bool
-		for _, dep := range dependentPaths {
-			if !seen[dep] {
-				existing = append(existing, dep)
-				seen[dep] = true
-				updated = true
-			}
-		}
-
-		if updated {
-			return sre.ZeroAllocJSONMarshal(existing, func(data []byte) error {
-				return bucket.Put(key, data)
-			})
-		}
-		return nil
-	})
-}
-
-func (wal *WAL) GetDependents(targetPath string) ([]string, error) {
-	var dependents []string
-	err := wal.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(bucketDeps)
-		if bucket == nil {
-			return fmt.Errorf("bucket_deps not found")
-		}
-
-		if data := bucket.Get([]byte(targetPath)); data != nil {
-			if err := json.Unmarshal(data, &dependents); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return dependents, err
 }
 
 func (wal *WAL) SaveScar(filePath string, scar string) error {

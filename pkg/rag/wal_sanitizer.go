@@ -31,7 +31,6 @@ var bucketValidators = map[string]validatorFn{
 	"hnsw_vectors":    uint32ArrayValidator,   // []float32 bits
 	"hnsw_weights":    uint32ArrayValidator,   // []float32 bits (MLP W1/W2)
 	"hnsw_docs":       jsonValidator,          // JSON DocMeta
-	"hnsw_deps":       jsonValidator,          // JSON []string
 	"hnsw_scars":      jsonValidator,          // JSON []string
 	"hnsw_directives": jsonValidator,          // JSON Directive
 }
@@ -41,7 +40,7 @@ var bucketValidators = map[string]validatorFn{
 // these after the HNSW-specific cascade pass. SanitizeWALMetadataOnly uses
 // metadataOnlyBuckets (subset without weights). [144.F]
 var nonHNSWBuckets = [][]byte{
-	bucketDocs, bucketDeps, bucketScars,
+	bucketDocs, bucketScars,
 	bucketWeights, bucketDirectives, bucketHnswMeta,
 }
 
@@ -55,7 +54,7 @@ var nonHNSWBuckets = [][]byte{
 // scheduled ~30s post-boot via runBackgroundSanitize() so corruption
 // doesn't accumulate silently across sessions.
 var metadataOnlyBuckets = [][]byte{
-	bucketDocs, bucketDeps, bucketScars,
+	bucketDocs, bucketScars,
 	bucketDirectives, bucketHnswMeta,
 }
 

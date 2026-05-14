@@ -130,13 +130,20 @@ func embedAndInsert(ctx context.Context, t *RadarTool, absTarget, target string,
 	return nil
 }
 
-// saveIndexDependencies links inbound imports so future BLAST_RADIUS finds dependents.
+// saveIndexDependencies refreshes the indexed file's file→file edges in the
+// GRAPH_EDGES dep-graph so a future BLAST_RADIUS finds its dependents — same
+// resolver path bootstrapWorkspace and certify use. Was writing import-strings
+// into the orphan hnsw_deps bucket that nothing read. [BLAST_RADIUS dep-graph fix]
 func saveIndexDependencies(t *RadarTool, data []byte, ext, absTarget string) {
-	imports := extractImports(string(data), ext)
-	for _, imp := range imports {
-		if err := t.wal.SaveDependencies(imp, []string{absTarget}); err != nil {
-			log.Printf("[SRE-99.A] SaveDependencies %s: %v", imp, err)
-		}
+	rel, err := filepath.Rel(t.workspace, absTarget)
+	if err != nil {
+		return
+	}
+	relSlash := filepath.ToSlash(rel)
+	edges := fileDepEdges(t.workspace, workspaceModulePath(t.workspace), relSlash,
+		extractImports(string(data), ext))
+	if err := rag.ReplaceFileEdges(t.wal, relSlash, edges); err != nil {
+		log.Printf("[SRE-99.A] dep-graph edges for %s: %v", relSlash, err)
 	}
 }
 
