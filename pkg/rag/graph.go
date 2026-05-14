@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -57,6 +58,48 @@ func SaveGraphEdges(wal *WAL, edges []GraphEdge) error {
 				continue
 			}
 
+			key := []byte(edge.SourceNode + "->" + edge.TargetNode)
+			if err := b.Put(key, data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ReplaceFileEdges atomically replaces every outgoing edge of sourceFile in the
+// GRAPH_EDGES bucket: it deletes all existing "<sourceFile>-><target>" keys,
+// then writes the supplied edges. This makes per-file edge updates idempotent —
+// re-indexing a file after it drops an import leaves no stale edge behind, which
+// a plain SaveGraphEdges (Put-only) would. Every edge in `edges` must have
+// SourceNode == sourceFile; an empty `edges` slice simply clears the file.
+func ReplaceFileEdges(wal *WAL, sourceFile string, edges []GraphEdge) error {
+	return wal.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("GRAPH_EDGES"))
+		if b == nil {
+			return fmt.Errorf("GRAPH_EDGES bucket not found")
+		}
+		// Collect the stale "<sourceFile>->*" keys first — deleting under a
+		// live cursor is fragile in bbolt — then delete them.
+		prefix := []byte(sourceFile + "->")
+		var stale [][]byte
+		c := b.Cursor()
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			kc := make([]byte, len(k))
+			copy(kc, k)
+			stale = append(stale, kc)
+		}
+		for _, k := range stale {
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+		}
+		// Write the fresh edge set.
+		for _, edge := range edges {
+			data, err := json.Marshal(edge)
+			if err != nil {
+				continue
+			}
 			key := []byte(edge.SourceNode + "->" + edge.TargetNode)
 			if err := b.Put(key, data); err != nil {
 				return err

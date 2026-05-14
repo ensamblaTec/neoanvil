@@ -372,6 +372,10 @@ func bootstrapWorkspace(ctx context.Context, workspace string, graph *rag.Graph,
 	embedSem := make(chan struct{}, embedConcurrency)
 	log.Printf("[SRE] Unleashing %d concurrent workers for mass ingestion (Provider: %s, embed_slots: %d)", workers, cfg.AI.Provider, embedConcurrency)
 
+	// [BLAST_RADIUS dep-graph fix] Resolve the workspace Go module once so the
+	// workers can turn raw import lists into file→file GRAPH_EDGES.
+	modulePath := workspaceModulePath(workspace)
+
 	for w := 0; w < workers; w++ {
 		go func(workerID int, jobsChan <-chan string, resChan chan<- indexPayload) {
 			for path := range jobsChan {
@@ -384,10 +388,14 @@ func bootstrapWorkspace(ctx context.Context, workspace string, graph *rag.Graph,
 				}
 
 				ext := filepath.Ext(path)
-				imports := extractImports(string(data), ext)
-				for _, imp := range imports {
-					if err := wal.SaveDependencies(imp, []string{path}); err != nil {
-						log.Printf("[SRE-WARN] failed to link dependency %s -> %s: %v", imp, path, err)
+				// [BLAST_RADIUS dep-graph fix] Write file→file edges into the
+				// GRAPH_EDGES bucket that BLAST_RADIUS actually reads — the old
+				// SaveDependencies wrote import-strings into an orphan bucket.
+				if rel, relErr := filepath.Rel(workspace, path); relErr == nil {
+					relSlash := filepath.ToSlash(rel)
+					edges := fileDepEdges(workspace, modulePath, relSlash, extractImports(string(data), ext))
+					if err := rag.ReplaceFileEdges(wal, relSlash, edges); err != nil {
+						log.Printf("[SRE-WARN] dep-graph edges for %s: %v", relSlash, err)
 					}
 				}
 
