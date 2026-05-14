@@ -835,3 +835,33 @@ the same session, post-refactor `AST_AUDIT` clean.
 
 ---
 
+## [2026-05-14] [ds-background-unretrievable] DS `background:true` task_id is not pollable
+
+**Prioridad:** P2 — real defect, has a workaround (use the foreground path).
+
+SÍNTOMA: `deepseek_call` with `background:true` for `red_team_audit` /
+`map_reduce_refactor` returns `{task_id, status:pending}` — but that `task_id`
+cannot be polled. The `task_id` argument is documented (and wired) only for
+`generate_boilerplate`. So a background audit's result is **unretrievable**:
+the goroutine runs, produces output, and the caller can never fetch it.
+
+EVIDENCIA: 2026-05-14 — attempted a DS premortem for the BLAST_RADIUS dep-graph
+fix in background mode (`async_8d95eaed5c58856c`); polling it with `task_id`
+started a fresh thread instead of returning the pending task's result. The
+foreground path is the only working route (and it timed out on v4-pro+max
+before `eb3c4c7` raised the budget) — so `background:true` is the intended
+escape hatch for slow audits and it is currently broken.
+
+FIX RECOMENDADO: see `master_plan.md` → "DS plugin — background task retrieval".
+(1) Locate the Nexus-side background dispatch result store. (2) Wire `task_id`
+polling for `red_team_audit` + `map_reduce_refactor` mirroring the
+`generate_boilerplate` poll path. (3) Update the `deepseek_call` schema so
+`task_id` covers all three background-capable actions; add a regression test.
+Workaround until then: use the synchronous path with a raised
+`DEEPSEEK_HTTP_TIMEOUT_SECONDS` for v4-pro+max audits.
+
+_Mirrored in the `neo_debt` BoltDB registry (workspace tier, P2) — `neo_debt
+list` surfaces it; this block is the human-readable detail._
+
+---
+
