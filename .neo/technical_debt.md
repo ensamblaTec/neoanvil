@@ -817,3 +817,21 @@ de eb3c4c7) — self-premortem aplicado (ver abajo).
 
 ---
 
+## ~~[2026-05-14 15:32] AST COMPLEXITY in radar_folder_audit.go:39~~ — RESOLVED 2026-05-14 (commit 70db3ba)
+
+Auto-tracker fired during the codebase audit phase, before the fix landed.
+`auditClaudeFolder` CC=16 → ~3: per-skill row build extracted to `auditOneSkill`,
+glob validation to `skillPathsValid`, xref check to `brokenSkillXrefs`. Zombie
+entry — resolved in the same session, post-refactor `AST_AUDIT` clean.
+
+---
+
+## ~~[2026-05-14 15:32] AST COMPLEXITY in tool_cache_stats.go:289~~ — RESOLVED 2026-05-14 (commit 70db3ba)
+
+Auto-tracker fired during the codebase audit phase, before the fix landed.
+`CacheStatsTool.Execute` CC=17 → ~5: section assembly split into
+`addRadarCacheSections` + `addGlobalCacheSections`. Zombie entry — resolved in
+the same session, post-refactor `AST_AUDIT` clean.
+
+---
+

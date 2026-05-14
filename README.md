@@ -479,6 +479,7 @@ Full list in `go.mod`.
 | [neo-yaml-guide.md](./docs/guide/neo-yaml-guide.md) | Full configuration reference |
 | [neo-project-federation-guide.md](./docs/guide/neo-project-federation-guide.md) | Multi-workspace federation setup |
 | [neo-doctrine-migration-guide.md](./docs/guide/neo-doctrine-migration-guide.md) | **Adopt this doctrine in a new repo** — hooks, settings, durability inheritance |
+| [neo-enforcement.md](./docs/onboarding/neo-enforcement.md) | Port the enforcement layer to another workspace — the `scripts/neo-onboard.sh` kit + the discoverability/enforcement/fluency model |
 | [jira-integration-guide.md](./docs/plugins/jira-integration-guide.md) | Jira plugin setup and workflow |
 | [deepseek-api-reference.md](./docs/plugins/deepseek-api-reference.md) | DeepSeek plugin API reference |
 | [plugin-author-guide.md](./docs/plugins/plugin-author-guide.md) | Writing custom MCP plugins |
@@ -510,15 +511,29 @@ What the neoanvil doctrine ships, measured 2026-05-13:
 
 ## Adopting this doctrine in your own repo
 
-See [`neo-doctrine-migration-guide.md`](./docs/guide/neo-doctrine-migration-guide.md) for the step-by-step:
+The enforcement layer is portable, and `scripts/neo-onboard.sh <target-workspace>`
+automates it:
 
-1. Copy 7 hook shell scripts to `<target>/.claude/hooks/`.
-2. Patch workspace detection in `briefing.sh` + `pre-edit-blast.sh` (2 of 7 hooks).
-3. Copy + adapt `.claude/settings.json` (federation-aware matchers if multi-workspace).
-4. (Optional) Copy `CLAUDE.md`, skills, rules dir.
-5. Validate with bash-syntax check + hook smoke tests.
+- copies the 7 hook scripts into `<target>/.claude/hooks/`;
+- merges the neo `hooks` block into the target's `.claude/settings.json`
+  **non-destructively** — target-owned hooks and keys (`permissions`, `env`, …)
+  are preserved, the `mcp__neoanvil__*` matchers are retargeted to the target's
+  MCP server name, `NEO_WORKSPACE_ID` is injected;
+- copies the curated skill set (`--no-skills` skips it when the target already
+  carries the doctrine as older `.claude/rules/` files);
+- seeds `.claude/neo-directives-seed.md` for the operator to curate;
+- preflight-checks that the target actually has the neo MCP wired — without it
+  (layer 0) the hooks and skills are inert.
 
-Total: ~10 min for a single workspace, ~30 min for a federated umbrella project. The canonical migrated example is `/develop/other/` (strategos backend + strategosia_frontend, both ride the same 7 hooks).
+`--dry-run` prints the full plan and writes nothing. The git pre-commit cert
+gate is **not** handled — neo-mcp self-installs it at boot.
+
+Why a script and not just a `CLAUDE.md` directive: a directive is a soft
+request the model can skip; the hooks are harness-enforced. See
+[`neo-enforcement.md`](./docs/onboarding/neo-enforcement.md) for the
+discoverability/enforcement/fluency model, and
+[`neo-doctrine-migration-guide.md`](./docs/guide/neo-doctrine-migration-guide.md)
+for the deeper federation story.
 
 ## Contributing
 
