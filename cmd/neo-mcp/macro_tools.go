@@ -1340,20 +1340,26 @@ func (t *CertifyMutationTool) certifyLocalBatch(ctx context.Context, localFiles 
 		}
 		results = append(results, t.certifyOneFile(ctx, filename, complexityIntent, fastMode, dryRun, rollbackFn))
 	}
-	t.logTestImpactFootprint(localFiles)
+	if line := t.testImpactSummary(localFiles); line != "" {
+		log.Print(line)
+		results = append(results, line)
+	}
 	return results
 }
 
-// logTestImpactFootprint emits one [CERTIFY-TEST-IMPACT] line per batch
-// summarising how many _test.go files could be affected (same-package
-// siblings + cross-package direct importers from GRAPH_EDGES). [Phase 2
-// MV / Speed-First] Observability-only — execution still runs the
-// changed package's full suite. Extracted from certifyLocalBatch to keep
-// that function's CC under the bouncer cap. Silent on empty input,
-// nil wal, or zero impacted tests.
-func (t *CertifyMutationTool) logTestImpactFootprint(localFiles []any) {
+// testImpactSummary builds an operator-facing one-liner naming the
+// _test.go files that could be affected by this batch (same-package
+// siblings + cross-package transitive importers via GRAPH_EDGES).
+// Returns "" when there's nothing useful to surface (no wal, empty
+// batch, no impacted tests). [Phase 2 MV / Speed-First]
+//
+// Both log AND certify-response carry this so operators tailing logs
+// AND operators reading the tool output see the same data. Execution
+// still runs the changed package's full suite; future narrowing into
+// `go test -run` requires symbol-level mapping (deferred epic).
+func (t *CertifyMutationTool) testImpactSummary(localFiles []any) string {
 	if t.wal == nil || len(localFiles) == 0 {
-		return
+		return ""
 	}
 	mutatedRel := make([]string, 0, len(localFiles))
 	for _, f := range localFiles {
@@ -1369,9 +1375,9 @@ func (t *CertifyMutationTool) logTestImpactFootprint(localFiles []any) {
 	}
 	impacted := testsImpactedBy(t.wal, t.workspace, mutatedRel)
 	if len(impacted) == 0 {
-		return
+		return ""
 	}
-	log.Printf("[CERTIFY-TEST-IMPACT] %d test file(s) could be impacted by this batch: %v",
+	return fmt.Sprintf("[CERTIFY-TEST-IMPACT] %d test file(s) could be impacted by this batch: %v",
 		len(impacted), impacted)
 }
 
