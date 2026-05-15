@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/ensamblatec/neoanvil/pkg/rag"
@@ -152,6 +153,111 @@ func TestTestsImpactedBy_Empty(t *testing.T) {
 	if got := testsImpactedBy(wal, workspace, nil); len(got) != 0 {
 		t.Errorf("empty input should return empty result, got %v", got)
 	}
+}
+
+// TestTestsImpactedBy_TransitiveChain is the headline upgrade from the
+// one-hop MV to the BFS-transitive version: the impact must propagate
+// across multiple hops. Chain: pkg/leaf/leaf.go ← pkg/mid/mid.go ←
+// cmd/svc/svc.go ← cmd/svc/svc_test.go. Mutating pkg/leaf/leaf.go must
+// surface cmd/svc/svc_test.go — the one-hop version would miss this
+// because there's no direct svc_test.go → leaf.go edge.
+func TestTestsImpactedBy_TransitiveChain(t *testing.T) {
+	workspace := t.TempDir()
+	mkfile := func(rel string) {
+		dir := filepath.Dir(filepath.Join(workspace, rel))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(workspace, rel), []byte("package x\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	for _, rel := range []string{
+		"pkg/leaf/leaf.go",
+		"pkg/mid/mid.go",
+		"cmd/svc/svc.go",
+		"cmd/svc/svc_test.go",
+	} {
+		mkfile(rel)
+	}
+
+	wal, err := rag.OpenWAL(filepath.Join(workspace, "wal.db"))
+	if err != nil {
+		t.Fatalf("OpenWAL: %v", err)
+	}
+	t.Cleanup(func() { _ = wal.Close() })
+	if err := rag.InitGraphRAG(wal); err != nil {
+		t.Fatalf("InitGraphRAG: %v", err)
+	}
+
+	// Chain edges (importer → imported):
+	//   cmd/svc/svc_test.go → cmd/svc/svc.go (would normally also be in same-pkg,
+	//       but explicit here so the BFS exercises the dep-graph leg)
+	//   cmd/svc/svc.go      → pkg/mid/mid.go
+	//   pkg/mid/mid.go      → pkg/leaf/leaf.go
+	edges := []rag.GraphEdge{
+		{SourceNode: "cmd/svc/svc_test.go", TargetNode: "cmd/svc/svc.go"},
+		{SourceNode: "cmd/svc/svc.go", TargetNode: "pkg/mid/mid.go"},
+		{SourceNode: "pkg/mid/mid.go", TargetNode: "pkg/leaf/leaf.go"},
+	}
+	if err := rag.SaveGraphEdges(wal, edges); err != nil {
+		t.Fatalf("SaveGraphEdges: %v", err)
+	}
+
+	got := testsImpactedBy(wal, workspace, []string{"pkg/leaf/leaf.go"})
+	mustContain(t, got, "cmd/svc/svc_test.go")
+}
+
+// TestTestsImpactedBy_DepthCapHonored protects against cycle blow-up or
+// pathological deep chains: the reverse-BFS must stop at
+// testsImpactBFSDepth hops even if the graph would let it walk further.
+// Set up a chain longer than the cap and confirm the deepest test isn't
+// reached.
+func TestTestsImpactedBy_DepthCapHonored(t *testing.T) {
+	workspace := t.TempDir()
+	wal, err := rag.OpenWAL(filepath.Join(workspace, "wal.db"))
+	if err != nil {
+		t.Fatalf("OpenWAL: %v", err)
+	}
+	t.Cleanup(func() { _ = wal.Close() })
+	if err := rag.InitGraphRAG(wal); err != nil {
+		t.Fatalf("InitGraphRAG: %v", err)
+	}
+
+	// Chain length = testsImpactBFSDepth + 2 (so the terminal test is
+	// just beyond the cap). Each link: pkg/N+1/n.go → pkg/N/n.go, with
+	// the deepest "test" at pkg/<depth+1>/n_test.go.
+	chainLen := testsImpactBFSDepth + 2
+	edges := make([]rag.GraphEdge, 0, chainLen)
+	for i := 0; i < chainLen-1; i++ {
+		edges = append(edges, rag.GraphEdge{
+			SourceNode: fakeNodeName(i + 1),
+			TargetNode: fakeNodeName(i),
+		})
+	}
+	// Test file at the far end imports the deepest non-test node.
+	edges = append(edges, rag.GraphEdge{
+		SourceNode: "pkg/farthest/farthest_test.go",
+		TargetNode: fakeNodeName(chainLen - 1),
+	})
+	if err := rag.SaveGraphEdges(wal, edges); err != nil {
+		t.Fatalf("SaveGraphEdges: %v", err)
+	}
+
+	// Mutate the lowest node (index 0). BFS from there can reach at
+	// most testsImpactBFSDepth hops up the chain.
+	got := testsImpactedBy(wal, workspace, []string{fakeNodeName(0)})
+
+	// The test at the far end should NOT be in the result — past the cap.
+	for _, p := range got {
+		if p == "pkg/farthest/farthest_test.go" {
+			t.Errorf("BFS exceeded cap %d, reached %q", testsImpactBFSDepth, p)
+		}
+	}
+}
+
+func fakeNodeName(i int) string {
+	return "pkg/n" + strconv.Itoa(i) + "/n.go"
 }
 
 // --- tiny helpers (avoid pulling in strings just for this file) ----------
