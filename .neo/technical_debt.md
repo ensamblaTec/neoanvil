@@ -926,3 +926,15 @@ neo_memory action:rem_sleep fails with "learning_rate and session_success_ratio 
 
 ---
 
+## ~~[2026-05-15 04:46] AST COMPLEXITY in macro_tools.go:1297~~ — RESOLVED 2026-05-15 (zombie)
+
+Auto-tracker fired on a stale snapshot. During Phase 2 MV wiring the
+test-impact logging block was briefly inlined in `certifyLocalBatch`,
+bumping CC to 17 — extracted in the same commit (`bcf87ef`) into
+`logTestImpactFootprint`, and again in `e4c57f7` into `testImpactSummary`,
+dropping CC back under the cap. Post-refactor `AST_AUDIT cmd/neo-mcp/macro_tools.go`
+returns clean (only the grandfathered `main` CC=18 remains).
+Zombie entry — closed in the same session that introduced it.
+
+---
+
