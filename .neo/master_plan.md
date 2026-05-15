@@ -54,12 +54,20 @@ The original plan had three premise errors discovered during code audit:
 
 ### Phase 0 — Quick wins (each 1-2h, low risk, mostly independent)
 
-- [ ] **0.A — Cache auto-warmup at boot.** `neo_cache(action:"warmup",
-      from_recent:true)` invoked from `bootRAG` post-load. The system itself
-      prints `warmup_suggested` paths — use them. Files touch:
-      `cmd/neo-mcp/boot_helpers.go::bootRAG` (line 39). **Exit:** post-restart
-      Tcache hit_ratio > 30% on the first BRIEFING that follows BLAST_RADIUS
-      calls.
+- [x] **0.A — Cache auto-warmup at boot** — done 2026-05-15. Two pieces
+      shipped together (the value-delivering combination):
+      (a) `pkg/rag/cache_persist.go` — `persistedSnapshot` and
+      `persistedTextSnapshot` extended with `RecentMisses []string`
+      (`omitempty` so empty-ring snapshots stay tidy); SaveSnapshot harvests
+      `c.RecentMissTargets(missRingPersistCap=64)`; LoadSnapshot rehydrates
+      via `c.misses_.record(...)` newest-on-top.
+      (b) `cmd/neo-mcp/main.go` — `warmupTool` extracted to a named var, async
+      goroutine after `mustRegister` invokes
+      `warmupTool.Execute(ctx, {"from_recent":true})`. Detached so warmup
+      latency never blocks boot.
+      Tests: `TestSnapshot_RecentMissesRoundTrip` 3 subtests — query cache,
+      text cache, empty-ring omits the JSON field. Round-trip preserved
+      newest-first ordering.
 
 - [x] **0.B — Per-intent latency breakdown in `neo_tool_stats`** — done
       2026-05-15. Found the dispatcher already records both `neo_radar` and

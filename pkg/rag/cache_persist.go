@@ -48,6 +48,11 @@ type persistedTextEntry struct {
 type persistedTextSnapshot struct {
 	Version int                  `json:"version"`
 	Entries []persistedTextEntry `json:"entries"`
+	// [Phase 0.A / Speed-First] Round-trip the recent-miss ring so the auto-
+	// warmup at boot has material on the FIRST post-restart session. Without
+	// this the ring is empty at boot and the cache stays cold until session
+	// activity refills it. Bounded by `missRingCap` (cache_window.go).
+	RecentMisses []string `json:"recent_misses,omitempty"`
 }
 
 // persistedSnapshot wraps the entry list with a version tag so future
@@ -55,9 +60,16 @@ type persistedTextSnapshot struct {
 type persistedSnapshot struct {
 	Version int              `json:"version"`
 	Entries []persistedEntry `json:"entries"`
+	// [Phase 0.A / Speed-First] See persistedTextSnapshot.RecentMisses.
+	RecentMisses []string `json:"recent_misses,omitempty"`
 }
 
 const snapshotVersion = 1
+
+// missRingPersistCap caps how many recent miss targets we round-trip per
+// snapshot. Sized to comfortably fit any practical warmup batch + leave
+// headroom; the underlying ring is missRingCap-bounded regardless.
+const missRingPersistCap = 64
 
 // SaveSnapshot writes the top-N most-hit entries to path. Overwrites
 // any existing file. Safe to call concurrently with Get/Put — the
@@ -68,7 +80,11 @@ func (c *QueryCache) SaveSnapshot(path string, n int) error {
 		return nil
 	}
 	top := c.Top(n)
-	snap := persistedSnapshot{Version: snapshotVersion, Entries: make([]persistedEntry, 0, len(top))}
+	snap := persistedSnapshot{
+		Version:      snapshotVersion,
+		Entries:      make([]persistedEntry, 0, len(top)),
+		RecentMisses: c.RecentMissTargets(missRingPersistCap),
+	}
 	// Top() returns QueryTopEntry — we need the Result slice too, so
 	// walk the LRU once more under lock to grab it.
 	c.mu.Lock()
@@ -109,7 +125,11 @@ func (c *TextCache) SaveSnapshot(path string, n int) error {
 		return nil
 	}
 	top := c.Top(n)
-	snap := persistedTextSnapshot{Version: snapshotVersion, Entries: make([]persistedTextEntry, 0, len(top))}
+	snap := persistedTextSnapshot{
+		Version:      snapshotVersion,
+		Entries:      make([]persistedTextEntry, 0, len(top)),
+		RecentMisses: c.RecentMissTargets(missRingPersistCap),
+	}
 	c.mu.Lock()
 	for _, e := range top {
 		for el := c.ll.Front(); el != nil; el = el.Next() {
@@ -170,6 +190,12 @@ func (c *TextCache) LoadSnapshot(path string, currentGen uint64) (int, error) {
 		c.mu.Unlock()
 		loaded++
 	}
+	// [Phase 0.A / Speed-First] Rehydrate the recent-miss ring so the auto-
+	// warmup at boot has material to chew on for the FIRST post-restart
+	// session. Oldest entries first so newest land on top of the ring.
+	for i := len(snap.RecentMisses) - 1; i >= 0; i-- {
+		c.misses_.record(snap.RecentMisses[i])
+	}
 	return loaded, nil
 }
 
@@ -208,6 +234,12 @@ func (c *QueryCache) LoadSnapshot(path string, currentGen uint64) (int, error) {
 		}
 		c.mu.Unlock()
 		loaded++
+	}
+	// [Phase 0.A / Speed-First] Rehydrate the recent-miss ring so the auto-
+	// warmup at boot has material to chew on for the FIRST post-restart
+	// session. See TextCache.LoadSnapshot for the matching restore.
+	for i := len(snap.RecentMisses) - 1; i >= 0; i-- {
+		c.misses_.record(snap.RecentMisses[i])
 	}
 	return loaded, nil
 }

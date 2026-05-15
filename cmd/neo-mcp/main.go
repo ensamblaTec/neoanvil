@@ -674,14 +674,25 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 	// [Épica 239] Unified cache observability + control tool. Dispatches via
 	// `action` to the six sub-handlers kept intact as *Tool types (still
 	// individually unit-testable). Replaces 6 previous MCP registrations.
+	warmupTool := &CacheWarmupTool{radar: radarTool, queryCache: queryCache, textCache: textCache}
 	mustRegister(&CacheTool{
 		stats:   &CacheStatsTool{queryCache: queryCache, textCache: textCache, embCache: embCache, hotFiles: radarTool.hotFiles, workspace: workspace, knowledgeStats: hotCache.Stats},
 		flush:   &CacheFlushTool{graph: hnswGraph},
 		resize:  &CacheResizeTool{queryCache: queryCache, textCache: textCache},
-		warmup:  &CacheWarmupTool{radar: radarTool, queryCache: queryCache, textCache: textCache},
+		warmup:  warmupTool,
 		persist: &CachePersistTool{queryCache: queryCache, textCache: textCache, embCache: embCache, workspace: workspace},
 		inspect: &CacheInspectTool{queryCache: queryCache, textCache: textCache, embCache: embCache, graph: hnswGraph},
 	})
+	// [Phase 0.A / Speed-First] Auto-warmup at boot. Uses the recent-miss
+	// rings rehydrated from the cache snapshot (cache_persist.go restores
+	// them now), so we close the observe→persist→warm loop without the
+	// operator copy-pasting target lists after every rebuild-restart.
+	// Runs detached: warmup is a latency optimisation, not a boot prereq.
+	go func() {
+		if _, werr := warmupTool.Execute(ctx, map[string]any{"from_recent": true}); werr != nil {
+			log.Printf("[BOOT] auto-warmup err: %v", werr)
+		}
+	}()
 	// [Épica 207] Per-tool latency / error observability — distinct domain
 	// (tool latency, not cache), kept as its own tool.
 	mustRegister(&ToolStatsTool{workspace: workspace})

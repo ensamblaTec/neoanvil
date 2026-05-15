@@ -3,6 +3,7 @@ package rag
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -142,4 +143,94 @@ func TestLoadSnapshot_WrongVersionIsNoOp(t *testing.T) {
 	if n != 0 {
 		t.Errorf("wrong version should skip, loaded %d", n)
 	}
+}
+
+// TestSnapshot_RecentMissesRoundTrip covers [Phase 0.A / Speed-First]: the
+// recent-miss ring must survive Save→Load so the boot auto-warmup has
+// material on the first post-restart session. Without round-trip, the
+// ring is empty at boot and `from_recent:true` warmup is a no-op until
+// new misses accumulate within the running session.
+func TestSnapshot_RecentMissesRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+
+	t.Run("query cache", func(t *testing.T) {
+		c := NewQueryCache(8)
+		// Generate 3 distinct misses so the ring has known content.
+		for _, target := range []string{"hnsw search algorithm", "config watcher hot reload", "plugin health check"} {
+			c.RecordMiss(target)
+		}
+
+		// Sanity — ring is populated pre-save.
+		if got := c.RecentMissTargets(10); len(got) != 3 {
+			t.Fatalf("pre-save ring depth = %d, want 3", len(got))
+		}
+
+		path := filepath.Join(tmp, "qcache.json")
+		if err := c.SaveSnapshot(path, 4); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+
+		// Fresh cache must start empty.
+		c2 := NewQueryCache(8)
+		if got := c2.RecentMissTargets(10); len(got) != 0 {
+			t.Fatalf("fresh cache should have empty ring, got %d", len(got))
+		}
+
+		if _, err := c2.LoadSnapshot(path, 1); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+
+		got := c2.RecentMissTargets(10)
+		if len(got) != 3 {
+			t.Fatalf("post-load ring depth = %d, want 3 (round-trip lost misses)", len(got))
+		}
+		// Newest-first order preserved (loop in LoadSnapshot recreates that).
+		if got[0] != "plugin health check" {
+			t.Errorf("newest-first violated: got[0]=%q, want %q", got[0], "plugin health check")
+		}
+	})
+
+	t.Run("text cache", func(t *testing.T) {
+		c := NewTextCache(8)
+		for _, target := range []string{"pkg/rag/embedder.go", "cmd/neo-mcp/tool_memory.go"} {
+			c.RecordMiss(target)
+		}
+
+		path := filepath.Join(tmp, "tcache.json")
+		if err := c.SaveSnapshot(path, 4); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+
+		c2 := NewTextCache(8)
+		if _, err := c2.LoadSnapshot(path, 1); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+
+		got := c2.RecentMissTargets(10)
+		if len(got) != 2 {
+			t.Fatalf("post-load ring depth = %d, want 2", len(got))
+		}
+		if got[0] != "cmd/neo-mcp/tool_memory.go" {
+			t.Errorf("newest-first violated: got[0]=%q", got[0])
+		}
+	})
+
+	t.Run("empty ring omits recent_misses field", func(t *testing.T) {
+		// A cache that's been used but never had a miss recorded should
+		// still snapshot cleanly. The omitempty tag keeps the JSON tidy
+		// for the (common) zero-miss case.
+		c := NewQueryCache(8)
+		path := filepath.Join(tmp, "empty.json")
+		if err := c.SaveSnapshot(path, 4); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "recent_misses") {
+			t.Errorf("snapshot of empty-miss-ring cache should omit recent_misses key, got: %s", raw)
+		}
+	})
 }
