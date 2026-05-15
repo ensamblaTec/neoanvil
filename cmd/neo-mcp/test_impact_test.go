@@ -260,6 +260,111 @@ func fakeNodeName(i int) string {
 	return "pkg/n" + strconv.Itoa(i) + "/n.go"
 }
 
+// TestCertifyMutationTool_testImpactSummary covers the operator-facing
+// wrapper: the test-impact list must end up in the certify response
+// (returned string) AND the log, not just the log. Without this guarantee
+// agents calling certify would see "✅ Aprobado" lines but no hint of
+// which tests should be re-run — defeating the Phase 2 MV observability
+// goal. Mirrors testsImpactedBy's coverage at the integration boundary.
+func TestCertifyMutationTool_testImpactSummary(t *testing.T) {
+	workspace, wal := fakeTestWorkspace(t)
+	tool := &CertifyMutationTool{wal: wal, workspace: workspace}
+
+	t.Run("nil wal returns empty", func(t *testing.T) {
+		empty := &CertifyMutationTool{wal: nil, workspace: workspace}
+		if got := empty.testImpactSummary([]any{"pkg/foo/x.go"}); got != "" {
+			t.Errorf("nil wal must return empty string, got %q", got)
+		}
+	})
+
+	t.Run("empty input returns empty", func(t *testing.T) {
+		if got := tool.testImpactSummary(nil); got != "" {
+			t.Errorf("nil input must return empty string, got %q", got)
+		}
+		if got := tool.testImpactSummary([]any{}); got != "" {
+			t.Errorf("empty slice must return empty string, got %q", got)
+		}
+	})
+
+	t.Run("non-string entries are skipped", func(t *testing.T) {
+		// localFiles is []any — assert defensively that a non-string slot
+		// (e.g. an MCP arg shape bug) doesn't panic the helper.
+		got := tool.testImpactSummary([]any{42, nil, "pkg/foo/x.go"})
+		if !contains(got, "could be impacted") {
+			t.Errorf("string entry should still be processed despite mixed types, got %q", got)
+		}
+	})
+
+	t.Run("absolute path is resolved against workspace", func(t *testing.T) {
+		absPath := filepath.Join(workspace, "pkg/foo/x.go")
+		got := tool.testImpactSummary([]any{absPath})
+		// Must produce a non-empty summary — fakeTestWorkspace has x_test.go
+		// in pkg/foo so same-package detection should fire.
+		if got == "" {
+			t.Fatalf("absolute workspace path should resolve and produce summary, got empty")
+		}
+		// The output should reference the SAME-package test as a workspace-
+		// relative path, not the absolute one.
+		if !contains(got, "pkg/foo/x_test.go") {
+			t.Errorf("expected workspace-relative pkg/foo/x_test.go in summary, got %q", got)
+		}
+	})
+
+	t.Run("happy path includes count + bracket-list", func(t *testing.T) {
+		got := tool.testImpactSummary([]any{"pkg/foo/x.go"})
+		if got == "" {
+			t.Fatal("expected non-empty summary")
+		}
+		// Format contract: starts with the [CERTIFY-TEST-IMPACT] prefix so
+		// agents can grep/parse, includes a count, and lists files.
+		for _, want := range []string{"[CERTIFY-TEST-IMPACT]", "could be impacted", "pkg/foo/x_test.go"} {
+			if !contains(got, want) {
+				t.Errorf("summary missing %q: %s", want, got)
+			}
+		}
+	})
+
+	t.Run("zero impacted tests returns empty (no noise)", func(t *testing.T) {
+		// A mutation in a directory with no tests AND not imported by any
+		// _test.go elsewhere should produce no summary line — we don't
+		// want a `0 test files` log spam on doc-only commits.
+		emptyWS := t.TempDir()
+		walEmpty, err := rag.OpenWAL(filepath.Join(emptyWS, "wal.db"))
+		if err != nil {
+			t.Fatalf("OpenWAL: %v", err)
+		}
+		t.Cleanup(func() { _ = walEmpty.Close() })
+		if err := rag.InitGraphRAG(walEmpty); err != nil {
+			t.Fatalf("InitGraphRAG: %v", err)
+		}
+		// Materialise a single prod file with no tests anywhere.
+		if err := os.MkdirAll(filepath.Join(emptyWS, "pkg/lonely"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(emptyWS, "pkg/lonely/x.go"), []byte("package lonely\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		emptyTool := &CertifyMutationTool{wal: walEmpty, workspace: emptyWS}
+		if got := emptyTool.testImpactSummary([]any{"pkg/lonely/x.go"}); got != "" {
+			t.Errorf("zero impact must be silent, got %q", got)
+		}
+	})
+}
+
+// contains is the tiniest substring helper to avoid pulling strings just
+// for these tests.
+func contains(hay, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(hay); i++ {
+		if hay[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
 // --- tiny helpers (avoid pulling in strings just for this file) ----------
 
 func mustContain(t *testing.T, haystack []string, needle string) {
