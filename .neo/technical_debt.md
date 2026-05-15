@@ -948,3 +948,43 @@ Zombie entry — closed in the same session that introduced it.
 
 ---
 
+## [2026-05-15 11:29] strategosia-frontend CPG memory leak 14.6GB vs 512MB limit (2853%)
+
+**Prioridad:** P2
+
+BRIEFING reporta CPG: 14610/512MB. cpg.max_heap_mb default is 512 pero el heap usado es 14.6 GB. **Root cause confirmado en entry separado abajo (instrumentation bug):** la métrica reportada es process-wide HeapAlloc, NO CPG-only. NO es leak real — strategosia simplemente es proceso grande (HNSW + memex + SharedMem 11K entries). Síntomas correlacionados: RAG 0% coverage (HNSW cold), 5 P0 nexus debts históricos, post-commit hook missing. Fix recomendado: corregir métrica (ver entry "CPG memory metric is process-wide HeapAlloc"). Esta entry registra el síntoma; la otra registra el bug subyacente.
+
+---
+
+## [2026-05-15 11:29] strategosia-frontend RAG 0% + HNSW cold
+
+**Prioridad:** P2
+
+BRIEFING: RAG 0% ⚠️ low_rag_coverage=0% (fallback_to_grep_recommended). HNSW: cold. Probable causa: hnsw.bin no cargado al boot, o índice nunca fue poblado para este workspace. Sin índice semántico, SEMANTIC_CODE caerá a grep siempre. Fix: re-ingestar workspace via neo_radar(intent:PROJECT_DIGEST) o reindex completo. Workaround actual: el fallback automático a grep mantiene funcionalidad pero pierde queries conceptuales.
+
+---
+
+## [2026-05-15 11:29] strategosia-frontend post-commit hook missing
+
+**Prioridad:** P2
+
+BRIEFING: hooks: post-commit:✗ — el hook no está instalado en este workspace. Implica que doc-pack automation por commit (make install-git-hooks) no se ejecutó aquí. Para sync con strategos+neoanvil que sí tienen post-commit:✓, correr el target make del repo neoanvil o copiar el hook manualmente.
+
+---
+
+## [2026-05-15 11:29] strategosia-frontend skills symlink 3 vs 17 (mismo patrón strategos)
+
+**Prioridad:** P2
+
+.claude/skills es symlink relativo ../../.claude/skills → ~/develop/other/.claude/skills (solo 3 skills genéricas). Strategos ya fixeado en sesión 2026-05-15 — apunta a neoanvil canonical (17 skills). Strategosia pendiente de aplicar mismo fix: rm + ln -s absoluto a /Users/manufactura/go/src/github.com/ensamblatec/neoanvil/.claude/skills.
+
+---
+
+## [2026-05-15 11:30] CPG memory metric is process-wide HeapAlloc, not CPG-only (instrumentation bug)
+
+**Prioridad:** P2
+
+pkg/cpg/manager.go:174 CurrentHeapMB returns runtime.MemStats.HeapAlloc / 1MB — that's TOTAL Go process heap, NOT the CPG subsystem's allocation. Lines 135 + 152 use the same MS.HeapAlloc. BRIEFING reports this as "CPG: X/512MB" comparing against cpg.max_heap_mb limit. Result: strategosia_frontend shows CPG 14610/512MB (2853%) — the workspace process is using 14.6GB total heap (HNSW + memex + SharedMem 11K entries + dep graph + index), NOT 14.6GB of CPG specifically. The OOM guard at manager.go:154 trips on process-wide pressure, not CPG-specific bloat. Fix paths: (a) rename to ProcessHeapMB / process_heap_mb to remove confusion; (b) implement CPG-only tracking via sync.Pool counters or per-package memory accounting; (c) document current behavior. Side effect: cpg.max_heap_mb config tag misleading — operators raise it expecting more CPG headroom but it controls process-wide OOM threshold. Same bug latent in strategos (CPG 202/16384 = 1.2%, doesn't trip the alarm). Detected via strategosia BRIEFING audit 2026-05-15.
+
+---
+
