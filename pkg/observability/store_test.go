@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -79,6 +80,65 @@ func TestStore_RecordCall_FlushRoundTrip(t *testing.T) {
 	}
 }
 
+// TestStore_RecordCall_PerActionAggregate covers the [Phase 0.B / Speed-First]
+// dual-write: persistCall maintains both the bare tool-name aggregate AND the
+// "<name>/<action>" composite, so neo_tool_stats can surface that
+// neo_radar/BLAST_RADIUS has different p99 than neo_radar/AST_AUDIT without
+// the operator needing to scrape per-intent token_spend data.
+func TestStore_RecordCall_PerActionAggregate(t *testing.T) {
+	s := newTestStore(t)
+	// Two intents on the same tool — different durations.
+	s.RecordCall("neo_radar", "BLAST_RADIUS", 400*time.Millisecond, "ok", "", 100, 200)
+	s.RecordCall("neo_radar", "BLAST_RADIUS", 460*time.Millisecond, "ok", "", 100, 200)
+	s.RecordCall("neo_radar", "AST_AUDIT", 5*time.Millisecond, "ok", "", 50, 100)
+	// One call without action — should hit only the bare key, not produce
+	// a "neo_radar/" composite entry.
+	s.RecordCall("neo_radar", "", 10*time.Millisecond, "ok", "", 1, 1)
+
+	if err := s.flushNow(); err != nil {
+		t.Fatalf("flushNow: %v", err)
+	}
+
+	aggs := s.ToolAggregates()
+
+	// Bare aggregate keeps existing semantics.
+	if got := aggs["neo_radar"].Calls; got != 4 {
+		t.Errorf("neo_radar (bare) Calls = %d, want 4", got)
+	}
+
+	// Per-action composites surface.
+	blast, ok := aggs["neo_radar/BLAST_RADIUS"]
+	if !ok {
+		t.Fatal("neo_radar/BLAST_RADIUS aggregate missing — per-action dual-write not effective")
+	}
+	if blast.Calls != 2 {
+		t.Errorf("neo_radar/BLAST_RADIUS Calls = %d, want 2", blast.Calls)
+	}
+	if blast.Name != "neo_radar/BLAST_RADIUS" {
+		t.Errorf("BLAST_RADIUS agg.Name = %q, want neo_radar/BLAST_RADIUS", blast.Name)
+	}
+
+	audit, ok := aggs["neo_radar/AST_AUDIT"]
+	if !ok {
+		t.Fatal("neo_radar/AST_AUDIT aggregate missing")
+	}
+	if audit.Calls != 1 {
+		t.Errorf("neo_radar/AST_AUDIT Calls = %d, want 1", audit.Calls)
+	}
+
+	// The whole point: per-action p99s diverge — BLAST_RADIUS slow tail,
+	// AST_AUDIT fast — the bare aggregate hides this.
+	if blast.P99Ns <= audit.P99Ns {
+		t.Errorf("expected BLAST_RADIUS p99 (%dns) > AST_AUDIT p99 (%dns); the whole point of per-action stats is they differ",
+			blast.P99Ns, audit.P99Ns)
+	}
+
+	// Empty action must NOT produce a "neo_radar/" entry.
+	if _, has := aggs["neo_radar/"]; has {
+		t.Error("aggregate keyed by empty action should not exist — would pollute the table")
+	}
+}
+
 // TestStore_RingFlushOnCapacity — crossing ringCapacity triggers async flush.
 func TestStore_RingFlushOnCapacity(t *testing.T) {
 	s := newTestStore(t)
@@ -131,12 +191,30 @@ func TestStore_ConcurrentRecordCall(t *testing.T) {
 		t.Errorf("TotalRecords = %d, want %d", got, workers*perWorker)
 	}
 	aggs := s.ToolAggregates()
+	// [Phase 0.B / Speed-First] Sum only bare-tool aggregates. persistCall
+	// dual-writes one row per record into both "worker_N" (bare) and
+	// "worker_N/action" (per-action composite); counting both would
+	// double-count. The bare aggregates carry the canonical 1:1 invariant.
 	totalCalls := 0
-	for _, a := range aggs {
+	for name, a := range aggs {
+		if strings.Contains(name, "/") {
+			continue
+		}
 		totalCalls += a.Calls
 	}
 	if totalCalls != workers*perWorker {
-		t.Errorf("sum of aggregate Calls = %d, want %d", totalCalls, workers*perWorker)
+		t.Errorf("sum of bare-tool aggregate Calls = %d, want %d", totalCalls, workers*perWorker)
+	}
+	// Sanity: the dual-write also produced one composite per call.
+	composite := 0
+	for name, a := range aggs {
+		if strings.Contains(name, "/") {
+			composite += a.Calls
+		}
+	}
+	if composite != workers*perWorker {
+		t.Errorf("sum of composite aggregate Calls = %d, want %d (one per record under action=%q)",
+			composite, workers*perWorker, "action")
 	}
 }
 

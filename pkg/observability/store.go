@@ -448,13 +448,33 @@ func (s *Store) persistCall(tx *bbolt.Tx, rec toolCallRecord) error {
 		return err
 	}
 
-	// Update aggregate stats for this tool.
+	// Update aggregate stats. [Phase 0.B / Speed-First] Dual-write: bare tool
+	// name (backward-compat: existing dashboards keep working) PLUS the
+	// "<name>/<action>" composite when action is non-empty. Lets operators
+	// see that neo_radar/BLAST_RADIUS p99 differs from neo_radar/AST_AUDIT
+	// p99 instead of staring at one lumped neo_radar number that hides which
+	// intent owns the latency tail.
 	aggB := tx.Bucket([]byte(bucketToolAggregate))
+	if err := s.updateToolAggregate(aggB, rec.Name, rec); err != nil {
+		return err
+	}
+	if rec.Action != "" {
+		if err := s.updateToolAggregate(aggB, rec.Name+"/"+rec.Action, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// updateToolAggregate reads-modifies-writes one ToolAggregate row keyed by
+// `key`. Used by persistCall to maintain both the bare-tool aggregate and
+// the per-action sub-aggregate from a single record. [Phase 0.B / Speed-First]
+func (s *Store) updateToolAggregate(aggB *bbolt.Bucket, key string, rec toolCallRecord) error {
 	var agg ToolAggregate
-	if raw := aggB.Get([]byte(rec.Name)); raw != nil {
+	if raw := aggB.Get([]byte(key)); raw != nil {
 		_ = json.Unmarshal(raw, &agg)
 	}
-	agg.Name = rec.Name
+	agg.Name = key
 	agg.Calls++
 	if rec.Status == "error" {
 		agg.Errors++
@@ -467,7 +487,7 @@ func (s *Store) persistCall(tx *bbolt.Tx, rec toolCallRecord) error {
 	}
 	agg.recomputePercentiles()
 	aggVal, _ := json.Marshal(agg)
-	return aggB.Put([]byte(rec.Name), aggVal)
+	return aggB.Put([]byte(key), aggVal)
 }
 
 // PurgeOldDays removes tool_calls_YYYYMMDD buckets older than `keep` days.

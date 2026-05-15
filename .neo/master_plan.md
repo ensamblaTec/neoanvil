@@ -61,12 +61,18 @@ The original plan had three premise errors discovered during code audit:
       Tcache hit_ratio > 30% on the first BRIEFING that follows BLAST_RADIUS
       calls.
 
-- [ ] **0.B — Per-intent latency breakdown in `neo_tool_stats`.** `neo_radar`
-      lumps 23 intents into one p99. Splitting them surfaces which intent owns
-      the 460ms tail (almost certainly SEMANTIC_CODE or uncached BLAST_RADIUS).
-      Files touch: `cmd/neo-mcp/tool_tool_stats.go` + the radar dispatch
-      observability hook. **Exit:** response shows
-      `neo_radar.BLAST_RADIUS.p99` separately from `neo_radar.AST_AUDIT.p99`.
+- [x] **0.B — Per-intent latency breakdown in `neo_tool_stats`** — done
+      2026-05-15. Found the dispatcher already records both `neo_radar` and
+      `neo_radar/<intent>` to the in-memory ring (`main.go:1005-1007`); the
+      persisted store (`bucketToolAggregate`) was keying only by `rec.Name`,
+      dropping the action. Fixed in `pkg/observability/store.go::persistCall`
+      via a new `updateToolAggregate` helper + dual-write (bare + composite
+      when `action != ""`). Backward-compat: existing dashboards keep working;
+      neo_tool_stats now surfaces `neo_radar/BLAST_RADIUS` p99 separately
+      from `neo_radar/AST_AUDIT`. `TestStore_RecordCall_PerActionAggregate`
+      regression test asserts the dual-write + that p99s diverge.
+      `TestStore_ConcurrentRecordCall` updated to count bare-tool rows only
+      (the dual-write is intentional double-write at aggregate level).
 
 - [ ] **0.C — HNSW quant `hybrid` audit + decision.** Current workspace runs
       float32 only (`cfg.RAG.VectorQuant = "float32"`, default at
