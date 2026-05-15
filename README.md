@@ -437,6 +437,21 @@ A/B helper at `scripts/b1-measurement.sh`, and only graduates if the
 primary metric moves. If a B fails, that B is discarded; the umbrella
 branch holds the B's that earned their merge.
 
+**Operator workflow is zero-touch.** Snapshotting is automatic via two
+hooks (`SessionStart` runs `b1-snapshot.sh pre` in background;
+`Stop` runs `b1-snapshot.sh post`), so the only knob the operator turns
+between A/B rounds is `export NEO_BRIEFING_DIFF_DISABLE=1` (baseline)
+vs `unset` (treatment). Trajectory is rendered with
+`./scripts/b1-measurement.sh report`. Three-step quickstart:
+[`docs/general/adaptive-runtime-quickstart.md`](./docs/general/adaptive-runtime-quickstart.md);
+full spec: [`docs/general/b1-measurement-protocol.md`](./docs/general/b1-measurement-protocol.md).
+
+*Note for macOS:* the hook chain was silently no-op'd until 2026-05-15
+because the `timeout` binary doesn't exist on macOS by default. The
+hooks now use bounded internal `curl --max-time` plus a portable
+background+kill watchdog instead, which means the mirror and snapshot
+actually fire on Darwin.
+
 In parallel — and shipped to `develop` (not the experimental branch)
 — two warning-only operator-discipline interventions landed:
 

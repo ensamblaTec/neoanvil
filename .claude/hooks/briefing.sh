@@ -71,7 +71,17 @@ echo "$text"
 # breaks. Opt-out via NEO_BRIEFING_DIFF_DISABLE=1.
 HELPER="$(dirname "${BASH_SOURCE[0]}")/briefing-behavior-diff.sh"
 if [ -x "$HELPER" ]; then
-  # 3s timeout — briefing already used ~17s of the 20s SessionStart budget;
-  # the helper has to be fast or skip silently.
-  timeout 3 "$HELPER" 2>/dev/null || true
+  # The helper has its own curl --max-time 1 + 2 (3 s bounded internally),
+  # so no outer wrapper is needed — and macOS lacks the `timeout` binary
+  # by default, which silently no-op'd the previous `timeout 3 "$HELPER"`.
+  "$HELPER" 2>/dev/null || true
+fi
+
+# [B1 auto-snapshot 2026-05-15] Capture pre-session tool-discipline state
+# for the A/B measurement. Runs in background with its own 7s outer cap so
+# the SessionStart budget is unaffected. The Stop hook captures the
+# corresponding post-session snapshot. Opt-out: NEO_B1_SNAPSHOT_DISABLE=1.
+SNAP="$(dirname "${BASH_SOURCE[0]}")/b1-snapshot.sh"
+if [ -x "$SNAP" ]; then
+  ( "$SNAP" pre </dev/null >/dev/null 2>&1 & ) >/dev/null 2>&1 || true
 fi
