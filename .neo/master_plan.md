@@ -78,14 +78,13 @@ The original plan had three premise errors discovered during code audit:
       fixed 10-query set; decision recorded in
       `docs/general/hnsw-quant-decision.md`.
 
-- [ ] **0.D — Persist `symbolMapCache` across restart** (ex-Pilar-I, scoped
-      down per audit). Add `SaveSnapshotJSON` / `LoadSnapshotJSON` to the
-      existing in-memory `symbolMapCache` map (`radar_compile.go:25-28`),
-      following the `HotFilesCache` snapshot pattern in
-      `pkg/rag/cache.go::persistedHotFilesSnapshot`. Wire load in `bootRAG`,
-      save on `WAL.Close()`. The key already encodes mtime — validity preserved
-      across restart automatically. **Exit:** `COMPILE_AUDIT` p99 < 5ms on
-      packages whose mtime hasn't changed since the previous session.
+- [x] **0.D — Persist `symbolMapCache` across restart** — done 2026-05-15
+      commit `332c01c`. Added `saveSymbolMapSnapshot` / `loadSymbolMapSnapshot`
+      (versioned JSON envelope) in `radar_compile.go`; wired load in
+      `setupCaches`, save in `persistCachesOnShutdown` (cache_setup.go). 4
+      regression tests: round-trip, missing-file no-error, version-mismatch
+      no-crash, corrupt-JSON returns-error. Takes effect after
+      `make rebuild-restart`.
 
 ---
 
