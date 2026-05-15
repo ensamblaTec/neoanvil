@@ -42,6 +42,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-read-large-file.sh",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "PostToolUse": [
