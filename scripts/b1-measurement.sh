@@ -190,6 +190,8 @@ from collections import defaultdict
 log = sys.argv[1]
 buckets = defaultdict(list)
 ws_counter = defaultdict(int)
+latest_tools_total = 14
+latest_intents_total = 23
 with open(log) as f:
     rdr = csv.DictReader(f)
     for row in rdr:
@@ -199,6 +201,8 @@ with open(log) as f:
             wsb = (row.get("workspace_boot") or "unknown").strip() or "unknown"
             buckets[row["treatment"]].append((row["timestamp"], int(row["tools_used"]), int(row["intents_used"]), tools_pct, intents_pct, wsb, row.get("notes", "")))
             ws_counter[wsb] += 1
+            latest_tools_total = int(row["tools_total"])
+            latest_intents_total = int(row["intents_total"])
         except Exception:
             continue
 
@@ -214,7 +218,7 @@ for arm in ("baseline", "treatment"):
         continue
     avg_tools = sum(r[1] for r in rows) / len(rows)
     avg_intents = sum(r[2] for r in rows) / len(rows)
-    print(f"### {arm}: {len(rows)} snapshots · avg tools {avg_tools:.1f}/15 · avg intents {avg_intents:.1f}/23")
+    print(f"### {arm}: {len(rows)} snapshots · avg tools {avg_tools:.1f}/{latest_tools_total} · avg intents {avg_intents:.1f}/{latest_intents_total}")
     print("")
     print("| timestamp | tools | intents | t% | i% | ws_boot | notes |")
     print("|---|---|---|---|---|---|---|")
