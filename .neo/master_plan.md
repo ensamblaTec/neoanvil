@@ -222,11 +222,16 @@ For strategos with multi-minute suites the win is 10× larger in absolute terms.
       `AsyncTask` rows survive → batch polls return "batch not found" for
       valid tasks. Promote to BoltDB bucket OR derive from a task-id naming
       convention. Out of scope until batch is exposed in plugin schemas.
-- [ ] **4.C — `cmd/plugin-jira` 100% error_rate audit.** Plugin running but
-      every `jira/jira/get_context` errors (7/7 in lifetime metrics).
-      Almost certainly missing `~/.neo/credentials.json::jira.<tenant>`.
-      Audit + document expected config + add a startup warning so the error
-      doesn't look like a code bug.
+- [x] **4.C — `cmd/plugin-jira` 100% error_rate audit** — done 2026-05-15.
+      Audit found the plugin already logs `connectivity OK/FAILED` per tenant
+      at boot (`ops.go:146-148`) — the actual gap was operator-facing
+      documentation. Added a "Troubleshooting — `jira/jira` error_rate 1.0"
+      section in `docs/plugins/jira-integration-guide.md` covering: the
+      symptom-vs-cause mapping (plugin running ≠ calls working), the
+      diagnostic flow (plugin log → jira.json schema → `curl /myself` probe
+      → audit-jira.log), and the design rationale for staying-alive-with-
+      bad-creds (hot-reload of credentials without `make rebuild-restart`).
+      No code change required.
 
 ---
 

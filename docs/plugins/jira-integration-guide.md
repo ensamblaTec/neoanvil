@@ -525,3 +525,65 @@ Razones:
 | 005 | Subprocess MCP > Go-native plugins (security + isolation) |
 | 006 | API Token + vault preparado para OAuth 3LO future |
 | 007 | Webhooks bidireccionales: deferred (polling cubre uso primario) |
+
+---
+
+## Troubleshooting — `jira/jira` error_rate 1.0
+
+Síntoma habitual: `neo_tool_stats` muestra `jira/jira` con **error_rate=1.0** o
+todas las llamadas `get_context` devuelven error, aunque `PLUGIN_STATUS` reporta
+el plugin `running` con un PID válido. Esto **no es un bug del plugin** — es
+configuración de credenciales / conectividad. El proceso está vivo (su loop
+JSON-RPC responde a `__health__`) pero cada llamada cruza red a Jira y falla.
+
+### Flujo de diagnóstico
+
+1. **Log del plugin** — buscar en el output de neo-mcp / Nexus:
+   ```
+   plugin-jira: connectivity OK     for tenant "<name>" (<domain>)
+   plugin-jira: connectivity FAILED for tenant "<name>": <error real>
+   ```
+   La línea FAILED tiene el error real del Jira upstream (401 inválido, DNS,
+   timeout, etc.). Sin esa línea o con `connectivity FAILED`, ese es el bug.
+
+2. **`~/.neo/plugins/jira.json`** — esquema esperado (canonical post-migration):
+   ```json
+   {
+     "tenants": {
+       "<name>": {
+         "domain": "<your-instance>.atlassian.net",
+         "email":  "user@example.com",
+         "token":  "<API token from id.atlassian.com>"
+       }
+     },
+     "active": "<name>"
+   }
+   ```
+   Si falta el archivo o el tenant `active`, el plugin cae al modo legacy
+   (env vars `JIRA_TOKEN` + `JIRA_EMAIL` + `JIRA_DOMAIN`); si tampoco eso, el
+   proceso muere con error fatal (no llega a `running`).
+
+3. **Quick probe** — fuera del MCP, validar el token:
+   ```bash
+   curl -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+     "https://$JIRA_DOMAIN/rest/api/3/myself"
+   ```
+   200 con tu user JSON = creds OK; 401 = token revocado o email mismatch;
+   404/DNS = domain incorrecto.
+
+4. **Audit cross-tenant** — `~/.neo/audit-jira.log` registra cada call con su
+   tenant, key y outcome. Útil para distinguir "todas fallan" (auth roto) de
+   "una tenant falla" (un PAT específico).
+
+### Por qué el plugin se queda `running` aunque las calls fallen
+
+Diseño deliberado per ADR-005: el plugin es un dispatcher MCP. Mantenerse vivo
+con creds malas permite re-cargar el archivo de creds vía hot-reload (config
+watcher) sin reiniciar Nexus. Si muriese, cualquier corrección de credenciales
+requeriría `make rebuild-restart` completo. El precio: `tool_stats` te muestra
+1.0 error_rate hasta que vos arregles la config.
+
+> **Phase 4.C / Speed-First (audit 2026-05-15):** este caso fue documentado
+> tras ver `jira/jira: 7/7 errors` en métricas persistidas — el plugin estaba
+> sano pero el entorno no tenía Jira configurado. Sin esta sección, el
+> síntoma se confunde fácilmente con un bug del plugin.
