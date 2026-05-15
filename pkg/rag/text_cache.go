@@ -52,6 +52,12 @@ type textEntry struct {
 	handler  string // [190] which handler cached this entry
 	variant  int    // [190] cached variant (topK/limit/depth)
 	hitCount uint64 // [190] how many times this entry was served
+	// mtime is the os.Stat.ModTime() of the target file when this entry was
+	// computed, or 0 if the caller didn't supply one (legacy path). When
+	// non-zero, GetWithMtimeFallback treats a matching mtime as a hit even
+	// if the graph generation has bumped — file-scoped invalidation that
+	// survives the global gen-bump on InsertBatch. [Phase 1 MV / Speed-First]
+	mtime int64
 }
 
 // TextCache holds the last N full-markdown responses. Safe for concurrent
@@ -141,6 +147,16 @@ func (c *TextCache) Put(key TextCacheKey, text string, currentGen uint64) {
 // records the handler+target+variant so Top() can surface human-readable
 // cache contents. Callers that want observability should use this form.
 func (c *TextCache) PutAnnotated(key TextCacheKey, text string, currentGen uint64, handler, target string, variant int) {
+	c.PutWithMtime(key, text, currentGen, 0, handler, target, variant)
+}
+
+// PutWithMtime stores `text` with both the graph generation stamp AND the
+// target file's mtime nanoseconds. Either stamp alone is enough for
+// GetWithMtimeFallback to score a hit — gen matches the live graph (the
+// historical invariant) OR mtime matches the live file (the file-scoped
+// invariant). Pass mtime=0 to opt out of file-scoped validity (then this
+// behaves exactly like PutAnnotated). [Phase 1 MV / Speed-First]
+func (c *TextCache) PutWithMtime(key TextCacheKey, text string, currentGen uint64, mtime int64, handler, target string, variant int) {
 	if c == nil || c.capacity <= 0 {
 		return
 	}
@@ -150,6 +166,7 @@ func (c *TextCache) PutAnnotated(key TextCacheKey, text string, currentGen uint6
 		entry := el.Value.(*textEntry)
 		entry.text = text
 		entry.gen = currentGen
+		entry.mtime = mtime
 		// Preserve handler/target if this caller didn't supply them; otherwise update.
 		if handler != "" {
 			entry.handler = handler
@@ -164,7 +181,7 @@ func (c *TextCache) PutAnnotated(key TextCacheKey, text string, currentGen uint6
 		return
 	}
 	entry := &textEntry{
-		key: key, text: text, gen: currentGen,
+		key: key, text: text, gen: currentGen, mtime: mtime,
 		handler: handler, target: target, variant: variant,
 	}
 	el := c.ll.PushFront(entry)
@@ -177,6 +194,45 @@ func (c *TextCache) PutAnnotated(key TextCacheKey, text string, currentGen uint6
 			c.evicts.Add(1)
 		}
 	}
+}
+
+// GetWithMtimeFallback returns a cached entry if EITHER the graph generation
+// still matches OR the entry was stamped with a file mtime and the supplied
+// currentMtime matches that stamp. The dual gate decouples cache validity
+// from the global graph.Gen counter for file-targeted entries — editing
+// pkg/foo/x.go bumps Gen and invalidates SEMANTIC_CODE-style cross-cutting
+// entries, but file-targeted BLAST_RADIUS entries for pkg/bar/y.go survive
+// as long as pkg/bar/y.go's mtime is unchanged. [Phase 1 MV / Speed-First]
+func (c *TextCache) GetWithMtimeFallback(key TextCacheKey, currentGen uint64, currentMtime int64) (string, bool) {
+	if c == nil || c.capacity <= 0 {
+		return "", false
+	}
+	c.mu.Lock()
+	el, ok := c.items[key]
+	if !ok {
+		c.misses.Add(1)
+		c.mu.Unlock()
+		c.window.record(false)
+		return "", false
+	}
+	entry := el.Value.(*textEntry)
+	genMatch := entry.gen == currentGen
+	mtimeMatch := entry.mtime != 0 && currentMtime != 0 && entry.mtime == currentMtime
+	if !genMatch && !mtimeMatch {
+		c.ll.Remove(el)
+		delete(c.items, key)
+		c.misses.Add(1)
+		c.mu.Unlock()
+		c.window.record(false)
+		return "", false
+	}
+	c.ll.MoveToFront(el)
+	entry.hitCount++
+	c.hits.Add(1)
+	text := entry.text
+	c.mu.Unlock()
+	c.window.record(true)
+	return text, true
 }
 
 // TopEntry summarises a single cached entry for Top().

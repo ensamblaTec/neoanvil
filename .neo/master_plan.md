@@ -104,17 +104,33 @@ The original plan had three premise errors discovered during code audit:
 
 ---
 
-### Phase 1 — Pilar III: File-scoped cache invalidation (DEFERRED — audit 2026-05-15)
+### Phase 1 — Pilar III: File-scoped cache invalidation (PARTIAL — MV shipped 2026-05-15)
 
-**Status:** deferred to a dedicated session. Audit-2 finding during Phase 0.A:
-the cache invalidation surface is bigger than Phase 1's "add per-target mtime"
-framing. Each `Put` callsite (radar_blast, radar_semantic, radar_graph,
-radar_digest, plus the cross-workspace scatter in neo-nexus) would need to
-provide the target mtime + dep mtimes — that's 6+ call sites touching shared
-hot-path code. The right discipline is a separate session where each call
-site lands as its own atomic commit, not a multi-file mega-change here.
-Original design preserved below as the canonical implementation plan when
-the session opens.
+**Status:** Phase 1 MV shipped — BLAST_RADIUS path only. Remaining call sites
+(SEMANTIC_CODE, GRAPH_WALK, PROJECT_DIGEST, CONTRACT_QUERY/GAP, neo-nexus
+scatter) intentionally deferred: their cache keys are NOT single-file targets
+(SEMANTIC_CODE is a natural-language query, GRAPH_WALK is a symbol name,
+PROJECT_DIGEST is workspace-wide) so the mtime gate doesn't apply cleanly the
+way it does for BLAST_RADIUS. They benefit from a different invalidation
+primitive (e.g. multi-file mtime sets or content-hash) — a separate epic.
+
+**Phase 1 MV shipped 2026-05-15:**
+- `pkg/rag/text_cache.go`: added `mtime int64` field to `textEntry`;
+  introduced `PutWithMtime(key, text, gen, mtime, handler, target, variant)`
+  + `GetWithMtimeFallback(key, currentGen, currentMtime)`. `PutAnnotated`
+  becomes a `mtime=0` shim around the new path (legacy callers unchanged).
+- `cmd/neo-mcp/radar_blast.go`: `blastRadiusCacheLookup` resolves the
+  target's os.Stat mtime via new `blastTargetMtime(workspace, target)`
+  helper; uses `GetWithMtimeFallback`. Both Put sites switch to
+  `PutWithMtime` so the entry is stamped with both gen + mtime.
+- Headline effect: a certify on `pkg/foo/x.go` bumps `graph.Gen`, but the
+  BLAST_RADIUS cache entry for `pkg/bar/y.go` survives — `pkg/bar/y.go`'s
+  mtime is unchanged, mtime fallback yields a hit instead of recomputing
+  the CPG PageRank walk.
+- 6 regression subtests in `TestTextCache_MtimeFallback`: gen-match wins,
+  mtime fallback on gen bump, target-mtime change forces miss, mtime=0
+  opts out (legacy path), currentMtime=0 forces gen-only, hit counter
+  increments under mtime hits.
 
 ---
 

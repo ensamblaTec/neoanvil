@@ -67,21 +67,47 @@ func parseBlastTargets(args map[string]any) []string {
 	return targets
 }
 
-// blastRadiusCacheLookup returns the cache key, cached text and a hit
-// flag. A nil text cache or bypass=true both short-circuit to a miss.
-// [Épica 228]
-func (t *RadarTool) blastRadiusCacheLookup(target string, bypassCache bool) (rag.TextCacheKey, string, bool) {
+// blastRadiusCacheLookup returns the cache key, the target file's current
+// mtime (0 if the file isn't stat-able — workspace-relative resolution
+// failed or path doesn't exist), the cached text, and a hit flag. A nil
+// text cache or bypass=true short-circuits to a miss. The mtime is returned
+// so the caller can pass it back to PutWithMtime on the cache-write path.
+//
+// [Phase 1 MV / Speed-First] We use GetWithMtimeFallback so a single-file
+// BLAST_RADIUS query hits the cache as long as the target file's mtime is
+// unchanged, even if graph.Gen has bumped because some OTHER file was
+// edited. Previously every certify-driven gen bump invalidated all entries.
+func (t *RadarTool) blastRadiusCacheLookup(target string, bypassCache bool) (rag.TextCacheKey, int64, string, bool) {
 	if t.textCache == nil {
-		return rag.TextCacheKey{}, "", false
+		return rag.TextCacheKey{}, 0, "", false
 	}
 	key := rag.NewTextCacheKey("BLAST_RADIUS", target, 0)
+	mtime := blastTargetMtime(t.workspace, target)
 	if bypassCache {
-		return key, "", false
+		return key, mtime, "", false
 	}
-	if cached, ok := t.textCache.Get(key, t.graph.Gen.Load()); ok {
-		return key, cached, true
+	if cached, ok := t.textCache.GetWithMtimeFallback(key, t.graph.Gen.Load(), mtime); ok {
+		return key, mtime, cached, true
 	}
-	return key, "", false
+	return key, mtime, "", false
+}
+
+// blastTargetMtime returns the os.Stat ModTime() of `target` resolved
+// against the workspace, or 0 if the file isn't reachable (the caller
+// then falls back to gen-only validity for that entry). [Phase 1 MV]
+func blastTargetMtime(workspace, target string) int64 {
+	if target == "" {
+		return 0
+	}
+	path := target
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workspace, target)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().UnixNano()
 }
 
 // cpgEnrichBlast returns the CPG structural caller section for target,
@@ -124,7 +150,7 @@ func (t *RadarTool) handleBlastRadius(ctx context.Context, args map[string]any) 
 	// enrichment) — CPG PageRank over the whole graph is the heaviest part
 	// and skipping it on a repeat query saves ~millisecond-class work.
 	bypassCache, _ := args["bypass_cache"].(bool)
-	cacheKey, cached, hit := t.blastRadiusCacheLookup(target, bypassCache)
+	cacheKey, targetMtime, cached, hit := t.blastRadiusCacheLookup(target, bypassCache)
 	if hit {
 		return mcpText(cached), nil
 	}
@@ -141,7 +167,7 @@ func (t *RadarTool) handleBlastRadius(ctx context.Context, args map[string]any) 
 		}
 		if t.textCache != nil {
 			t.textCache.RecordMiss(target)
-			t.textCache.PutAnnotated(cacheKey, text, t.graph.Gen.Load(), "BLAST_RADIUS", target, 0)
+			t.textCache.PutWithMtime(cacheKey, text, t.graph.Gen.Load(), targetMtime, "BLAST_RADIUS", target, 0)
 		}
 		return mcpText(text), nil
 	}
@@ -159,10 +185,12 @@ func (t *RadarTool) handleBlastRadius(ctx context.Context, args map[string]any) 
 	text += t.contractEnrichBlast(target)
 	// [Épica 179/190] Generation stamp captured AFTER the work completes
 	// so an ingest that raced concurrently doesn't cache a pre-ingest view
-	// under the post-ingest generation.
+	// under the post-ingest generation. [Phase 1 MV] also stamp with the
+	// target file's mtime so a gen bump from an unrelated edit doesn't
+	// invalidate this entry.
 	if t.textCache != nil {
 		t.textCache.RecordMiss(target)
-		t.textCache.PutAnnotated(cacheKey, text, t.graph.Gen.Load(), "BLAST_RADIUS", target, 0)
+		t.textCache.PutWithMtime(cacheKey, text, t.graph.Gen.Load(), targetMtime, "BLAST_RADIUS", target, 0)
 	}
 	return mcpText(text), nil
 }
