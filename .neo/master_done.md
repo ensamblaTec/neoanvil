@@ -356,3 +356,133 @@ _Last distillation: 2026-05-13 23:20 UTC_
 
 ---
 
+<!-- archived: 2026-05-15 -->
+# NeoAnvil — Master Plan
+
+## Phase: DS plugin — background task retrieval
+
+### Problem
+
+`deepseek_call` with `background:true` for `red_team_audit` / `map_reduce_refactor`
+returns `{task_id, status:pending}` immediately — but that `task_id` **cannot be
+polled**. A follow-up `deepseek_call(action:"red_team_audit", task_id:"…")`
+starts a *fresh audit* instead of returning the pending task's result. So a
+background audit's output is unretrievable.
+
+Surfaced 2026-05-14 trying to run a DS premortem in background mode
+(`async_8d95eaed5c58856c`). The foreground path timed out on v4-pro+max — that
+was fixed in `eb3c4c7` (config-driven HTTP timeout) — but `background:true`
+remains the intended escape hatch for slow audits and it is broken.
+Debt: `technical_debt.md` → `[ds-background-unretrievable]`, mirrored in
+`neo_debt` (workspace tier, P2).
+
+### Root cause (investigated 2026-05-15 — task #1 done)
+
+The Nexus-side async store **already exists and is complete** — the master_plan's
+original premise ("store missing/incomplete") was wrong:
+- `cmd/neo-nexus/plugin_async.go` — `AsyncTaskStore` (BoltDB): `Submit` / `Get` /
+  `Complete` / `Fail` / `Cleanup` / `SubmitBatch` / `BatchStatus`.
+- `cmd/neo-nexus/plugin_routing.go::handleAsyncDispatch` — submit + poll + batch.
+- `cmd/neo-nexus/api_async.go` — HTTP routes `/api/v1/async/tasks`.
+
+`red_team_audit` / `map_reduce_refactor` **submit correctly** via the
+`background:true` branch (`handleSingleAsyncSubmit`) — the task runs, the result
+is persisted to the Nexus store.
+
+**The bug is the poll trigger.** `plugin_routing.go:332-333` gates the poll on
+`task_id present && action NOT present`:
+
+```go
+if taskID, ok := args["task_id"].(string); ok {
+    if _, hasAction := args["action"]; !hasAction && ... {   // never true
+        return handleTaskPoll(reqID, taskID, rt)
+    }
+}
+```
+
+But `cmd/plugin-deepseek/main.go:218` declares `"required": []string{"action"}` —
+`deepseek_call` **cannot be invoked without `action`**. So `!hasAction` is never
+true, the poll path is unreachable, and every poll falls through to the
+synchronous dispatch → starts a fresh audit. The `batch_id` poll branch
+(`plugin_routing.go:326-327`) has the identical latent flaw.
+
+`generate_boilerplate` works only because it bypasses Nexus entirely with its own
+plugin-side mechanism (`tool_boilerplate.go` — separate BoltDB bucket
+`deepseek_bg_tasks`, plugin-side short-circuit at line 59).
+
+### Decision — Option B: fix the Nexus poll guard (chosen 2026-05-15)
+
+Rejected the original plugin-side-pattern plan: it would *duplicate* a working
+store across 3 plugin files and leave `AsyncTaskStore` dead for these tools.
+Fixing the one wrong guard is smaller, DRY, and fixes `red_team_audit` +
+`map_reduce_refactor` + any future background plugin tool at once.
+
+**Refined by self-premortem 2026-05-15** (DS upstream returned EOF — premortem
+attempted 3 ways, all failed; self-premortem applied per `[SELF-AUDIT-V2]`):
+
+Original idea was "fall through to synchronous dispatch on a Nexus-store miss".
+Premortem finding (SEV High): that lets an *expired/bad* `async_` id silently
+start a fresh audit — the worst failure mode — and `Get` errors are ambiguous
+(not-found vs unmarshal-corruption). **Better: gate routing on the `async_` ID
+prefix, decided at routing time, no store lookup.**
+- `task_id` has `async_` prefix → it is unambiguously a Nexus task →
+  `handleTaskPoll` (which already errors cleanly on a genuine miss — correct).
+- `task_id` lacks the prefix (e.g. `bgtask_*` from `generate_boilerplate`) →
+  do not touch the Nexus store, `return nil`, fall through to the plugin.
+
+The `async_` prefix is a package-owned protocol constant (`newAsyncID` builds
+it), not a config value — extracting it to a named const is **not** a
+`[ZERO-HARDCODING]` violation. Net effect: `handleTaskPoll` / `handleBatchPoll`
+are **untouched**; the only change is the guard in `handleAsyncDispatch`.
+
+Premortem also cleared: concurrent poll vs `RunAsync` write (`AsyncTaskStore`
+already has `sync.RWMutex` + BoltDB txn isolation); `background:true`+`task_id`
+both set (submit branch wins, acceptable). Deferred follow-up: `batchMap` is
+in-memory and lost on Nexus restart while BoltDB tasks survive — pre-existing,
+out of scope, record as debt.
+
+### Tasks
+
+- [x] **Investigate the current `background` dispatch path.** — done 2026-05-15.
+      Root cause + decision recorded above. Nexus store complete; bug is the
+      `!hasAction` poll guard, unreachable because `action` is schema-required.
+- [x] **DS premortem** — done 2026-05-15. DS upstream unstable (pro+max sync
+      rejected, pro+high sync timed out, background submit → `error: EOF` in
+      4.7s — same DeepSeek instability noted in `0374cee`). Self-premortem
+      applied per `[SELF-AUDIT-V2]`; findings folded into the Decision section
+      above (prefix-gate refinement). Side benefit: the background submit + the
+      `/api/v1/async/tasks/{id}` HTTP route validated the Nexus store works
+      end-to-end — only the MCP-tool poll path is broken.
+- [x] **Fix the `task_id` poll guard** — done 2026-05-15.
+      `cmd/neo-nexus/plugin_routing.go::handleAsyncDispatch`: `!hasAction`
+      replaced with `strings.HasPrefix(taskID, asyncIDPrefix)` (and
+      `batchIDPrefix` for `batch_id`). `asyncIDPrefix` / `batchIDPrefix` consts
+      extracted in `plugin_async.go`; `newAsyncID` / `SubmitBatch` use them.
+      `handleTaskPoll` / `handleBatchPoll` unchanged.
+- [x] **Schema + regression test** — done 2026-05-15.
+      `cmd/plugin-deepseek/main.go` `task_id` description now covers all three
+      background-capable actions. `TestHandleAsyncDispatch_PollGuard`
+      (`plugin_routing_test.go`, 5 subtests): `async_` id + `action` present →
+      polls; `bgtask_` id → falls through; unknown `async_` id → clean error;
+      no task_id → synchronous dispatch; non-`batch_` id → falls through. Full
+      `cmd/neo-nexus` + `cmd/plugin-deepseek` suites green; certified BUG_FIX.
+
+### Done when
+
+`deepseek_call(red_team_audit, background:true, …)` returns a `task_id`, and a
+follow-up `deepseek_call(action:"red_team_audit", task_id:"<id>")` returns
+`status:pending` while running and `status:done` + the full audit text once
+done — same for `map_reduce_refactor`. `generate_boilerplate` polling still
+works (plugin-side, via fall-through). Regression test green; schema accurate;
+`go build ./...` + `go test` clean; certified.
+
+**Status: DONE — shipped, restarted, validated live 2026-05-15.** Commits
+`13108fb` (fix) + `09c3113` (post-review: stale doc + batch-routing test).
+After `make rebuild-restart`, validated end-to-end on the running Nexus:
+`deepseek_call(red_team_audit, background:true)` → `async_958c607b7b23fb30`;
+follow-up `deepseek_call(action:"red_team_audit", task_id:"async_958c607b7b23fb30")`
+returned `status:done` + the full audit text — not a fresh dispatch. A bad
+`async_` id returns `-32000 task not found` — clean error, no fresh audit.
+Full `cmd`+`pkg` short suite green, `make audit-ci` 0-new, `go vet` clean.
+---
+
