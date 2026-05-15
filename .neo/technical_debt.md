@@ -992,7 +992,7 @@ BRIEFING: hooks: post-commit:✗ — el hook no está instalado en este workspac
 
 ---
 
-## [2026-05-15 11:30] CPG memory metric is process-wide HeapAlloc, not CPG-only (instrumentation bug)
+## ~~[2026-05-15 11:30] CPG memory metric is process-wide HeapAlloc, not CPG-only (instrumentation bug)~~ — RESOLVED 2026-05-15 (method rename ship + back-compat wrappers)
 
 **Prioridad:** P2
 

@@ -164,16 +164,16 @@ func (m *Manager) SSAFunctions() []*ssa.Function {
 	return m.ssaFuncs
 }
 
-// CurrentHeapMB returns the live PROCESS-WIDE HeapAlloc in MB — NOT
+// ProcessHeapMB returns the live PROCESS-WIDE HeapAlloc in MB — NOT
 // CPG-specific allocation. CPG never tracked its own arena; the OOM
 // guard at line 154 trips on process pressure (across HNSW + memex +
-// SharedMem + dep-graph) compared against cpg.max_heap_mb. Historic
-// naming kept for compatibility with TUI + BRIEFING callers, but the
-// semantic is "process heap" — operators raising cpg.max_heap_mb in
-// neo.yaml are actually raising the process OOM threshold. Pair with
-// HeapLimitMB to reason about remaining headroom. [PILAR-XXVII/243.C]
-// Documented as workspace debt 2026-05-15 (CPG metric is process-wide).
-func (m *Manager) CurrentHeapMB() int {
+// SharedMem + dep-graph) compared against cpg.max_heap_mb. Pair with
+// ProcessOOMLimitMB to reason about remaining headroom.
+// [PILAR-XXVII/243.C] Renamed from CurrentHeapMB 2026-05-15 — old
+// name implied CPG-only allocation which was misleading. The wire
+// format (snapshot CPGHeapMB / json:"cpg_heap_mb") is kept for back-
+// compat with TUI + persisted observability snapshots.
+func (m *Manager) ProcessHeapMB() int {
 	if m == nil {
 		return 0
 	}
@@ -182,14 +182,33 @@ func (m *Manager) CurrentHeapMB() int {
 	return int(ms.HeapAlloc / (1024 * 1024))
 }
 
+// CurrentHeapMB is the deprecated pre-2026-05-15 name. Kept as a thin
+// wrapper for any out-of-tree consumer compiling against this package.
+// New code should call ProcessHeapMB.
+//
+// Deprecated: use ProcessHeapMB. Will be removed after 2026-08-15.
+func (m *Manager) CurrentHeapMB() int { return m.ProcessHeapMB() }
+
 // HeapLimitMB returns the resolved CPG heap ceiling (static or via the
 // MaxHeapMBFn closure). 0 when no limit is configured.
-func (m *Manager) HeapLimitMB() int {
+// ProcessOOMLimitMB returns the resolved process-wide OOM guard ceiling
+// (static cfg.CPG.MaxHeapMB or the live MaxHeapMBFn closure value). 0
+// when no limit is configured. Named cpg.max_heap_mb in neo.yaml for
+// historic reasons — see ProcessHeapMB doc — but the threshold trips
+// on TOTAL process HeapAlloc, not CPG subsystem allocation alone.
+func (m *Manager) ProcessOOMLimitMB() int {
 	if m == nil {
 		return 0
 	}
 	return m.cfg.resolveMaxHeapMB()
 }
+
+// HeapLimitMB is the deprecated pre-2026-05-15 name. Kept as a thin
+// wrapper for any out-of-tree consumer. New code should call
+// ProcessOOMLimitMB.
+//
+// Deprecated: use ProcessOOMLimitMB. Will be removed after 2026-08-15.
+func (m *Manager) HeapLimitMB() int { return m.ProcessOOMLimitMB() }
 
 // Graph returns the built CPG, blocking up to timeout for the build to finish.
 // Returns ErrNotReady if the build is still running after timeout.

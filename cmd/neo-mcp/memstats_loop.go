@@ -41,8 +41,13 @@ func startMemStatsLoop(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				cpgHeap := cpgMgr.CurrentHeapMB()
-				cpgLimit := cpgMgr.HeapLimitMB()
+				// [2026-05-15] CPG metric rename: ProcessHeapMB returns
+				// process-wide HeapAlloc (not CPG-only — historic naming
+				// preserved at wire layer via snapshot.CPGHeapMB +
+				// json:"cpg_heap_mb"). ProcessOOMLimitMB is the
+				// cpg.max_heap_mb threshold (process-wide OOM guard).
+				cpgHeap := cpgMgr.ProcessHeapMB()
+				cpgLimit := cpgMgr.ProcessOOMLimitMB()
 				qHit := ratioOrZero(queryCache)
 				tHit := textRatioOrZero(textCache)
 				eHit := embRatioOrZero(embCache)
