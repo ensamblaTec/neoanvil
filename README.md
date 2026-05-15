@@ -408,12 +408,12 @@ harness lives in `pkg/rag/recall_measure_live_test.go` behind the
 | Workspace | Lang | Nodes | hybrid recall | hybrid lat | RAM extra |
 |-----------|------|------:|:-------------:|----------:|----------:|
 | neoanvil | Go (mixed) | 25,406 | **1.000** | 5 µs | 2.3 MB (3.1%) |
-| strategosia | Go monolith | 64,939 | **1.000** | 5 µs | 6.1 MB (3.1%) |
-| **strategosia_frontend** | TypeScript | **132,866** | **1.000** | 5 µs | 12.5 MB (3.1%) |
+| code project (mid) | Go monolith | 64,939 | **1.000** | 5 µs | 6.1 MB (3.1%) |
+| **code project (large)** | TypeScript | **132,866** | **1.000** | 5 µs | 12.5 MB (3.1%) |
 
 Latency stays at ~5 µs across the 5× scale jump (25k → 132k), exactly
 the O(log N) profile HNSW promises. RAM overhead holds at 3.1% across
-all sizes. **strategosia_frontend confirmed at 132k vectors — the
+all sizes. **Large TS code project confirmed at 132k vectors — the
 "platillo fuerte" — with zero recall loss.**
 
 Reproduce any time:
@@ -431,8 +431,8 @@ next search — paid ONCE per ingest cycle, not per query.
 
 | Workspace | First query (cold, includes re-populate) | Warm queries |
 |-----------|----------------------------------------:|-------------:|
-| strategosia (65k) | 192 ms | 20-31 ms |
-| strategosia_frontend (133k) | **525 ms** | 125-129 ms |
+| code project (65k LOC) | 192 ms | 20-31 ms |
+| code project (133k LOC) | **525 ms** | 125-129 ms |
 
 For 100 daemon-mode queries with 1 ingest in between:
 `1 × 425 ms + 99 × 5 µs ≈ 425.5 ms total` — still beats the steady-state
