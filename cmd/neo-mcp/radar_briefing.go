@@ -261,11 +261,16 @@ type briefingData struct {
 	incTotal             int    // total INC-*.md files in workspace [158.B]
 	incIndexed           int64  // incidents indexed this session [158.B]
 	knowledgeConflicts   int    // [342.A] unresolved LWW conflict entries in NSConflicts
-	// [Épica 236] CPG heap observability — complements 229.4's hot-reloadable
-	// OOM guard by surfacing current vs limit so the operator can see how
-	// close to the ceiling the graph is.
-	cpgHeapMB  int
-	cpgLimitMB int
+	// [Épica 236] CPG OOM observability — complements 229.4's hot-reloadable
+	// OOM guard by surfacing current vs limit. SEMANTIC NOTE 2026-05-15: the
+	// "Heap" value here is PROCESS-WIDE HeapAlloc (HNSW + memex + SharedMem
+	// + dep-graph + everything else), NOT CPG-only allocation. The label
+	// "CPG:" in the BRIEFING line is historical — see Manager.CurrentHeapMB
+	// for the source. Pairing high process heap with cpg.max_heap_mb limit
+	// trips the OOM guard; raising the limit raises the WHOLE-PROCESS
+	// ceiling, not the CPG-subset.
+	cpgHeapMB  int // PROCESS heap, not CPG-only
+	cpgLimitMB int // process OOM ceiling (named cpg.max_heap_mb in yaml)
 	// [Épica 263.D] Boot mode: "fast" (snapshot) or "cold" (SSA rebuild).
 	cpgBootMode string
 	// [ÉPICA 149.E] HNSW boot mode mirror — "fast" when LoadHNSWSnapshot
@@ -570,6 +575,10 @@ func renderCacheSegments(d *briefingData) string {
 		if pct >= 80 {
 			warn = " ⚠️"
 		}
+		// [2026-05-15] Label kept as "CPG:" for back-compat with operator
+		// mental models + TUI parsers, but the value is process-wide heap
+		// (see cpgHeapMB declaration). Raising cpg.max_heap_mb in neo.yaml
+		// raises the WHOLE-PROCESS OOM threshold, not CPG-only headroom.
 		fmt.Fprintf(&sb, " | CPG: %d/%dMB (%d%%)%s", d.cpgHeapMB, d.cpgLimitMB, pct, warn)
 	}
 	// [ÉPICA 149.E] HNSW boot mode mirror. Append after CPG so the two

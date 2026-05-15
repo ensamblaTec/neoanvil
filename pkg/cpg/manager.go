@@ -164,9 +164,15 @@ func (m *Manager) SSAFunctions() []*ssa.Function {
 	return m.ssaFuncs
 }
 
-// CurrentHeapMB returns the live process HeapAlloc in MB. The CPG does
-// not track its own arena — this is a proxy that callers pair with
+// CurrentHeapMB returns the live PROCESS-WIDE HeapAlloc in MB — NOT
+// CPG-specific allocation. CPG never tracked its own arena; the OOM
+// guard at line 154 trips on process pressure (across HNSW + memex +
+// SharedMem + dep-graph) compared against cpg.max_heap_mb. Historic
+// naming kept for compatibility with TUI + BRIEFING callers, but the
+// semantic is "process heap" — operators raising cpg.max_heap_mb in
+// neo.yaml are actually raising the process OOM threshold. Pair with
 // HeapLimitMB to reason about remaining headroom. [PILAR-XXVII/243.C]
+// Documented as workspace debt 2026-05-15 (CPG metric is process-wide).
 func (m *Manager) CurrentHeapMB() int {
 	if m == nil {
 		return 0
