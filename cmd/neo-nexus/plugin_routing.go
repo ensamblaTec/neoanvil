@@ -309,11 +309,13 @@ func callPluginTool(ctx context.Context, body []byte, conn *plugin.Connected, lo
 	})
 }
 
-// rejectIfUnauthorized enforces the workspace ACL [P-WSACL] and semantic
-// handleAsyncDispatch checks for background:true (submit) or task_id without
-// action (poll). Returns a JSON-RPC response to short-circuit, or nil to
-// continue with the synchronous path. Extracted from callPluginTool to keep
-// CC under 15. [376.C+D]
+// handleAsyncDispatch short-circuits a plugin tool call into the async path:
+// background:true → submit, or an id minted by this store (asyncIDPrefix /
+// batchIDPrefix) → poll. Routing is by ID prefix, NOT by the absence of an
+// `action` arg — the deepseek_call schema makes `action` required, so the
+// old `!hasAction` guard was always-false dead code. Returns a JSON-RPC
+// response to short-circuit, or nil to continue with the synchronous path.
+// Extracted from callPluginTool to keep CC under 15. [376.C+D]
 func handleAsyncDispatch(reqID json.RawMessage, args map[string]any, conn *plugin.Connected, localName string, rt *pluginRuntime) []byte {
 	if bg, _ := args["background"].(bool); bg && rt != nil && rt.asyncStore != nil {
 		// [376.H] Batch dispatch: batch_files present → fan-out N goroutines.

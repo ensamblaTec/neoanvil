@@ -571,4 +571,19 @@ func TestHandleAsyncDispatch_PollGuard(t *testing.T) {
 			t.Errorf("batch_id without batchIDPrefix must fall through (nil), got: %s", resp)
 		}
 	})
+
+	t.Run("batch_ id routes to handleBatchPoll", func(t *testing.T) {
+		// batch_ prefix → routed to handleBatchPoll even with `action` set.
+		// An id absent from the in-memory batchMap yields a "batch not found"
+		// error response — non-nil proves the routing happened (the old
+		// !hasAction guard would have fallen through to a fresh dispatch).
+		args := map[string]any{"action": "map_reduce_refactor", "batch_id": "batch_unknown"}
+		resp := handleAsyncDispatch(reqID, args, conn, "deepseek_call", rt)
+		if resp == nil {
+			t.Fatal("batch_-prefixed id must route to handleBatchPoll, not fall through")
+		}
+		if !strings.Contains(string(resp), `"error"`) {
+			t.Errorf("unknown batch_id should yield a JSON-RPC error: %s", resp)
+		}
+	})
 }
