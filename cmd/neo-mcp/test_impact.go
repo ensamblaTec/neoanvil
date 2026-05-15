@@ -29,6 +29,9 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -141,4 +144,103 @@ func collectTransitiveTests(wal *rag.WAL, mutatedFiles []string, seen map[string
 		}
 		queue = next
 	}
+}
+
+// extractTestFuncNames parses a _test.go file and returns the names of its
+// top-level `func TestXxx(*testing.T)` declarations. Used by Phase 2.2 to
+// build the `-run "^(TestA|TestB|...)$"` regex passed to `go test`. Returns
+// nil on parse error, non-test file, or no Test* funcs — callers MUST treat
+// nil/empty the same and skip the -run narrowing entirely (DS Finding 1:
+// empty regex `^()$` matches no tests and would silently zero-out coverage).
+//
+// Filters:
+//   - Top-level only (no methods, no closures): Receiver == nil
+//   - Prefix `Test` AND (next-char-uppercase OR no-next-char): excludes
+//     `Testing`-style helpers BUT keeps `Test_lowercase` (Go convention).
+//   - Excludes `Benchmark*`, `Example*`, `Fuzz*` — `-run` doesn't apply to
+//     those subcommand types anyway.
+func extractTestFuncNames(testFilePath string) []string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, testFilePath, nil, parser.SkipObjectResolution)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name == nil {
+			continue
+		}
+		name := fn.Name.Name
+		if !strings.HasPrefix(name, "Test") {
+			continue
+		}
+		// Disambiguate Test vs Testing/TestHelper: per Go's testing package,
+		// the rune after "Test" must be uppercase, digit, or '_' (or the name
+		// is exactly "Test"). Anything else (e.g. "Testing") is NOT a test.
+		if len(name) > 4 {
+			r := name[4]
+			isValid := (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_'
+			if !isValid {
+				continue
+			}
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// buildTestRunRegex composes the `^(A|B|...)$` regex for `go test -run`
+// from same-pkg impacted _test.go files. Returns "" when there are no
+// names to narrow on (caller MUST fall through to running the full pkg
+// suite — DS Finding 1).
+//
+// `samePkgTestFiles` are absolute paths to _test.go files in the same
+// directory as the mutated file. Dedupe + sort the test names so the
+// command is deterministic (matters for `go test` cache key stability).
+func buildTestRunRegex(samePkgTestFiles []string) string {
+	if len(samePkgTestFiles) == 0 {
+		return ""
+	}
+	seen := make(map[string]struct{}, len(samePkgTestFiles)*4)
+	for _, p := range samePkgTestFiles {
+		for _, n := range extractTestFuncNames(p) {
+			seen[n] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return "^(" + strings.Join(names, "|") + ")$"
+}
+
+// impactedSamePkgTestFiles returns absolute paths to _test.go files in the
+// SAME directory as `mutatedAbsPath`, drawn from the workspace-relative
+// impacted set produced by testsImpactedBy. Cross-pkg test files in the
+// impacted set are dropped — v1 narrowing only applies within the test
+// binary that `runGoBouncer` runs (i.e., the mutated file's package).
+// Cross-pkg expansion is a deliberate v2 epic.
+func impactedSamePkgTestFiles(wal *rag.WAL, workspace, mutatedAbsPath string) []string {
+	if wal == nil || workspace == "" || mutatedAbsPath == "" {
+		return nil
+	}
+	relMutated, err := filepath.Rel(workspace, mutatedAbsPath)
+	if err != nil || strings.HasPrefix(relMutated, "..") {
+		return nil
+	}
+	relMutated = filepath.ToSlash(relMutated)
+	wantPkgDir := filepath.ToSlash(filepath.Dir(relMutated))
+	impacted := testsImpactedBy(wal, workspace, []string{relMutated})
+	var out []string
+	for _, rel := range impacted {
+		if filepath.ToSlash(filepath.Dir(rel)) == wantPkgDir {
+			out = append(out, filepath.Join(workspace, rel))
+		}
+	}
+	return out
 }

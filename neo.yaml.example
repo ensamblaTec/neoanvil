@@ -547,6 +547,7 @@ databases: []
 #   session_state_ttl_hours:       24                          # Vacuum_Memory purge cutoff
 #   max_directive_chars:           500                         # [374.A] Max chars per directive (learn action)
 #   max_directives:                60                          # [374.B] Max total active directives
+#   test_impact_enabled:           false                       # [Phase 2.2 / Speed-First] when true, certify narrows `go test pkg` to `-run "^(TestA|TestB|...)$"` from the dep-graph reverse-walk of impacted same-pkg _test.go files. Zero impacted → no -run (full pkg). Default false (opt-in).
 
 # inference:
 #   max_tokens:              4096

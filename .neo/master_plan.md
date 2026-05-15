@@ -245,10 +245,13 @@ test files whose execution depends on the mutated set. Run only those via
       `GetAllGraphEdges` backward from mutated files to find all `_test.go`
       files transitively reaching them. Reuses the same edge map BLAST_RADIUS
       already loads.
-- [ ] **2.2 — Certify pipeline integration in
+- [x] **2.2 — Certify pipeline integration in
       `cmd/neo-mcp/macro_tools.go::runGoBouncer:1800`.** Replace blanket
       `go test -short <pkgPath>` with selective
       `go test -short -run 'TestA|TestB' <pkgPath>` from the impacted set.
+      — gated by `sre.test_impact_enabled`; within-pkg v1 (cross-pkg expansion
+      a future epic). Empty impacted set falls through to full pkg test
+      (DS Finding 1 mitigation).
 - [ ] **2.3 — Safe fallback.** If reverse index empty (workspace not yet
       indexed) or graph coverage < 50%: run the package as today + log
       `test_impact_fallback:true` in the certify response. Never skip tests
@@ -263,9 +266,11 @@ test files whose execution depends on the mutated set. Run only those via
       `tool_memory.go` must select `TestWithRemSleepDefaults` and tests whose
       deps include `tool_memory.go`, NOT the whole `cmd/neo-mcp` suite. Compare
       end-to-end certify wall-clock before/after on a fixed 5-file mutation set.
-- [ ] **2.7 — Config field.** `sre.test_impact.enabled` (default false until
+- [x] **2.7 — Config field.** `sre.test_impact.enabled` (default false until
       validated) + `sre.test_impact.always_run []string` + backfill per
-      `[CONFIG-FIELD-BACKFILL-RULE]`.
+      `[CONFIG-FIELD-BACKFILL-RULE]`. — `test_impact_enabled` shipped; bool
+      default false uses natural zero-value (no backfill needed since
+      yaml tag has no omitempty). `always_run []string` deferred until 2.4.
 
 #### Exit
 Certify p99 drops from 24.6s → estimated 3-8s on typical 1-file mutations.

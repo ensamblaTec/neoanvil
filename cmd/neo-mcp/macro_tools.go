@@ -1855,7 +1855,24 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 	}
 
 	// [SRE-17.3.3] Test-Driven Validation.
-	testCmd := exec.CommandContext(ctx, "go", "test", "-short", pkgPath) //nolint:gosec // G204-LITERAL-BIN
+	// [Phase 2.2 / Speed-First 2026-05-15] When sre.test_impact_enabled and
+	// the dep-graph names at least one impacted _test.go file IN THE SAME
+	// PACKAGE, narrow the test set via `-run "^(TestA|TestB|...)$"`. The
+	// regex is built from `func TestXxx` decls parsed out of those test
+	// files. DS Finding 1 mitigation: empty regex would silently zero-out
+	// coverage — buildTestRunRegex returns "" in that case, and we omit
+	// `-run` entirely so today's full-pkg behavior runs (no narrowing, no
+	// loss). Compile-time safety preserved: `go test pkg` still builds the
+	// whole package even with -run, so cross-file compile errors surface.
+	testArgs := []string{"test", "-short", pkgPath}
+	if t.cfg != nil && t.cfg.SRE.TestImpactEnabled {
+		samePkg := impactedSamePkgTestFiles(t.wal, t.workspace, filename)
+		if regex := buildTestRunRegex(samePkg); regex != "" {
+			testArgs = []string{"test", "-short", "-run", regex, pkgPath}
+			log.Printf("[CERTIFY-TEST-IMPACT-RUN] narrowed pkg=%s tests=%d regex=%s", pkgPath, len(samePkg), regex)
+		}
+	}
+	testCmd := exec.CommandContext(ctx, "go", testArgs...) //nolint:gosec // G204-LITERAL-BIN
 	testCmd.Dir = goModRootOf(filename) // [T001] go.mod root, NOT neo.yaml root
 	out, errTest := testCmd.CombinedOutput()
 	if errTest != nil {

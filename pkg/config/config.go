@@ -244,6 +244,7 @@ type SREConfig struct {
 	DeepseekBlockSeverity       int      `yaml:"deepseek_block_severity"`             // [371.D] DS findings >= this SEV fail certification. 0 = default 9.
 	ReadSliceAdvisoryOff        bool     `yaml:"read_slice_advisory_off"`             // [372.C] Disable FILE_EXTRACT advisory on READ_SLICE results. Default false (advisory enabled).
 	ToolNudgesOff               bool     `yaml:"tool_nudges_off"`                     // [373.D] Disable underutilized tool suggestions in BRIEFING full mode. Default false (nudges enabled).
+	TestImpactEnabled           bool     `yaml:"test_impact_enabled"`                 // [Phase 2.2 / Speed-First 2026-05-15] When true, certify narrows `go test pkg` to `-run "^(TestA|TestB|...)$"` using the dep-graph reverse-walk over impacted _test.go files in the same pkg. Default false — opt-in per workspace until enough operators confirm zero coverage loss. Zero impacted names → no -run flag (full pkg test).
 }
 
 // InferenceConfig controls the 4-level inference router (LOCAL/OLLAMA/HYBRID/CLOUD).
@@ -865,6 +866,13 @@ func applySREDefaults(cfg *NeoConfig, ns *bool) {
 		cfg.SRE.ContextCompressThresholdKB = 600
 		*ns = true
 	}
+	// [Phase 2.2 / Speed-First 2026-05-15] TestImpactEnabled: no backfill
+	// needed. Default is false (the zero-value) and yaml tag has no
+	// omitempty → yaml.Marshal serialises the field on every round-trip,
+	// so an operator's yaml without the key will get `test_impact_enabled:
+	// false` written on the next config-watcher save. Backfill would only
+	// matter if default differed from zero-value (see DigitalTwinTesting,
+	// ConsensusEnabled, DebtAuditLog for the same pattern).
 	applySREOracleAndBudgetDefaults(cfg, ns)
 }
 
