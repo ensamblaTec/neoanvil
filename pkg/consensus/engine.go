@@ -147,7 +147,7 @@ func (ce *ConsensusEngine) pollModel(ctx context.Context, model, mutation string
 		baseURL = ce.cfg.AI.BaseURL
 	}
 	if baseURL == "" {
-		baseURL = "http://localhost:11434"
+		baseURL = "http://127.0.0.1:11434" // [SRE-LOCAL-LLM-2026-05-15] IPv4-explicit — macOS localhost→::1 drift
 	}
 
 	payload := map[string]any{

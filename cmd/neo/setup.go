@@ -43,7 +43,7 @@ type setupOptions struct {
 	WithOllama  bool   // verify Ollama reachable + write ai.* config
 	Docker      bool   // use container-friendly defaults (binds 0.0.0.0, ${NEO_MCP_URL})
 	Yes         bool   // non-interactive — refuse to prompt, fail on conflicts
-	OllamaURL   string // override default localhost:11434
+	OllamaURL   string // override default 127.0.0.1:11434 (IPv4 explicit — see ssrf.go dialFirstReachable note)
 	MCPURL      string // override default for .mcp.json
 	WorkspaceID string // override hash-derived ID (Docker path-stability)
 }
@@ -76,7 +76,7 @@ Examples:
 	cmd.Flags().BoolVar(&opts.WithOllama, "with-ollama", false, "verify Ollama reachable + populate ai.* config")
 	cmd.Flags().BoolVar(&opts.Docker, "docker", false, "container-friendly defaults (bind 0.0.0.0, .mcp.json uses ${NEO_MCP_URL})")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "non-interactive: refuse to prompt, fail on conflicts (CI mode)")
-	cmd.Flags().StringVar(&opts.OllamaURL, "ollama-url", "http://localhost:11434", "Ollama base URL")
+	cmd.Flags().StringVar(&opts.OllamaURL, "ollama-url", "http://127.0.0.1:11434", "Ollama base URL")
 	cmd.Flags().StringVar(&opts.MCPURL, "url", "", "MCP endpoint URL for .mcp.json (default http://127.0.0.1:9000/workspaces/<id>/mcp/sse)")
 	cmd.Flags().StringVar(&opts.WorkspaceID, "workspace-id", "", "explicit workspace ID (override path-hash; Docker path-stability)")
 	return cmd

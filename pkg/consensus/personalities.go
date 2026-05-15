@@ -140,7 +140,7 @@ func (ce *ConsensusEngine) pollWithPersonality(ctx context.Context, p Personalit
 		baseURL = ce.cfg.AI.BaseURL
 	}
 	if baseURL == "" {
-		baseURL = "http://localhost:11434"
+		baseURL = "http://127.0.0.1:11434" // [SRE-LOCAL-LLM-2026-05-15] IPv4-explicit — macOS localhost→::1 drift
 	}
 
 	start := time.Now()
