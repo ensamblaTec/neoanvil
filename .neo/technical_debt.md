@@ -938,7 +938,7 @@ Zombie entry — closed in the same session that introduced it.
 
 ---
 
-## [2026-05-15 10:47] strategos CLAUDE.md + doctrine stale V7.2 vs neoanvil V10.6
+## ~~[2026-05-15 10:47] strategos CLAUDE.md + doctrine stale V7.2 vs neoanvil V10.6~~ — RESOLVED 2026-05-15 (strategos commit `4d3a657e`)
 
 **Prioridad:** P2
 
@@ -948,7 +948,7 @@ Zombie entry — closed in the same session that introduced it.
 
 ---
 
-## [2026-05-15 11:29] strategosia-frontend CPG memory leak 14.6GB vs 512MB limit (2853%)
+## ~~[2026-05-15 11:29] strategosia-frontend CPG memory leak 14.6GB vs 512MB limit (2853%)~~ — RESOLVED 2026-05-15 (false alarm)
 
 **Prioridad:** P2
 
@@ -976,7 +976,7 @@ BRIEFING reporta CPG: 14610/512MB. cpg.max_heap_mb default is 512 pero el heap u
 
 ---
 
-## [2026-05-15 11:29] strategosia-frontend post-commit hook missing
+## ~~[2026-05-15 11:29] strategosia-frontend post-commit hook missing~~ — RESOLVED 2026-05-15 (symlinked → neoanvil/scripts/git-hooks/post-commit)
 
 **Prioridad:** P2
 
@@ -984,7 +984,7 @@ BRIEFING: hooks: post-commit:✗ — el hook no está instalado en este workspac
 
 ---
 
-## [2026-05-15 11:29] strategosia-frontend skills symlink 3 vs 17 (mismo patrón strategos)
+## ~~[2026-05-15 11:29] strategosia-frontend skills symlink 3 vs 17 (mismo patrón strategos)~~ — RESOLVED 2026-05-15 (symlink absoluto → neoanvil/.claude/skills, 17 skills accesibles)
 
 **Prioridad:** P2
 
