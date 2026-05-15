@@ -176,7 +176,14 @@ rag:
   # paid una vez por ingest cycle (e.g. 425 ms para 133k vectors), después
   # warm. Verificar dispatch real via neo_cache stats include:[search_paths]
   # → hybrid_count > 0. Boot log "populated" NO es suficiente prueba.
-  vector_quant: "float32"
+  #
+  # Recomendación template: "hybrid" — ADR-014 estableció recall=1.000 en
+  # 3 workspaces production (neoanvil/strategosia/strategosia_frontend),
+  # speedup ~2× sobre float32 baseline con +3% RAM. El binary-level default
+  # de applyRAGDefaults sigue siendo "float32" para no flipear silenciosamente
+  # workspaces sin yaml explícito; este template eleva el listón para los
+  # nuevos. Phase 0.C / Speed-First.
+  vector_quant: "hybrid"
   # [PILAR-XXV/175] Capacidad LRU del cache de queries semánticas.
   # 0 desactiva el cache. Default 256 cubre típicas sesiones SRE.
   # Hit path: 54 ns vs ~6 µs para búsqueda HNSW fresca.

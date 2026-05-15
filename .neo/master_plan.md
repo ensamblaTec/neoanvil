@@ -74,15 +74,17 @@ The original plan had three premise errors discovered during code audit:
       `TestStore_ConcurrentRecordCall` updated to count bare-tool rows only
       (the dual-write is intentional double-write at aggregate level).
 
-- [ ] **0.C — HNSW quant `hybrid` audit + decision.** Current workspace runs
-      float32 only (`cfg.RAG.VectorQuant = "float32"`, default at
-      `pkg/config/config.go:504`). `[HNSW-QUANT-WIRING]` documents `hybrid` as
-      the sweet spot (binary candidate + float32 rerank, recall 1.000 in 3
-      production workspaces). Audit
-      `cmd/neo-mcp/main.go::populateQuantCompanion` wiring at line 237; decide
-      if neoanvil flips. **Exit:** SEMANTIC_CODE p99 measured before/after on a
-      fixed 10-query set; decision recorded in
-      `docs/general/hnsw-quant-decision.md`.
+- [x] **0.C — HNSW quant `hybrid` audit + decision** — done 2026-05-15.
+      Audit found: (a) `populateQuantCompanion` wiring at `main.go:237-262`
+      handles all 4 modes correctly; (b) this workspace's `neo.yaml` already
+      had `vector_quant: hybrid`; (c) the HUD `search_paths bin=0 hybrid=0`
+      reflects no-searches-yet, NOT mis-wiring; (d) `pkg/rag/hnsw_hybrid_test.go`
+      exists and ADR-014 already documents recall=1.000 across 3 production
+      workspaces. Gap closed: `neo.yaml.example` template flipped from
+      `"float32"` to `"hybrid"` with a comment pointing at ADR-014 so new
+      workspaces inherit the validated default. `applyRAGDefaults` binary-
+      level default left at `"float32"` to avoid silently flipping workspaces
+      with no explicit yaml.
 
 - [x] **0.D — Persist `symbolMapCache` across restart** — done 2026-05-15
       commit `332c01c`. Added `saveSymbolMapSnapshot` / `loadSymbolMapSnapshot`
