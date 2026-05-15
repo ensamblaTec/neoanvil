@@ -85,6 +85,11 @@ sre:
     deepseek_block_severity: 9
     read_slice_advisory_off: false
     tool_nudges_off: false
+    # [Phase 2.2 / Speed-First 2026-05-15] When true, certify narrows
+    # `go test pkg` to `-run "^(TestA|TestB|...)$"` from the dep-graph
+    # reverse-walk of impacted same-pkg _test.go files. Zero impacted →
+    # no -run (full pkg test, no coverage loss). Default false (opt-in).
+    test_impact_enabled: false
 server:
     log_level: info
     host: 127.0.0.1
