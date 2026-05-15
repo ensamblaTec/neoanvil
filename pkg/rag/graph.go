@@ -112,11 +112,38 @@ func ReplaceFileEdges(wal *WAL, sourceFile string, edges []GraphEdge) error {
 // IndexCoverage returns the fraction of non-test .go files in workspace that have
 // a corresponding node in the HNSW graph. Returns 0.0 on empty workspace or nil graph.
 // O(files) — only called on BLAST_RADIUS fallback, not on hot paths.
+//
+// LEGACY: hardcoded to .go files. For multi-language workspaces (TypeScript
+// frontends, Python, Rust, etc.) this reports 0.0 even when the HNSW is fully
+// populated with the actual language's content. New callers should use
+// IndexCoverageWithLang and pass the workspace's `dominant_lang` so the file
+// counter matches the indexed corpus. Kept here as a thin wrapper for the 8+
+// call sites still relying on the .go default while they migrate.
 func IndexCoverage(g *Graph, workspace string) float64 {
+	return IndexCoverageWithLang(g, workspace, "")
+}
+
+// IndexCoverageWithLang returns indexed_nodes / total_source_files_in_workspace
+// where the "source file" filter is driven by `dominantLang`:
+//
+//	go                              → .go
+//	javascript/typescript/js/ts     → .ts .tsx .js .jsx
+//	python/py                       → .py
+//	rust/rs                         → .rs
+//	"" or unknown                   → .go (legacy fallback so IndexCoverage
+//	                                   stays back-compat for old callers)
+//
+// All filters skip _test.go, /vendor/, and .neo/. Cap at 100% when the index
+// has more nodes than discovered files (re-ingest residue, multi-pass embed).
+// [SRE-LANG-AWARE-COVERAGE-2026-05-15] Detected via strategosia-frontend
+// reporting RAG 0% despite a 4 GB HNSW: the workspace had zero .go files
+// (Next.js frontend) so total=0 yielded 0.0 regardless of indexed content.
+func IndexCoverageWithLang(g *Graph, workspace, dominantLang string) float64 {
 	if g == nil || workspace == "" {
 		return 0.0
 	}
 	indexed := len(g.Nodes)
+	extensions := sourceExtensionsForLang(dominantLang)
 
 	var total int
 	_ = filepath.Walk(workspace, func(path string, info os.FileInfo, err error) error {
@@ -125,11 +152,27 @@ func IndexCoverage(g *Graph, workspace string) float64 {
 		}
 		rel, _ := filepath.Rel(workspace, path)
 		rel = filepath.ToSlash(rel)
-		if strings.HasSuffix(path, ".go") &&
-			!strings.HasSuffix(path, "_test.go") &&
-			!strings.Contains(rel, "/vendor/") &&
-			!strings.HasPrefix(rel, ".neo/") {
-			total++
+		// Skip excluded paths regardless of extension. Check both top-level
+		// (HasPrefix) AND nested (Contains "/<dir>/") so workspace layouts
+		// with top-level `vendor/`, `node_modules/`, `.next/` get excluded
+		// — the original IndexCoverage only handled the nested case, which
+		// over-counted Go projects with conventional root-level vendor dirs.
+		// [SRE-LANG-AWARE-COVERAGE-2026-05-15]
+		if strings.Contains(rel, "/vendor/") || strings.HasPrefix(rel, "vendor/") ||
+			strings.HasPrefix(rel, ".neo/") ||
+			strings.Contains(rel, "/node_modules/") || strings.HasPrefix(rel, "node_modules/") ||
+			strings.Contains(rel, "/.next/") || strings.HasPrefix(rel, ".next/") {
+			return nil
+		}
+		// Go-specific: still skip _test.go even when "go" matches.
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		for _, ext := range extensions {
+			if strings.HasSuffix(path, ext) {
+				total++
+				return nil
+			}
 		}
 		return nil
 	})
@@ -141,6 +184,25 @@ func IndexCoverage(g *Graph, workspace string) float64 {
 		indexed = total // cap at 100%
 	}
 	return float64(indexed) / float64(total)
+}
+
+// sourceExtensionsForLang maps the workspace `dominant_lang` to the file
+// extensions that count toward `total` in IndexCoverageWithLang. Empty
+// or unrecognized lang defaults to .go for back-compat with the legacy
+// IndexCoverage callers (strategos / neoanvil = Go-heavy).
+func sourceExtensionsForLang(lang string) []string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "go", "golang":
+		return []string{".go"}
+	case "javascript", "typescript", "js", "ts":
+		return []string{".ts", ".tsx", ".js", ".jsx"}
+	case "python", "py":
+		return []string{".py"}
+	case "rust", "rs":
+		return []string{".rs"}
+	default:
+		return []string{".go"}
+	}
 }
 
 // GetAllGraphEdges extrae la topología completa desde BoltDB a la RAM.

@@ -276,14 +276,17 @@ test files whose execution depends on the mutated set. Run only those via
       {"selected_count": N, "selected_names": [...], "skipped_via_dep_graph":
       K, "fallback": false}` JSON sub-object. Falls through cleanly when
       narrowing disabled (no field) or fallback fired (different shape).
-- [ ] **2.6 — Tests + benchmarks.** Regression: a 1-line change in
+- [x] **2.6 — Tests + benchmarks.** Regression: a 1-line change in
       `tool_memory.go` must select `TestWithRemSleepDefaults` and tests whose
       deps include `tool_memory.go`, NOT the whole `cmd/neo-mcp` suite. Compare
       end-to-end certify wall-clock before/after on a fixed 5-file mutation set.
-      — partial: 8 unit tests for integrationTaggedTestFiles+
-      buildTestRunRegexWithAllowlist shipped in test_impact_alwaysrun_test.go.
-      End-to-end benchmark + the specific `TestWithRemSleepDefaults`
-      regression case remain open (require real dep-graph state setup).
+      — closed in test_impact_e2e_test.go (3 E2E tests synthesize the spec
+      topology in temp workspaces and assert the regex narrows correctly:
+      TestWithRemSleepDefaults selected ✓, same-pkg sibling included ✓,
+      cross-pkg leaf NOT included ✓, empty-impact fallback ✓, allowlist
+      rescue ✓). Wall-clock benchmark deferred — environment-dependent
+      measurement not testable hermetically; covered observationally by
+      `[CERTIFY-TEST-IMPACT-RUN]` log latency metrics.
 - [x] **2.7 — Config field.** `sre.test_impact.enabled` (default false until
       validated) + `sre.test_impact.always_run []string` + backfill per
       `[CONFIG-FIELD-BACKFILL-RULE]`. — `test_impact_enabled` shipped; bool

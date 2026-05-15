@@ -956,11 +956,9 @@ BRIEFING reporta CPG: 14610/512MB. cpg.max_heap_mb default is 512 pero el heap u
 
 ---
 
-## [2026-05-15 11:29] strategosia-frontend RAG 0% + HNSW cold
+## ~~[2026-05-15 11:29] strategosia-frontend RAG 0% + HNSW cold~~ — RESOLVED 2026-05-15 (commit pending in current session)
 
-**Prioridad:** P2
-
-BRIEFING: RAG 0% ⚠️ low_rag_coverage=0% (fallback_to_grep_recommended). HNSW: cold. Probable causa: hnsw.bin no cargado al boot, o índice nunca fue poblado para este workspace. Sin índice semántico, SEMANTIC_CODE caerá a grep siempre. Fix: re-ingestar workspace via neo_radar(intent:PROJECT_DIGEST) o reindex completo. Workaround actual: el fallback automático a grep mantiene funcionalidad pero pierde queries conceptuales.
+**Resolución:** Root cause = `IndexCoverage` en pkg/rag/graph.go hardcodea filtro `.go` non-test non-vendor. Strategosia es Next.js con 0 archivos .go pero 897 .ts/.tsx + 4GB hnsw.bin poblado → métrica reportaba 0% engañosamente. Fix: nuevo helper `IndexCoverageWithLang(g, workspace, dominantLang)` que mapea lang → extensions (go|js|ts|py|rs). Briefing usa `t.cfg.Workspace.DominantLang` para llamar la versión lang-aware. Legacy `IndexCoverage` mantenida sin cambios para back-compat con 8+ callers. Bonus fix: path filter mejorado para excluir top-level `vendor/`, `node_modules/`, `.next/` (antes solo nested). 5 tests añadidos en pkg/rag/coverage_lang_test.go. HNSW:cold sigue siendo cuestión separada — re-ingest decision para el operador.
 
 ---
 

@@ -1077,7 +1077,16 @@ func gatherSessionAndRAGMetrics(t *RadarTool, d *briefingData) {
 	d.sessionMuts, _ = t.wal.GetSessionMutations(sessionID)
 	// [335.A] Load peer workspace mutations mirrored via Nexus.
 	d.peerMuts, _ = t.wal.GetAllPeerSessionMutations()
-	d.ragCoverage = rag.IndexCoverage(t.graph, t.workspace) * 100
+	// [SRE-LANG-AWARE-COVERAGE-2026-05-15] Use dominant_lang from cfg so
+	// non-Go workspaces (strategosia/Next.js) don't get a misleading 0%
+	// RAG coverage just because IndexCoverage's legacy default counts only
+	// .go files. cfg.Workspace.DominantLang is populated at workspace
+	// registration via DetectDominantLang.
+	dominantLang := ""
+	if t.cfg != nil {
+		dominantLang = t.cfg.Workspace.DominantLang
+	}
+	d.ragCoverage = rag.IndexCoverageWithLang(t.graph, t.workspace, dominantLang) * 100
 	d.binAgeStr = briefingBinaryAge(t.workspace)
 	// [162.A] Detect binary stale alert from binAgeStr marker.
 	if _, after, ok := strings.Cut(d.binAgeStr, "binary_stale_vs_HEAD="); ok {
