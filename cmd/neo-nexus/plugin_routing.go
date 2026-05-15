@@ -27,18 +27,15 @@ import (
 	"log"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/plugin"
 )
 
-// batchMap tracks batch_id → task_ids for batch poll. In-memory only —
-// survives within a Nexus process lifetime. [376.I]
-var (
-	batchMapMu sync.RWMutex
-	batchMap   = make(map[string][]string)
-)
+// batch_id → task_ids mapping moved from this package-level in-memory map to
+// AsyncTaskStore's BoltDB-backed batchBucket so it survives Nexus restart.
+// [Phase 4.B / Speed-First, was 376.I] See SaveBatchMapping / GetBatchMapping
+// in plugin_async.go.
 
 // interceptPluginTools merges plugin tools into a tools/list response from
 // the child. Returns the original respBody untouched when:
@@ -412,9 +409,9 @@ func handleBatchDispatch(reqID json.RawMessage, args map[string]any, batchFiles 
 			RunAsync(rt.asyncStore, conn, toolName, taskArgs, taskID, rt.asyncDoneCallback)
 		}()
 	}
-	batchMapMu.Lock()
-	batchMap[batchID] = taskIDs
-	batchMapMu.Unlock()
+	if err := rt.asyncStore.SaveBatchMapping(batchID, taskIDs); err != nil {
+		log.Printf("[PLUGIN-ASYNC-BATCH] persist mapping for %s failed: %v (batch will not survive restart)", batchID, err)
+	}
 	log.Printf("[PLUGIN-ASYNC-BATCH] submitted batch %s with %d tasks plugin=%s", batchID, count, conn.Name)
 	resultJSON, _ := json.Marshal(map[string]any{"batch_id": batchID, "task_ids": taskIDs, "status": "pending", "count": count})
 	resp, _ := json.Marshal(map[string]any{
@@ -438,13 +435,12 @@ func handleTaskPoll(reqID json.RawMessage, taskID string, rt *pluginRuntime) []b
 	return resp
 }
 
-// handleBatchPoll looks up batch_id in task IDs stored in a simple naming
-// convention: batch tasks share the batch prefix. For now we store batch→taskIDs
-// mapping in memory via a package-level map. [376.I]
+// handleBatchPoll resolves batch_id → task_ids via the BoltDB-backed mapping
+// in AsyncTaskStore (Phase 4.B). Survives Nexus restart so a batch submitted
+// before reboot is still pollable after, as long as the individual AsyncTask
+// rows are still in the store (governed by Cleanup TTL). [376.I + Phase 4.B]
 func handleBatchPoll(reqID json.RawMessage, batchID string, rt *pluginRuntime) []byte {
-	batchMapMu.RLock()
-	taskIDs, ok := batchMap[batchID]
-	batchMapMu.RUnlock()
+	taskIDs, ok := rt.asyncStore.GetBatchMapping(batchID)
 	if !ok {
 		resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": reqID, "error": map[string]any{"code": -32000, "message": "batch not found: " + batchID}})
 		return resp

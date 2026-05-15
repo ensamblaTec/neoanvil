@@ -23,6 +23,7 @@ import (
 
 const (
 	asyncBucket     = "plugin_async_tasks"
+	batchBucket     = "plugin_async_batches" // [Phase 4.B / Speed-First] batch_id → []taskID
 	asyncMaxPending = 100
 	asyncCallTTL    = 300 * time.Second
 
@@ -70,13 +71,65 @@ func NewAsyncTaskStore(dbPath string) (*AsyncTaskStore, error) {
 		return nil, fmt.Errorf("async store: open %s: %w", dbPath, err)
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(asyncBucket))
+		if _, err := tx.CreateBucketIfNotExists([]byte(asyncBucket)); err != nil {
+			return err
+		}
+		// [Phase 4.B / Speed-First] batch mapping bucket — survives restart so
+		// handleBatchPoll for a batch_id submitted before reboot doesn't return
+		// "batch not found" while the AsyncTask rows themselves are intact.
+		_, err := tx.CreateBucketIfNotExists([]byte(batchBucket))
 		return err
 	}); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("async store: create bucket: %w", err)
 	}
 	return &AsyncTaskStore{db: db}, nil
+}
+
+// SaveBatchMapping persists batch_id → []taskID so handleBatchPoll can
+// resolve batches across a Nexus restart. The mapping outlives the
+// individual AsyncTask rows by design — Cleanup may reap stale tasks,
+// but the batch entry stays until ReapBatchMappings sweeps it. Idempotent
+// — overwrites any existing entry for the same batchID. [Phase 4.B]
+func (s *AsyncTaskStore) SaveBatchMapping(batchID string, taskIDs []string) error {
+	if s == nil {
+		return nil
+	}
+	data, err := json.Marshal(taskIDs)
+	if err != nil {
+		return fmt.Errorf("batch mapping marshal: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte(batchBucket)).Put([]byte(batchID), data)
+	})
+}
+
+// GetBatchMapping returns the task IDs originally enqueued under batchID.
+// (nil, false) means the batch is unknown to this store — caller surfaces
+// a clean error. Restart-safe: a batch submitted before reboot still
+// resolves after. [Phase 4.B]
+func (s *AsyncTaskStore) GetBatchMapping(batchID string) ([]string, bool) {
+	if s == nil {
+		return nil, false
+	}
+	var taskIDs []string
+	var found bool
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		raw := tx.Bucket([]byte(batchBucket)).Get([]byte(batchID))
+		if raw == nil {
+			return nil
+		}
+		if err := json.Unmarshal(raw, &taskIDs); err != nil {
+			return err
+		}
+		found = true
+		return nil
+	})
+	return taskIDs, found
 }
 
 func (s *AsyncTaskStore) Submit(pluginName, action string) (string, error) {

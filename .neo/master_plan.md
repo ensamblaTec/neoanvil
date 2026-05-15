@@ -217,11 +217,16 @@ For strategos with multi-minute suites the win is 10× larger in absolute terms.
       and Phase 2 selective tests, the long-deferred refactor (extract
       `newDaemonHooks`, `newMcpHandler`, `installHTTPMux`) lands safely in
       2-3 PRs.
-- [ ] **4.B — `batchMap` restart-persistence gap** (deferred from
-      DS-background phase). In-memory map lost on Nexus restart while BoltDB
-      `AsyncTask` rows survive → batch polls return "batch not found" for
-      valid tasks. Promote to BoltDB bucket OR derive from a task-id naming
-      convention. Out of scope until batch is exposed in plugin schemas.
+- [x] **4.B — `batchMap` restart-persistence gap** — done 2026-05-15. Added
+      `batchBucket = "plugin_async_batches"` to `AsyncTaskStore`; new methods
+      `SaveBatchMapping` / `GetBatchMapping` keep batch_id → []taskID on
+      disk next to the AsyncTask rows. `handleBatchDispatch` writes via the
+      store; `handleBatchPoll` reads via the store. The in-memory
+      `batchMap`/`batchMapMu` package vars + `sync` import deleted from
+      `plugin_routing.go`. Regression tests: `TestAsyncStore_BatchMapping_SaveGet`
+      (idempotent overwrite + missing-key returns false) and
+      `TestAsyncStore_BatchMapping_SurvivesRestart` (close → reopen same
+      file → mapping intact — the headline guarantee).
 - [x] **4.C — `cmd/plugin-jira` 100% error_rate audit** — done 2026-05-15.
       Audit found the plugin already logs `connectivity OK/FAILED` per tenant
       at boot (`ops.go:146-148`) — the actual gap was operator-facing

@@ -130,3 +130,79 @@ func TestAsyncStore_List(t *testing.T) {
 		t.Errorf("expected 2 deepseek, got %d", len(ds))
 	}
 }
+
+// TestAsyncStore_BatchMapping_SaveGet covers the basic round-trip in a single
+// store instance — [Phase 4.B / Speed-First] precursor to the cross-restart
+// case below.
+func TestAsyncStore_BatchMapping_SaveGet(t *testing.T) {
+	store := newTestAsyncStore(t)
+
+	if got, ok := store.GetBatchMapping("batch_unknown"); ok || got != nil {
+		t.Errorf("missing batch should yield (nil, false), got (%v, %v)", got, ok)
+	}
+
+	taskIDs := []string{"async_aaa", "async_bbb", "async_ccc"}
+	if err := store.SaveBatchMapping("batch_xyz", taskIDs); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got, ok := store.GetBatchMapping("batch_xyz")
+	if !ok {
+		t.Fatal("expected batch found after save")
+	}
+	if len(got) != 3 || got[0] != "async_aaa" || got[2] != "async_ccc" {
+		t.Errorf("got %v, want %v", got, taskIDs)
+	}
+
+	// Idempotent overwrite.
+	if err := store.SaveBatchMapping("batch_xyz", []string{"async_only"}); err != nil {
+		t.Fatalf("overwrite: %v", err)
+	}
+	got, _ = store.GetBatchMapping("batch_xyz")
+	if len(got) != 1 || got[0] != "async_only" {
+		t.Errorf("overwrite lost: got %v", got)
+	}
+}
+
+// TestAsyncStore_BatchMapping_SurvivesRestart is the headline Phase 4.B
+// regression. Before this commit, batchMap was a package-level in-memory
+// map: a Nexus restart wiped it while the per-task AsyncTask rows in BoltDB
+// survived, so handleBatchPoll returned "batch not found" for valid task
+// IDs. Now the mapping is in BoltDB next to the tasks → close the store,
+// re-open the SAME file, the mapping is still there.
+func TestAsyncStore_BatchMapping_SurvivesRestart(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "async.db")
+
+	// First "lifetime" — write the mapping.
+	store1, err := NewAsyncTaskStore(dbPath)
+	if err != nil {
+		t.Fatalf("open 1: %v", err)
+	}
+	want := []string{"async_111", "async_222", "async_333", "async_444"}
+	if err := store1.SaveBatchMapping("batch_persistent", want); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := store1.Close(); err != nil {
+		t.Fatalf("close 1: %v", err)
+	}
+
+	// Simulated restart — fresh store, same disk path.
+	store2, err := NewAsyncTaskStore(dbPath)
+	if err != nil {
+		t.Fatalf("open 2: %v", err)
+	}
+	defer store2.Close()
+
+	got, ok := store2.GetBatchMapping("batch_persistent")
+	if !ok {
+		t.Fatal("mapping lost across restart — Phase 4.B regression")
+	}
+	if len(got) != len(want) {
+		t.Fatalf("post-restart len = %d, want %d", len(got), len(want))
+	}
+	for i, id := range want {
+		if got[i] != id {
+			t.Errorf("post-restart got[%d] = %q, want %q", i, got[i], id)
+		}
+	}
+}
