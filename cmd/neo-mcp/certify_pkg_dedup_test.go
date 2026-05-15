@@ -34,7 +34,7 @@ func TestRunGoBouncer_BatchPkgDedupSkip(t *testing.T) {
 	rollback := func() { rollbackCalls++ }
 
 	tool := &CertifyMutationTool{}
-	msg, bounce := tool.runGoBouncer(
+	msg, bounce, sel := tool.runGoBouncer(
 		context.Background(),
 		file,
 		[]byte("package foo\n"),
@@ -47,6 +47,9 @@ func TestRunGoBouncer_BatchPkgDedupSkip(t *testing.T) {
 	}
 	if bounce != nil {
 		t.Errorf("dedup hit must return nil bounce, got: %+v", bounce)
+	}
+	if sel != nil {
+		t.Errorf("dedup hit must return nil selection, got: %+v", sel)
 	}
 	if rollbackCalls != 0 {
 		t.Errorf("dedup short-circuit must not invoke rollback, got %d calls", rollbackCalls)

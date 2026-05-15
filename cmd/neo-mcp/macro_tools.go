@@ -1485,7 +1485,12 @@ func (t *CertifyMutationTool) certifyOneFile(ctx context.Context, filename, comp
 		return fmt.Sprintf("🛑 Rollback Ejecutado. Fallaste en [AST-SYNTAX]: %v. Intenta otra lógica.%s", syntaxErr, flashback)
 	}
 
-	if msg := t.runFileChecks(ctx, filename, ext, complexityIntent, src, fastMode, checks, rollbackAll, testedPkgs); msg != "" {
+	// [Phase 2.5 / Speed-First 2026-05-15] Capture test-impact selection
+	// from runGoBouncer when narrowing fires, surface as `test_impact`
+	// JSON field below. Nil when narrowing disabled, full pkg ran, or
+	// the file isn't .go.
+	var impactSel *testImpactSelection
+	if msg := t.runFileChecks(ctx, filename, ext, complexityIntent, src, fastMode, checks, rollbackAll, testedPkgs, &impactSel); msg != "" {
 		return msg
 	}
 
@@ -1576,11 +1581,32 @@ func (t *CertifyMutationTool) certifyOneFile(ctx context.Context, filename, comp
 	}
 
 	t.emitBouncer(filename, "pass", complexityIntent)
+	// [Phase 2.5 / Speed-First 2026-05-15] test_impact JSON fragment.
+	// Renders `,"test_impact":{"selected_count": N, "selected_names": [...]}`
+	// when narrowing fired (sre.test_impact_enabled true AND ≥1 same-pkg
+	// _test.go in impacted set). Empty string when full pkg ran — agent
+	// can tell narrowing was inactive vs fallback for that call.
+	testImpactJSON := ""
+	if impactSel != nil {
+		if impactSel.Fallback {
+			// Phase 2.3 — narrowing was eligible but dep-graph stale, full pkg ran.
+			testImpactJSON = `, "test_impact": {"fallback": true, "reason": "empty_impacted_set"}`
+		} else if len(impactSel.SelectedNames) > 0 {
+			// Phase 2.5 — narrowing fired, surface selected names + skipped count.
+			quoted := make([]string, len(impactSel.SelectedNames))
+			for i, n := range impactSel.SelectedNames {
+				quoted[i] = `"` + n + `"`
+			}
+			testImpactJSON = fmt.Sprintf(`, "test_impact": {"selected_count": %d, "selected_names": [%s], "skipped_via_dep_graph": %d, "fallback": false}`,
+				len(impactSel.SelectedNames), strings.Join(quoted, ","), impactSel.SkippedViaDepGraph)
+		}
+	}
 	return fmt.Sprintf(
-		`{"status": "Aprobado e Indexado", "file": "%s", "complexity": "%s", "checks": {"ast": "%s", "build": "%s", "bouncer": "%s", "tests": "%s"}%s}`,
+		`{"status": "Aprobado e Indexado", "file": "%s", "complexity": "%s", "checks": {"ast": "%s", "build": "%s", "bouncer": "%s", "tests": "%s"}%s%s}`,
 		filename, complexityIntent,
 		checks["ast"], checks["build"], checks["bouncer"], checks["tests"],
 		remediationHint,
+		testImpactJSON,
 	)
 }
 
@@ -1677,7 +1703,7 @@ func isPathInWorkspace(workspace, filename string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, complexityIntent string, src []byte, fastMode bool, checks map[string]string, rollbackAll func(), testedPkgs map[string]struct{}) string {
+func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, complexityIntent string, src []byte, fastMode bool, checks map[string]string, rollbackAll func(), testedPkgs map[string]struct{}, impactOut **testImpactSelection) string {
 	// [SRE-26.3.1/26.3.2/26.3.3] Universal module router — polyglot, skipped in pair mode.
 	if ext != ".go" && !fastMode && os.Getenv("NEO_SERVER_MODE") != "pair" {
 		checks["build"] = "running"
@@ -1693,7 +1719,11 @@ func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, 
 		checks["build"] = "running"
 		checks["bouncer"] = "running"
 		checks["tests"] = "running"
-		if msg, bounce := t.runGoBouncer(ctx, filename, src, complexityIntent, rollbackAll, testedPkgs); msg != "" {
+		msg, bounce, sel := t.runGoBouncer(ctx, filename, src, complexityIntent, rollbackAll, testedPkgs)
+		if sel != nil && impactOut != nil {
+			*impactOut = sel
+		}
+		if msg != "" {
 			checks["build"] = "fail"
 			checks["bouncer"] = "fail"
 			checks["tests"] = "fail"
@@ -1803,7 +1833,25 @@ func (t *CertifyMutationTool) resolveModuleBuild(filename string) (moduleDir, bu
 // runGoBouncer runs the thermodynamic bouncer and TDD for Go files. [SRE-86.A]
 // Returns (errorMsg, bounceResult). errorMsg="" means success. bounceResult is
 // populated on failure to feed inference.SuggestFix for auto-fix proposals.
-func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string, src []byte, complexityIntent string, rollbackAll func(), testedPkgs map[string]struct{}) (string, *inference.BounceResult) {
+// testImpactSelection carries the per-file outcome of the Phase 2.2 -run
+// narrowing for inclusion in the certify JSON response (Phase 2.5+2.3).
+//   - SelectedNames non-empty + Fallback=false → narrowing fired, regex
+//     -run passed to go test with these test names
+//   - SelectedNames empty + Fallback=true → narrowing was enabled but
+//     the dep-graph was empty/stale (Phase 2.3 safe fallback)
+//   - nil pointer → narrowing wasn't enabled (cfg.SRE.TestImpactEnabled=false)
+//     or fastMode / non-Go file path
+//
+// SkippedViaDepGraph is the count of tests in the same pkg that were
+// excluded because the dep-graph didn't reach them — populated on
+// successful narrowing; 0 on fallback.
+type testImpactSelection struct {
+	SelectedNames      []string
+	SkippedViaDepGraph int
+	Fallback           bool // Phase 2.3 — true when narrowing eligible but didn't fire
+}
+
+func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string, src []byte, complexityIntent string, rollbackAll func(), testedPkgs map[string]struct{}) (string, *inference.BounceResult, *testImpactSelection) {
 	// [SRE-17.3.2] Thermodynamic Bouncer: detect O(N²) when O(1) is claimed.
 	if complexityIntent == "O(1)_OPTIMIZATION" {
 		code := string(src)
@@ -1816,7 +1864,7 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 				ErrorContext: msg,
 				FailedChecks: []string{"BOUNCER-THERMODYNAMIC"},
 				FilePath:     filename,
-			}
+			}, nil
 		}
 	}
 	// [Phase 2 MV+ / Speed-First 2026-05-15] Per-batch pkg dedup. `go test
@@ -1828,7 +1876,7 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 	pkgKey := goModRootOf(filename) + "|" + pkgPath
 	if testedPkgs != nil {
 		if _, done := testedPkgs[pkgKey]; done {
-			return "", nil
+			return "", nil, nil
 		}
 	}
 	// [SRE-76.4] Preflight dependency check — verify imports resolve before running tests.
@@ -1850,7 +1898,7 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 				ErrorContext: outStr,
 				FailedChecks: []string{"BUILD-DEPENDENCY"},
 				FilePath:     filename,
-			}
+			}, nil
 		}
 	}
 
@@ -1865,11 +1913,37 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 	// loss). Compile-time safety preserved: `go test pkg` still builds the
 	// whole package even with -run, so cross-file compile errors surface.
 	testArgs := []string{"test", "-short", pkgPath}
+	var selection *testImpactSelection
 	if t.cfg != nil && t.cfg.SRE.TestImpactEnabled {
 		samePkg := impactedSamePkgTestFiles(t.wal, t.workspace, filename)
-		if regex := buildTestRunRegex(samePkg); regex != "" {
+		// [Phase 2.4 / Speed-First 2026-05-15] Always-run escape hatch:
+		// union impacted set with (a) integration-tagged _test.go files in
+		// pkgPath and (b) operator-supplied test name allowlist from yaml.
+		// Neither path can SHRINK coverage — only EXPAND. Safe even when
+		// dep-graph is empty (impacted set is empty + always_run still fires).
+		alwaysFiles := integrationTaggedTestFiles(t.workspace, pkgPath)
+		mergedFiles := append([]string{}, samePkg...)
+		mergedFiles = append(mergedFiles, alwaysFiles...)
+		regex := buildTestRunRegexWithAllowlist(mergedFiles, t.cfg.SRE.TestImpactAlwaysRun)
+		if regex != "" {
 			testArgs = []string{"test", "-short", "-run", regex, pkgPath}
-			log.Printf("[CERTIFY-TEST-IMPACT-RUN] narrowed pkg=%s tests=%d regex=%s", pkgPath, len(samePkg), regex)
+			// Extract names from `^(A|B|C)$` for Phase 2.5 surface in certify response.
+			trimmed := strings.TrimPrefix(strings.TrimSuffix(regex, ")$"), "^(")
+			selection = &testImpactSelection{
+				SelectedNames: strings.Split(trimmed, "|"),
+			}
+			log.Printf("[CERTIFY-TEST-IMPACT-RUN] narrowed pkg=%s tests=%d regex=%s", pkgPath, len(selection.SelectedNames), regex)
+		} else {
+			// [Phase 2.3 / Speed-First 2026-05-15] Safe fallback: narrowing
+			// was enabled but the dep-graph couldn't name any same-pkg test
+			// to include (empty reverse index, workspace not yet indexed, or
+			// the mutated file has zero same-pkg _test.go siblings AND no
+			// cross-pkg test depends on it). Run the package as today + log
+			// fallback so operators can audit when narrowing isn't earning
+			// its keep. Never skip tests due to graph staleness — this is
+			// the "never silently drop coverage" guarantee.
+			selection = &testImpactSelection{Fallback: true}
+			log.Printf("[CERTIFY-TEST-IMPACT-FALLBACK] pkg=%s reason=empty_impacted_set (graph stale or no same-pkg tests reach mutated file) — running full pkg suite", pkgPath)
 		}
 	}
 	testCmd := exec.CommandContext(ctx, "go", testArgs...) //nolint:gosec // G204-LITERAL-BIN
@@ -1884,12 +1958,12 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 			ErrorContext: string(out),
 			FailedChecks: []string{"TDD"},
 			FilePath:     filename,
-		}
+		}, nil
 	}
 	if testedPkgs != nil {
 		testedPkgs[pkgKey] = struct{}{}
 	}
-	return "", nil
+	return "", nil, selection
 }
 
 // [SRE-21.3.1] Write certified file path to lock file for pre-commit hook verification.

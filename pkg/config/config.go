@@ -245,6 +245,7 @@ type SREConfig struct {
 	ReadSliceAdvisoryOff        bool     `yaml:"read_slice_advisory_off"`             // [372.C] Disable FILE_EXTRACT advisory on READ_SLICE results. Default false (advisory enabled).
 	ToolNudgesOff               bool     `yaml:"tool_nudges_off"`                     // [373.D] Disable underutilized tool suggestions in BRIEFING full mode. Default false (nudges enabled).
 	TestImpactEnabled           bool     `yaml:"test_impact_enabled"`                 // [Phase 2.2 / Speed-First 2026-05-15] When true, certify narrows `go test pkg` to `-run "^(TestA|TestB|...)$"` using the dep-graph reverse-walk over impacted _test.go files in the same pkg. Default false — opt-in per workspace until enough operators confirm zero coverage loss. Zero impacted names → no -run flag (full pkg test).
+	TestImpactAlwaysRun         []string `yaml:"test_impact_always_run"`              // [Phase 2.4 / Speed-First 2026-05-15] Test names to ALWAYS include in -run regex even when not reached by the dep-graph. Belt-and-suspenders for critical regression tests (e.g. `TestSchemaMigration`, `TestE2E_GoldenPath`). Files with `//go:build integration` tag are auto-included separately. Empty = no allowlist (only dep-graph + integration tag).
 }
 
 // InferenceConfig controls the 4-level inference router (LOCAL/OLLAMA/HYBRID/CLOUD).

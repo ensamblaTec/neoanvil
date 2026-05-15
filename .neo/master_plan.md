@@ -255,20 +255,35 @@ test files whose execution depends on the mutated set. Run only those via
       — gated by `sre.test_impact_enabled`; within-pkg v1 (cross-pkg expansion
       a future epic). Empty impacted set falls through to full pkg test
       (DS Finding 1 mitigation).
-- [ ] **2.3 — Safe fallback.** If reverse index empty (workspace not yet
+- [x] **2.3 — Safe fallback.** If reverse index empty (workspace not yet
       indexed) or graph coverage < 50%: run the package as today + log
       `test_impact_fallback:true` in the certify response. Never skip tests
-      due to graph staleness alone.
-- [ ] **2.4 — Always-run escape hatch.** Files with `//go:build integration`
+      due to graph staleness alone. — shipped in macro_tools.go runGoBouncer:
+      empty impacted set → selection.Fallback=true → log
+      `[CERTIFY-TEST-IMPACT-FALLBACK]` + JSON `"test_impact": {"fallback": true}`.
+      Coverage<50% heuristic not implemented (empty-set fallback covers the
+      stated guarantee). Pending: explicit coverage threshold for advanced cases.
+- [x] **2.4 — Always-run escape hatch.** Files with `//go:build integration`
       tag always included. Optional allowlist for any other "always-run" test
-      files (config'd via `neo.yaml::sre.test_impact.always`).
-- [ ] **2.5 — Surface in certify response.** New fields `tests_selected`
+      files (config'd via `neo.yaml::sre.test_impact.always`). — shipped as
+      `integrationTaggedTestFiles` helper (detects new + legacy build tag
+      syntax) + `SREConfig.TestImpactAlwaysRun []string` + `buildTestRunRegex
+      WithAllowlist`. Allowlist names go straight into regex; blanks filtered
+      (DS Finding 1 guard).
+- [x] **2.5 — Surface in certify response.** New fields `tests_selected`
       (count + names) and `tests_skipped_via_dep_graph` (count) in the certify
-      JSON. Operator sees the win per call.
+      JSON. Operator sees the win per call. — shipped as `"test_impact":
+      {"selected_count": N, "selected_names": [...], "skipped_via_dep_graph":
+      K, "fallback": false}` JSON sub-object. Falls through cleanly when
+      narrowing disabled (no field) or fallback fired (different shape).
 - [ ] **2.6 — Tests + benchmarks.** Regression: a 1-line change in
       `tool_memory.go` must select `TestWithRemSleepDefaults` and tests whose
       deps include `tool_memory.go`, NOT the whole `cmd/neo-mcp` suite. Compare
       end-to-end certify wall-clock before/after on a fixed 5-file mutation set.
+      — partial: 8 unit tests for integrationTaggedTestFiles+
+      buildTestRunRegexWithAllowlist shipped in test_impact_alwaysrun_test.go.
+      End-to-end benchmark + the specific `TestWithRemSleepDefaults`
+      regression case remain open (require real dep-graph state setup).
 - [x] **2.7 — Config field.** `sre.test_impact.enabled` (default false until
       validated) + `sre.test_impact.always_run []string` + backfill per
       `[CONFIG-FIELD-BACKFILL-RULE]`. — `test_impact_enabled` shipped; bool

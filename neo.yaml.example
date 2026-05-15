@@ -548,6 +548,7 @@ databases: []
 #   max_directive_chars:           500                         # [374.A] Max chars per directive (learn action)
 #   max_directives:                60                          # [374.B] Max total active directives
 #   test_impact_enabled:           false                       # [Phase 2.2 / Speed-First] when true, certify narrows `go test pkg` to `-run "^(TestA|TestB|...)$"` from the dep-graph reverse-walk of impacted same-pkg _test.go files. Zero impacted → no -run (full pkg). Default false (opt-in).
+#   test_impact_always_run:        []                          # [Phase 2.4] Test names ALWAYS in -run regex even when not reached by dep-graph. Belt-and-suspenders for critical regressions (e.g. ["TestSchemaMigration", "TestE2E_GoldenPath"]). Files with `//go:build integration` tag are auto-included separately. Empty = no allowlist.
 
 # inference:
 #   max_tokens:              4096

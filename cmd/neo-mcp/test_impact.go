@@ -219,6 +219,108 @@ func buildTestRunRegex(samePkgTestFiles []string) string {
 	return "^(" + strings.Join(names, "|") + ")$"
 }
 
+// integrationTaggedTestFiles scans pkgPath for `*_test.go` files carrying a
+// `//go:build integration` (or `// +build integration` legacy) build tag —
+// Phase 2.4 / Speed-First always-run escape hatch. Those tests are
+// unconditionally included in the -run regex even when the dep-graph
+// reverse-walk doesn't reach them, on the principle that operators who
+// explicitly tag a file as "integration" want it to run when its package is
+// touched. Returns absolute paths matching impactedSamePkgTestFiles shape so
+// the caller can union the two slices.
+//
+// Nil-safe: missing dir returns nil; parse errors return nil for that file.
+// Scope: only the pkgPath directory (no recursion); siblings only.
+func integrationTaggedTestFiles(workspace, pkgPath string) []string {
+	if pkgPath == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(pkgPath)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		full := filepath.Join(pkgPath, name)
+		body, readErr := os.ReadFile(full) //nolint:gosec // G304-WORKSPACE-CANON: caller passes validated workspace pkg dir
+		if readErr != nil {
+			continue
+		}
+		// Build tag must appear before the package declaration, per Go spec.
+		// Scan only the first ~30 lines to keep this cheap.
+		head := body
+		if len(head) > 2048 {
+			head = head[:2048]
+		}
+		if bytesContainsIntegrationBuildTag(head) {
+			out = append(out, full)
+		}
+	}
+	return out
+}
+
+// bytesContainsIntegrationBuildTag returns true when head contains a Go
+// build constraint that activates only with the `integration` tag. Matches
+// both new (`//go:build`) and legacy (`// +build`) syntax. Conservative:
+// only triggers on a bare `integration` token to avoid false positives
+// from `integrationdev` etc.
+func bytesContainsIntegrationBuildTag(head []byte) bool {
+	s := string(head)
+	for _, line := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(line)
+		if !strings.HasPrefix(t, "//go:build") && !strings.HasPrefix(t, "// +build") {
+			continue
+		}
+		// Split on common separators used by build constraints (space, comma,
+		// ampersand, pipe, parens) and look for a bare `integration` token.
+		fields := strings.FieldsFunc(t, func(r rune) bool {
+			return r == ' ' || r == ',' || r == '&' || r == '|' || r == '(' || r == ')' || r == '!'
+		})
+		for _, f := range fields {
+			if f == "integration" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// buildTestRunRegexWithAllowlist composes the `^(A|B|...)$` regex from
+// the merged impacted+integration set PLUS an explicit operator allowlist
+// (cfg.SRE.TestImpactAlwaysRun). Same dedup+sort discipline as
+// buildTestRunRegex. Returns "" when nothing to narrow on — caller MUST
+// fall through to full pkg test (DS Finding 1). [Phase 2.4]
+//
+// Names in `alwaysRunNames` are added verbatim (assumed Go-identifier shape
+// per the operator); not validated since they're operator-supplied. The
+// regex chars in test func names are still impossible (Go spec).
+func buildTestRunRegexWithAllowlist(samePkgTestFiles, alwaysRunNames []string) string {
+	seen := make(map[string]struct{}, len(samePkgTestFiles)*4+len(alwaysRunNames))
+	for _, p := range samePkgTestFiles {
+		for _, n := range extractTestFuncNames(p) {
+			seen[n] = struct{}{}
+		}
+	}
+	for _, n := range alwaysRunNames {
+		if strings.TrimSpace(n) == "" {
+			continue
+		}
+		seen[n] = struct{}{}
+	}
+	if len(seen) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return "^(" + strings.Join(names, "|") + ")$"
+}
+
 // impactedSamePkgTestFiles returns absolute paths to _test.go files in the
 // SAME directory as `mutatedAbsPath`, drawn from the workspace-relative
 // impacted set produced by testsImpactedBy. Cross-pkg test files in the
