@@ -1317,6 +1317,15 @@ func (t *CertifyMutationTool) certifyLocalBatch(ctx context.Context, localFiles 
 		}
 	}
 
+	// [Phase 2 MV+ / Speed-First 2026-05-15] Per-batch dedup of `go list` +
+	// `go test`. Key: goModRoot|pkgDir. Safe because `go test pkgPath`
+	// compiles the WHOLE package (every .go file in the dir), so the first
+	// file's test run already validates the cumulative on-disk state of
+	// every sibling in the batch — duplicate symbols, broken imports, and
+	// failing tests in file N are caught by file 1's test. Only marked on
+	// SUCCESS; failures fall through to today's per-file behavior so the
+	// dedup never masks a real regression.
+	testedPkgs := make(map[string]struct{}, len(localFiles))
 	var results []string
 	for _, fRaw := range localFiles {
 		filename, _ := fRaw.(string)
@@ -1338,7 +1347,7 @@ func (t *CertifyMutationTool) certifyLocalBatch(ctx context.Context, localFiles 
 		default:
 			rollbackFn = rollbackAll
 		}
-		results = append(results, t.certifyOneFile(ctx, filename, complexityIntent, fastMode, dryRun, rollbackFn))
+		results = append(results, t.certifyOneFile(ctx, filename, complexityIntent, fastMode, dryRun, rollbackFn, testedPkgs))
 	}
 	if line := t.testImpactSummary(localFiles); line != "" {
 		log.Print(line)
@@ -1442,7 +1451,7 @@ func (t *CertifyMutationTool) Execute(ctx context.Context, args map[string]any) 
 // certifyOneFile runs the full certification pipeline for a single file and returns the result message.
 // Uses early return instead of continue — caller appends the message to results unconditionally.
 // [SRE-60.3] Result now includes a "checks" object so callers know which steps ran and passed.
-func (t *CertifyMutationTool) certifyOneFile(ctx context.Context, filename, complexityIntent string, fastMode, dryRun bool, rollbackAll func()) string {
+func (t *CertifyMutationTool) certifyOneFile(ctx context.Context, filename, complexityIntent string, fastMode, dryRun bool, rollbackAll func(), testedPkgs map[string]struct{}) string {
 	// [Épica 330.L] Workspace ownership guard — reject paths outside t.workspace.
 	// Cross-workspace certify pollutes session_state, heatmap, and RAG index of
 	// the wrong workspace. Validated 2026-04-23 when vision-link BRIEFING
@@ -1476,7 +1485,7 @@ func (t *CertifyMutationTool) certifyOneFile(ctx context.Context, filename, comp
 		return fmt.Sprintf("🛑 Rollback Ejecutado. Fallaste en [AST-SYNTAX]: %v. Intenta otra lógica.%s", syntaxErr, flashback)
 	}
 
-	if msg := t.runFileChecks(ctx, filename, ext, complexityIntent, src, fastMode, checks, rollbackAll); msg != "" {
+	if msg := t.runFileChecks(ctx, filename, ext, complexityIntent, src, fastMode, checks, rollbackAll, testedPkgs); msg != "" {
 		return msg
 	}
 
@@ -1668,7 +1677,7 @@ func isPathInWorkspace(workspace, filename string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, complexityIntent string, src []byte, fastMode bool, checks map[string]string, rollbackAll func()) string {
+func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, complexityIntent string, src []byte, fastMode bool, checks map[string]string, rollbackAll func(), testedPkgs map[string]struct{}) string {
 	// [SRE-26.3.1/26.3.2/26.3.3] Universal module router — polyglot, skipped in pair mode.
 	if ext != ".go" && !fastMode && os.Getenv("NEO_SERVER_MODE") != "pair" {
 		checks["build"] = "running"
@@ -1684,7 +1693,7 @@ func (t *CertifyMutationTool) runFileChecks(ctx context.Context, filename, ext, 
 		checks["build"] = "running"
 		checks["bouncer"] = "running"
 		checks["tests"] = "running"
-		if msg, bounce := t.runGoBouncer(ctx, filename, src, complexityIntent, rollbackAll); msg != "" {
+		if msg, bounce := t.runGoBouncer(ctx, filename, src, complexityIntent, rollbackAll, testedPkgs); msg != "" {
 			checks["build"] = "fail"
 			checks["bouncer"] = "fail"
 			checks["tests"] = "fail"
@@ -1794,7 +1803,7 @@ func (t *CertifyMutationTool) resolveModuleBuild(filename string) (moduleDir, bu
 // runGoBouncer runs the thermodynamic bouncer and TDD for Go files. [SRE-86.A]
 // Returns (errorMsg, bounceResult). errorMsg="" means success. bounceResult is
 // populated on failure to feed inference.SuggestFix for auto-fix proposals.
-func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string, src []byte, complexityIntent string, rollbackAll func()) (string, *inference.BounceResult) {
+func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string, src []byte, complexityIntent string, rollbackAll func(), testedPkgs map[string]struct{}) (string, *inference.BounceResult) {
 	// [SRE-17.3.2] Thermodynamic Bouncer: detect O(N²) when O(1) is claimed.
 	if complexityIntent == "O(1)_OPTIMIZATION" {
 		code := string(src)
@@ -1810,8 +1819,19 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 			}
 		}
 	}
-	// [SRE-76.4] Preflight dependency check — verify imports resolve before running tests.
+	// [Phase 2 MV+ / Speed-First 2026-05-15] Per-batch pkg dedup. `go test
+	// pkgPath` compiles the WHOLE package — file 1's run already validated
+	// every sibling .go in pkgPath (compile errors, duplicate symbols,
+	// failing tests all surface there). Marked only on success below, so a
+	// failed first file falls through to today's behavior.
 	pkgPath := filepath.Dir(filename)
+	pkgKey := goModRootOf(filename) + "|" + pkgPath
+	if testedPkgs != nil {
+		if _, done := testedPkgs[pkgKey]; done {
+			return "", nil
+		}
+	}
+	// [SRE-76.4] Preflight dependency check — verify imports resolve before running tests.
 	listCmd := exec.CommandContext(ctx, "go", "list", pkgPath) //nolint:gosec // G204-LITERAL-BIN
 	listCmd.Dir = goModRootOf(filename) // [T001] go.mod root, NOT neo.yaml root
 	if out, listErr := listCmd.CombinedOutput(); listErr != nil {
@@ -1848,6 +1868,9 @@ func (t *CertifyMutationTool) runGoBouncer(ctx context.Context, filename string,
 			FailedChecks: []string{"TDD"},
 			FilePath:     filename,
 		}
+	}
+	if testedPkgs != nil {
+		testedPkgs[pkgKey] = struct{}{}
 	}
 	return "", nil
 }
