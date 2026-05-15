@@ -865,3 +865,11 @@ list` surfaces it; this block is the human-readable detail._
 
 ---
 
+## [2026-05-14 17:59] neo_memory(rem_sleep) schema drift — required params not exposed
+
+**Prioridad:** P3
+
+neo_memory action:rem_sleep fails with "learning_rate and session_success_ratio must be numbers" — the handler requires those two params but the neo_memory tool schema does not expose them (no learning_rate / session_success_ratio fields). Manual REM trigger is unusable through the MCP tool interface. Low impact: REM consolidation still runs automatically on 5-min idle ([SRE-MEMEX]), so the memex→HNSW path works; only the manual trigger is broken. Surfaced 2026-05-14 at session close. Fix: either add the two fields to the neo_memory input schema (cmd/neo-mcp tool registration) or default them server-side when absent. Same defect class as the schema-vs-error-drift Distilled Wisdom note. Files: cmd/neo-mcp tool_memory.go + the neo_memory schema.
+
+---
+
