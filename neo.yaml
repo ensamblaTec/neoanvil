@@ -133,8 +133,8 @@ workspace:
     dominant_lang: ""
 ai:
     provider: ollama
-    base_url: http://localhost:11434
-    embed_base_url: http://localhost:11434
+    base_url: http://127.0.0.1:11434
+    embed_base_url: http://127.0.0.1:11434
     embedding_urls: []
     embedding_model: nomic-embed-text
     context_window: 8192
@@ -267,7 +267,7 @@ federation:
     max_vectors_per_node: 500
     harvest_timeout_sec: 300
 llm:
-    ollama_url: http://localhost:11434
+    ollama_url: http://127.0.0.1:11434
     model: llama3.2:3b
     max_tokens: 2048
     temperature: 0.3

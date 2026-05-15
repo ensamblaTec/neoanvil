@@ -484,7 +484,7 @@ func defaultNeoConfig() *NeoConfig {
 		},
 		AI: AIConfig{
 			Provider:            "ollama",
-			BaseURL:             "http://localhost:11434",
+			BaseURL:             "http://127.0.0.1:11434", // [SRE-LOCAL-LLM-2026-05-15] explicit IPv4 — `localhost` resolves IPv6 first on macOS and Ollama binds 127.0.0.1 only, breaking the dial
 			EmbeddingModel:      "nomic-embed-text",
 			ContextWindow:       8192,
 			EmbedTimeoutSeconds: 8,
@@ -607,7 +607,8 @@ func defaultNeoConfig() *NeoConfig {
 			HarvestTimeoutSec: 300,
 		},
 		LLM: LLMConfig{
-			OllamaURL:   "http://localhost:11434",
+			OllamaURL:   "http://127.0.0.1:11434", // [SRE-LOCAL-LLM-2026-05-15] explicit IPv4 — see AI.BaseURL note
+
 			Model:       "llama3.2:3b",
 			MaxTokens:   2048,
 			Temperature: 0.3,
@@ -1058,7 +1059,7 @@ func applyAIDefaults(cfg *NeoConfig, ns *bool) {
 		*ns = true
 	}
 	if cfg.AI.BaseURL == "" {
-		cfg.AI.BaseURL = "http://localhost:11434"
+		cfg.AI.BaseURL = "http://127.0.0.1:11434" // [SRE-LOCAL-LLM-2026-05-15] IPv4-explicit default
 		*ns = true
 	}
 	if cfg.AI.EmbeddingModel == "" {
@@ -1378,7 +1379,7 @@ func applyFederationLLMDefaults(cfg *NeoConfig, ns *bool) {
 	}
 	// [SRE-95] LLM config backfill
 	if cfg.LLM.OllamaURL == "" {
-		cfg.LLM.OllamaURL = "http://localhost:11434"
+		cfg.LLM.OllamaURL = "http://127.0.0.1:11434" // [SRE-LOCAL-LLM-2026-05-15] IPv4-explicit default
 		*ns = true
 	}
 	if cfg.LLM.Model == "" {

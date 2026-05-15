@@ -193,11 +193,40 @@ func SafeOperatorHTTPClient(timeoutSec int) *http.Client {
 						return nil, fmt.Errorf("[SRE-SSRF] SafeOperatorHTTPClient: dirección no-direccionable bloqueada (%s)", raw.String())
 					}
 				}
-				safeAddr := net.JoinHostPort(ips[0].String(), port)
-				return net.DialTimeout(network, safeAddr, 5*time.Second)
+				return dialFirstReachable(network, ips, port, 5*time.Second)
 			},
 		},
 	}
+}
+
+// dialFirstReachable iterates the resolved IPs in order and returns the
+// first successful TCP connection, or the last error if all attempts fail.
+// [SRE-LOCAL-LLM-2026-05-15] Fixes a dual-stack drift on macOS: `localhost`
+// resolves to `[::1, 127.0.0.1]` and net.LookupIP returns IPv6 first per
+// RFC 6724. Taking ips[0] alone bound the client to ::1, but Ollama (and
+// most loopback-only services) listen on 127.0.0.1 only — yielding
+// `connect: connection refused` on the very first attempt, with no retry
+// because Go's stdlib treats RST as a definitive failure rather than a
+// soft-fail that would trigger Happy Eyeballs.
+//
+// The per-IP timeout is small (5s) so a fully-down target still resolves
+// quickly. Connection-refused returns instantly (~µs) so the cumulative
+// cost in the typical "first IP wrong, second IP right" case is bounded
+// to a few milliseconds.
+func dialFirstReachable(network string, ips []net.IP, port string, perTimeout time.Duration) (net.Conn, error) {
+	var lastErr error
+	for _, raw := range ips {
+		safeAddr := net.JoinHostPort(raw.String(), port)
+		conn, err := net.DialTimeout(network, safeAddr, perTimeout)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("no resolved address reachable")
 }
 
 func SafeHTTPClient() *http.Client {
@@ -245,8 +274,7 @@ func SafeHTTPClient() *http.Client {
 					}
 				}
 
-				safeAddr := net.JoinHostPort(ips[0].String(), port)
-				return net.DialTimeout(network, safeAddr, 5*time.Second)
+				return dialFirstReachable(network, ips, port, 5*time.Second)
 			},
 		},
 	}
