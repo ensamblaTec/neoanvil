@@ -112,3 +112,4 @@ docs/session/SESSION-*.md
 /plugin-github
 cmd/plugin-jira/plugin-jira
 cmd/plugin-github/plugin-github
+.neo/b1-measurements.csv
