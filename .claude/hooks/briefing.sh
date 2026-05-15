@@ -65,3 +65,13 @@ fi
 echo "## Auto-BRIEFING (SessionStart hook · workspace=${WORKSPACE_ID})"
 echo ""
 echo "$text"
+
+# [B1 / adaptive-runtime 2026-05-15] Append tool-discipline mirror. Helper
+# is fail-soft (silent on any error) — briefing keeps working if the helper
+# breaks. Opt-out via NEO_BRIEFING_DIFF_DISABLE=1.
+HELPER="$(dirname "${BASH_SOURCE[0]}")/briefing-behavior-diff.sh"
+if [ -x "$HELPER" ]; then
+  # 3s timeout — briefing already used ~17s of the 20s SessionStart budget;
+  # the helper has to be fast or skip silently.
+  timeout 3 "$HELPER" 2>/dev/null || true
+fi
