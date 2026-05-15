@@ -28,11 +28,11 @@ set -uo pipefail
 
 NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
 
-case "$PWD" in
-  *neoanvil*) DEFAULT_WS="neoanvil-35694" ;;
-  *)          DEFAULT_WS="neoanvil-35694" ;;
-esac
-WORKSPACE_ID="${NEO_WORKSPACE_ID:-$DEFAULT_WS}"
+# This script lives in neoanvil; the literal default reflects that. Cross-
+# workspace invocations (e.g. from strategos hooks) set NEO_WORKSPACE_ID
+# via env. Dead `case "$PWD"` block (both branches returned the same
+# value) removed 2026-05-15.
+WORKSPACE_ID="${NEO_WORKSPACE_ID:-neoanvil-35694}"
 
 # Probe Nexus (1s) — parent already did this, but defensive when invoked
 # standalone for tests.
@@ -76,10 +76,10 @@ canonical_tools = {
     # 7 Macro
     "neo_radar", "neo_sre_certify_mutation", "neo_daemon", "neo_chaos_drill",
     "neo_cache", "neo_command", "neo_memory",
-    # 8 Specialist (forge_tool deprecated but listed for completeness)
+    # 7 Specialist (neo_forge_tool deprecated per directive 46 — removed
+    # 2026-05-15 so it stops appearing as "underused" forever).
     "neo_compress_context", "neo_apply_migration", "neo_download_model",
     "neo_log_analyzer", "neo_tool_stats", "neo_debt", "neo_local_llm",
-    "neo_forge_tool",
 }
 canonical_intents = {
     "BLAST_RADIUS", "SEMANTIC_CODE", "DB_SCHEMA", "TECH_DEBT_MAP",

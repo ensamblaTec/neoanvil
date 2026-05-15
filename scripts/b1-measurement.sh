@@ -77,11 +77,12 @@ except Exception:
     sys.exit(1)
 
 canonical_tools = {
+    # 14 active tools — kept in lockstep with briefing-behavior-diff.sh.
+    # neo_forge_tool removed 2026-05-15 (deprecated per directive 46).
     "neo_radar", "neo_sre_certify_mutation", "neo_daemon", "neo_chaos_drill",
     "neo_cache", "neo_command", "neo_memory",
     "neo_compress_context", "neo_apply_migration", "neo_download_model",
     "neo_log_analyzer", "neo_tool_stats", "neo_debt", "neo_local_llm",
-    "neo_forge_tool",
 }
 canonical_intents = {
     "BLAST_RADIUS","SEMANTIC_CODE","DB_SCHEMA","TECH_DEBT_MAP","READ_MASTER_PLAN",
