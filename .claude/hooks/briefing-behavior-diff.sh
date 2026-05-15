@@ -24,6 +24,7 @@
 
 set -uo pipefail
 
+# Kill switch — silences the mirror regardless of trial arm.
 [ "${NEO_BRIEFING_DIFF_DISABLE:-0}" = "1" ] && exit 0
 
 NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
@@ -33,6 +34,17 @@ NEXUS_URL="${NEO_NEXUS_URL:-http://127.0.0.1:9000}"
 # via env. Dead `case "$PWD"` block (both branches returned the same
 # value) removed 2026-05-15.
 WORKSPACE_ID="${NEO_WORKSPACE_ID:-neoanvil-35694}"
+
+# Auto-arm — derived from CSV history (zero env-var ceremony).
+# baseline arm → silence the mirror; treatment arm → render it.
+# Override via NEO_B1_FORCE_ARM. b1-measurement.sh lives at <repo>/scripts/.
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+B1_SCRIPT="$HOOK_DIR/../../scripts/b1-measurement.sh"
+B1_ARM="treatment"  # default fallback if helper missing
+if [ -x "$B1_SCRIPT" ]; then
+  B1_ARM="$("$B1_SCRIPT" arm 2>/dev/null || echo treatment)"
+fi
+[ "$B1_ARM" = "baseline" ] && exit 0
 
 # Probe Nexus (1s) — parent already did this, but defensive when invoked
 # standalone for tests.

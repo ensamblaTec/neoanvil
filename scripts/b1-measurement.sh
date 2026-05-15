@@ -7,6 +7,17 @@
 #   scripts/b1-measurement.sh snapshot   → record current state to log
 #   scripts/b1-measurement.sh report     → render trajectory summary
 #   scripts/b1-measurement.sh clear      → wipe log (start fresh A/B)
+#   scripts/b1-measurement.sh arm        → print current arm (auto-derived)
+#
+# Auto-arm semantics (2026-05-15 redesign — zero env-var ceremony):
+#   - The arm of the NEXT session is the OPPOSITE of the most recent
+#     `auto-post` row's treatment column.
+#   - Empty CSV → starts on `baseline`.
+#   - Both `briefing-behavior-diff.sh` (mirror) and `b1-snapshot.sh`
+#     (CSV writer) query `arm` and stay in lockstep.
+#   - Override: NEO_B1_FORCE_ARM=baseline|treatment (debugging/extending).
+#   - Kill switches (NOT arm selectors): NEO_BRIEFING_DIFF_DISABLE=1 hides
+#     the mirror; NEO_B1_SNAPSHOT_DISABLE=1 disables CSV logging.
 #
 # Log format: .neo/b1-measurements.csv
 #   timestamp,tools_used,tools_total,intents_used,intents_total,treatment,workspace_boot,notes
@@ -40,6 +51,33 @@ ensure_log() {
   fi
 }
 
+decide_arm() {
+  # Print the arm for the upcoming session. Override > auto-derive.
+  if [ -n "${NEO_B1_FORCE_ARM:-}" ]; then
+    case "$NEO_B1_FORCE_ARM" in
+      baseline|treatment) printf '%s\n' "$NEO_B1_FORCE_ARM"; return ;;
+    esac
+  fi
+  python3 - "$LOG_FILE" <<'PYEOF'
+import csv, os, sys
+log = sys.argv[1] if len(sys.argv) > 1 else ""
+if not os.path.exists(log):
+    print("baseline"); sys.exit(0)
+last_arm = None
+try:
+    with open(log) as f:
+        rdr = csv.DictReader(f)
+        for row in rdr:
+            notes = (row.get("notes") or "").strip()
+            if notes.startswith("auto-post"):
+                last_arm = row.get("treatment")
+except Exception:
+    print("baseline"); sys.exit(0)
+# Alternate from last auto-post row; default to baseline on empty/treatment.
+print("treatment" if last_arm == "baseline" else "baseline")
+PYEOF
+}
+
 snapshot() {
   ensure_log
   # Probe Nexus
@@ -59,9 +97,15 @@ snapshot() {
       return 1
     }
 
-  local treatment="treatment"
+  # 2026-05-15 redesign: arm is auto-derived from CSV history. The
+  # legacy NEO_BRIEFING_DIFF_DISABLE env var is honored ONLY as a manual
+  # kill-switch override (forces baseline tag) so existing operator
+  # automation keeps working.
+  local treatment
   if [ "${NEO_BRIEFING_DIFF_DISABLE:-0}" = "1" ]; then
     treatment="baseline"
+  else
+    treatment="$(decide_arm)"
   fi
 
   # Reuse the canonical-intersection logic from briefing-behavior-diff.sh.
@@ -211,5 +255,6 @@ case "$CMD" in
   snapshot) snapshot ;;
   report)   report ;;
   clear)    clear_log ;;
-  *)        echo "usage: $0 {snapshot|report|clear}" >&2; exit 1 ;;
+  arm)      decide_arm ;;
+  *)        echo "usage: $0 {snapshot|report|clear|arm}" >&2; exit 1 ;;
 esac
