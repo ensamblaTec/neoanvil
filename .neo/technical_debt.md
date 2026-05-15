@@ -938,3 +938,13 @@ Zombie entry — closed in the same session that introduced it.
 
 ---
 
+## [2026-05-15 10:47] strategos CLAUDE.md + doctrine stale V7.2 vs neoanvil V10.6
+
+**Prioridad:** P2
+
+~/develop/other/strategos/CLAUDE.md y .claude/rules/neo-sre-doctrine.md referencian "Neo-Go MCP V7.2 · 14 tools / 55 ops · workspace strategosia-28463 (no existe)". Real: V10.6, 15 tools, 60+ ops, workspace strategos-32492. .claude/rules/neo-synced-directives.md tiene 37 directivas vs 57 canónicas. Skills symlink ya resuelto (usuario ejecutó manualmente: rm + ln -s absoluto a neoanvil/.claude/skills). Pendiente: refrescar CLAUDE.md+rules en repo strategos.
+
+**Tags:** cross-workspace-drift, doctrine-sync
+
+---
+

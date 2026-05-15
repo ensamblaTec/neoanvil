@@ -239,12 +239,15 @@ test files whose execution depends on the mutated set. Run only those via
 `go test -run 'TestA|TestB'`.
 
 #### Tasks
-- [ ] **2.1 — Reverse-edge helper `testsImpactedBy(files []string) []string`
+- [x] **2.1 — Reverse-edge helper `testsImpactedBy(files []string) []string`
       in `pkg/rag/graph.go`** (not `dep_graph.go` — that file doesn't exist;
       dep-graph code lives in `graph.go` alongside the HNSW graph). Walks
       `GetAllGraphEdges` backward from mutated files to find all `_test.go`
       files transitively reaching them. Reuses the same edge map BLAST_RADIUS
-      already loads.
+      already loads. — shipped as `cmd/neo-mcp/test_impact.go::testsImpactedBy`
+      in commits `bcf87ef` (MV, one-hop) + `1d07d8b` (MV+, transitive BFS,
+      depth-capped at 5). Same-pkg via ReadDir + cross-pkg via reverse-BFS
+      over GetAllGraphEdges. Used by Phase 2.2 `-run` narrowing (`ffd0461`).
 - [x] **2.2 — Certify pipeline integration in
       `cmd/neo-mcp/macro_tools.go::runGoBouncer:1800`.** Replace blanket
       `go test -short <pkgPath>` with selective
