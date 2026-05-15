@@ -314,6 +314,31 @@ captured fresh after each commit so we can spot accidental regressions.
 | Search median (`k=10`, corpus=200 nodes) | **4 µs** |
 | Search p95                               | **4 µs** |
 
+### Speed-First Initiative — agent tool-latency reduction (2026-05-15)
+
+Six surgical wins targeting "agent tool latency × call frequency" — the
+real bottleneck for any workspace running neo-mcp. The full plan + audit
+findings live in [`.neo/master_plan.md`](./.neo/master_plan.md). The
+binary ships in every workspace, so each saving propagates.
+
+| Win | What |
+|-----|------|
+| **`symbolMapCache` persisted across restart** (Phase 0.D) | `cmd/neo-mcp/radar_compile.go::symbolMapCache` (already mtime-keyed) now snapshots to `.neo/db/symbol_map.snapshot.json` on shutdown and rehydrates at boot via `setupCaches`. First `COMPILE_AUDIT` after `make rebuild-restart` skips the ~50 ms `go/ast` parse and returns from the persisted map in µs |
+| **Auto-warmup at boot + persisted miss-ring** (Phase 0.A) | `QueryCache`/`TextCache` snapshots now include `recent_misses` (`omitempty`); after boot, an async goroutine fires `neo_cache_warmup{from_recent:true}` on the rehydrated targets. Live: post-restart **`Tcache: 100% (6H/0M)`** vs `0%` before — the most-recently-missed BLAST_RADIUS targets are warm on the first agent call instead of paying the cold-path tax |
+| **File-mtime cache gate for BLAST_RADIUS** (Phase 1 MV) | New `TextCache.PutWithMtime` + `GetWithMtimeFallback`. An entry stays valid while EITHER `graph.Gen` matches (legacy) OR the target file's `os.Stat` mtime matches. Editing `pkg/foo/x.go` bumps `graph.Gen` but no longer invalidates the BLAST_RADIUS cache for `pkg/bar/y.go` (mtime unchanged) — saves the CPG PageRank walk on every unrelated edit |
+| **`testsImpactedBy` + certify response surface** (Phase 2 MV+) | Helper computes the set of `_test.go` files affected by a mutation: same-package siblings via `os.ReadDir` + cross-package transitive importers via depth-5 reverse-BFS over `GRAPH_EDGES`. Single inverted-index build per batch. Result surfaces both in the certify response (`[CERTIFY-TEST-IMPACT] N test file(s) ...`) and in the log — observability foundation for future `go test -run` narrowing |
+| **Per-action `tool_stats` aggregates** (Phase 0.B) | `pkg/observability/store.go::persistCall` dual-writes both `neo_radar` AND `neo_radar/<intent>` rows into `bucketToolAggregate`. `neo_tool_stats sort_by:p99` now surfaces `neo_radar/BLAST_RADIUS` p99 separately from `neo_radar/AST_AUDIT` — which intent owns the latency tail is no longer hidden by the lumped average |
+| **`vector_quant: hybrid` as the new template default** (Phase 0.C) | `neo.yaml.example` flipped from `float32` → `hybrid` (ADR-014 already established recall=1.000 across 3 production workspaces with ~2× speedup at +3% RAM). `applyRAGDefaults` binary-level default unchanged so existing yaml-less workspaces aren't silently flipped on a binary upgrade |
+
+Plus two non-perf reliability fixes:
+
+- **`batchMap` BoltDB-persisted** (Phase 4.B) — `cmd/neo-nexus/plugin_async.go` gained `SaveBatchMapping`/`GetBatchMapping` so async batch polls survive Nexus restart. Latent today (batch_files not in schema) but closes a sharp edge waiting for batch to go live.
+- **`jira/jira` error_rate 1.0 explained** (Phase 4.C) — `docs/plugins/jira-integration-guide.md` gained a Troubleshooting section so operators seeing 100% errors on a `running` plugin diagnose the credentials path instead of reporting a code bug.
+
+The remaining Phase 1 callsites (SEMANTIC_CODE / GRAPH_WALK / PROJECT_DIGEST)
+and full Phase 2 (symbol→test-function narrowing for `go test -run`) need
+distinct invalidation primitives — explicit follow-up epics in the plan.
+
 ### Local LLM tool — `neo_local_llm` (ADR-013)
 
 15th MCP tool ships a $0/call complement to the DeepSeek plugin. Routes
