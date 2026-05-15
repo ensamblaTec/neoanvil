@@ -63,6 +63,16 @@ func setupCaches(cfg *config.NeoConfig, workspace string, currentGen uint64) cac
 	// then invokes warmHotFilesCacheSnapshot) — the cache instance does not
 	// exist at this point in the boot sequence.
 
+	// [Phase 0.D / Speed-First] symbolMapCache (radar_compile.go package var)
+	// — not part of cacheStack because it's a package-level memo, but the
+	// boot warm-load belongs alongside the other snapshots. Self-invalidating
+	// via aggregated-mtime keys, so stale entries cannot serve incorrect data.
+	if n, err := loadSymbolMapSnapshot(filepath.Join(workspace, symbolMapSnapshotRelPath)); err != nil {
+		log.Printf("[BOOT] symbol_map cache snapshot load failed: %v (continuing cold)", err)
+	} else if n > 0 {
+		log.Printf("[BOOT] symbol_map cache warm-loaded %d package(s) from snapshot", n)
+	}
+
 	return s
 }
 
@@ -112,6 +122,13 @@ func persistCachesOnShutdown(s cacheStack, workspace string) {
 			return s.hotFiles.SaveSnapshotJSON(filepath.Join(workspace, hotFilesCacheSnapshotRelPath), 64)
 		}, filepath.Join(workspace, hotFilesCacheSnapshotRelPath)})
 	}
+	// [Phase 0.D / Speed-First] symbolMapCache snapshot — saved unconditionally
+	// (no top-N trim; the cache is bounded by # of packages × # of source files,
+	// not by query volume). Mirror of the load wired in setupCaches.
+	ops = append(ops, persistOp{"symbol_map", func() error {
+		_, err := saveSymbolMapSnapshot(filepath.Join(workspace, symbolMapSnapshotRelPath))
+		return err
+	}, filepath.Join(workspace, symbolMapSnapshotRelPath)})
 	for _, op := range ops {
 		if err := op.fn(); err != nil {
 			log.Printf("[SHUTDOWN] %s cache persist failed: %v", op.label, err)

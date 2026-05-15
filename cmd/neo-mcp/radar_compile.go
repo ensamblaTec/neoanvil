@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -26,6 +27,85 @@ var (
 	symbolMapCache   = map[string]map[string]int{}
 	symbolMapCacheMu sync.RWMutex
 )
+
+// [Phase 0.D / Speed-First] On-disk persistence of symbolMapCache across
+// restart. Without this, COMPILE_AUDIT pays the ~50ms go/ast parse on the
+// first call to every package after every `make rebuild-restart`. Saved
+// at shutdown via persistCachesOnShutdown; loaded at boot via setupCaches.
+//
+// Self-invalidation: the cache key already encodes (absDir, aggregated_mtime,
+// includeUnexported). Entries whose source files changed since the snapshot
+// will not match any post-restart lookup, so stale keys remain dormant
+// without an explicit mtime check — natural eventual cleanup happens when
+// new aggregated-mtime keys are written for the same dir.
+const (
+	symbolMapSnapshotRelPath = ".neo/db/symbol_map.snapshot.json"
+	symbolMapSnapshotVersion = 1
+)
+
+type symbolMapPersistedSnapshot struct {
+	Version int                       `json:"version"`
+	Entries map[string]map[string]int `json:"entries"`
+}
+
+// saveSymbolMapSnapshot writes the in-memory symbolMapCache to path as a
+// JSON snapshot. Returns the package-count + any error. Failures are
+// non-fatal at the call site — the cache is a latency optimisation, not
+// a durability requirement.
+func saveSymbolMapSnapshot(path string) (int, error) {
+	symbolMapCacheMu.RLock()
+	snap := symbolMapPersistedSnapshot{
+		Version: symbolMapSnapshotVersion,
+		Entries: make(map[string]map[string]int, len(symbolMapCache)),
+	}
+	for k, v := range symbolMapCache {
+		copied := make(map[string]int, len(v))
+		for sym, line := range v {
+			copied[sym] = line
+		}
+		snap.Entries[k] = copied
+	}
+	symbolMapCacheMu.RUnlock()
+
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return 0, fmt.Errorf("symbol_map snapshot marshal: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return 0, fmt.Errorf("symbol_map snapshot write %s: %w", path, err)
+	}
+	return len(snap.Entries), nil
+}
+
+// loadSymbolMapSnapshot reads a JSON snapshot from path and rehydrates
+// the in-memory symbolMapCache. Missing file → (0, nil) so cold boot is
+// silent. Version mismatch → (0, nil) so future schema bumps don't break
+// startup. Any rehydrated entry remains subject to the existing
+// aggregated-mtime key check on first COMPILE_AUDIT lookup, so stale
+// entries cannot serve incorrect data.
+func loadSymbolMapSnapshot(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("symbol_map snapshot read %s: %w", path, err)
+	}
+	var snap symbolMapPersistedSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return 0, fmt.Errorf("symbol_map snapshot unmarshal: %w", err)
+	}
+	if snap.Version != symbolMapSnapshotVersion {
+		return 0, nil
+	}
+	symbolMapCacheMu.Lock()
+	for k, v := range snap.Entries {
+		symbolMapCache[k] = v
+	}
+	count := len(symbolMapCache)
+	symbolMapCacheMu.Unlock()
+	return count, nil
+}
 
 // handleCompileAudit reports build status, stale cert files, and a symbol_map of exported identifiers.
 // It surfaces undefined symbols with nearest-match suggestions, import completeness, and cert seal status.
