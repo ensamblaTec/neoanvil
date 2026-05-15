@@ -188,25 +188,36 @@ become no-ops; new code stops adding them.
 
 ---
 
-### Phase 2 — Pilar II: Dep-graph-aware Test Impact selection in certify (DEFERRED — audit 2026-05-15)
+### Phase 2 — Pilar II: Dep-graph-aware Test Impact selection in certify (MV shipped 2026-05-15)
 
-**Status:** deferred to a dedicated session. Audit-2 finding while preparing
-implementation: the GRAPH_EDGES dep-graph is **file→file via imports**, but
-Go same-package files **don't import each other** — `tool_memory_test.go` and
-`tool_memory.go` share a package without a graph edge. Today's certify already
-runs only the changed package's tests (`go test ./<pkg>/...`), so the
-remaining narrowing must be **intra-package** — i.e. symbol→test-function
-mapping, not file→file. That's a multi-day epic (parse every test file, track
-which test functions reference which symbols, persist the index, integrate
-into certify's `-run` regex) — not the hours-scale estimate in the original
-plan. Marked as a separate epic when scoped.
+**Status:** Phase 2 MV shipped — observability-only foundation. The full
+narrowing (rewriting certify's `go test` invocation with a `-run` regex)
+still requires symbol→test-function mapping, which remains a multi-day epic
+deferred. But the foundation that future commits build on landed today.
 
-Cross-package optimisation (transitively impacted tests in OTHER packages)
-remains valuable but is already covered by the current "only this package's
-tests run" behaviour for single-package mutations. Multi-package commit
-batches are the residual case — useful but rare.
+**Phase 2 MV shipped 2026-05-15:**
+- `cmd/neo-mcp/test_impact.go`: new `testsImpactedBy(wal, workspace,
+  mutatedFiles) []string` helper. Two complementary sources:
+  (1) Same-package tests via `os.ReadDir` (Go same-package files don't
+  import each other, so dir-globbing is necessary for completeness);
+  (2) Cross-package direct-import tests via one-hop reverse-walk of
+  `GRAPH_EDGES` (uses `rag.GetImpactedNodes`). Sorted + deduplicated;
+  caches dir scans across same-package mutated files. Sub-millisecond on
+  typical workspaces.
+- `cmd/neo-mcp/macro_tools.go`: new `logTestImpactFootprint` helper called
+  at the end of `certifyLocalBatch`. Emits one `[CERTIFY-TEST-IMPACT]
+  N test file(s) could be impacted` log line per batch. Execution still
+  runs the changed package's full suite — log is observability only,
+  paving way for the future `-run` integration.
+- Extracted to a helper to keep `certifyLocalBatch` under the CC=15 cap
+  (had bumped to 17 with inline wiring).
+- 7 regression subtests in `TestTestsImpactedBy_*`: same-package
+  detection, cross-package via dep-graph, only-tests-returned filter,
+  dedup across sources, mutated-test self-skip, nil-WAL fail-soft, empty
+  input.
 
-Original design preserved below as the canonical implementation plan.
+The narrowing-in-execution piece (multi-day symbol→test mapping) remains
+deferred. Original design below.
 
 ---
 

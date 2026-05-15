@@ -1340,7 +1340,39 @@ func (t *CertifyMutationTool) certifyLocalBatch(ctx context.Context, localFiles 
 		}
 		results = append(results, t.certifyOneFile(ctx, filename, complexityIntent, fastMode, dryRun, rollbackFn))
 	}
+	t.logTestImpactFootprint(localFiles)
 	return results
+}
+
+// logTestImpactFootprint emits one [CERTIFY-TEST-IMPACT] line per batch
+// summarising how many _test.go files could be affected (same-package
+// siblings + cross-package direct importers from GRAPH_EDGES). [Phase 2
+// MV / Speed-First] Observability-only — execution still runs the
+// changed package's full suite. Extracted from certifyLocalBatch to keep
+// that function's CC under the bouncer cap. Silent on empty input,
+// nil wal, or zero impacted tests.
+func (t *CertifyMutationTool) logTestImpactFootprint(localFiles []any) {
+	if t.wal == nil || len(localFiles) == 0 {
+		return
+	}
+	mutatedRel := make([]string, 0, len(localFiles))
+	for _, f := range localFiles {
+		s, ok := f.(string)
+		if !ok || s == "" {
+			continue
+		}
+		rel, err := filepath.Rel(t.workspace, s)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			rel = s
+		}
+		mutatedRel = append(mutatedRel, filepath.ToSlash(rel))
+	}
+	impacted := testsImpactedBy(t.wal, t.workspace, mutatedRel)
+	if len(impacted) == 0 {
+		return
+	}
+	log.Printf("[CERTIFY-TEST-IMPACT] %d test file(s) could be impacted by this batch: %v",
+		len(impacted), impacted)
 }
 
 // [SRE-17.3] ACID Certifier: reads from disk, validates, tests, indexes or rolls back.
