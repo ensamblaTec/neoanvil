@@ -9,16 +9,22 @@
 #   scripts/b1-measurement.sh clear      → wipe log (start fresh A/B)
 #
 # Log format: .neo/b1-measurements.csv
-#   timestamp,tools_used,tools_total,intents_used,intents_total,treatment
-#   2026-05-15T16:00:00Z,7,15,9,23,baseline
-#   2026-05-15T17:00:00Z,8,15,10,23,treatment
+#   timestamp,tools_used,tools_total,intents_used,intents_total,treatment,workspace_boot,notes
+#   2026-05-15T16:00:00Z,7,15,9,23,baseline,neoanvil,startup
+#   2026-05-15T17:00:00Z,8,15,10,23,treatment,strategos,auto-post
 #
 # `treatment` column is environment-driven (NEO_BRIEFING_DIFF_DISABLE):
 #   - "1" or unset on B1-disabled run        → baseline
 #   - "0" or unset on B1-enabled run         → treatment
 # This way the same script captures both arms of the A/B test.
 #
+# `workspace_boot` column tracks WHICH workspace the session opened in,
+# even though `neo_tool_stats` is Nexus-global (same counter across all
+# workspaces this Nexus serves). The tag lets us correlate task focus
+# with mirror exposure when the agent moves between workspaces.
+#
 # Spec: docs/general/adaptive-runtime-charter.md (B1 ship criterion).
+# Cross-workspace finding: docs/general/adaptive-runtime-charter.md#openq3
 
 set -uo pipefail
 
@@ -30,7 +36,7 @@ WORKSPACE_ID="${NEO_WORKSPACE_ID:-neoanvil-35694}"
 ensure_log() {
   mkdir -p "$(dirname "$LOG_FILE")"
   if [ ! -f "$LOG_FILE" ]; then
-    echo "timestamp,tools_used,tools_total,intents_used,intents_total,treatment,notes" > "$LOG_FILE"
+    echo "timestamp,tools_used,tools_total,intents_used,intents_total,treatment,workspace_boot,notes" > "$LOG_FILE"
   fi
 }
 
@@ -107,8 +113,19 @@ PYEOF
   local ts
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local note="${NEO_B1_NOTE:-}"
-  echo "${ts},${counts},${treatment},${note}" >> "$LOG_FILE"
-  echo "[B1-MEASURE] ${treatment} @ ${ts}: ${counts}  → ${LOG_FILE}"
+  # workspace_boot tag: derive from NEO_WORKSPACE_BOOT (set by per-workspace
+  # b1-snapshot.sh) or fall back to detecting from $WORKSPACE_ID prefix.
+  local ws_boot="${NEO_WORKSPACE_BOOT:-}"
+  if [ -z "$ws_boot" ]; then
+    case "$WORKSPACE_ID" in
+      neoanvil*)            ws_boot="neoanvil" ;;
+      strategos-*)          ws_boot="strategos" ;;
+      strategosia-*)        ws_boot="strategosia_frontend" ;;
+      *)                    ws_boot="unknown" ;;
+    esac
+  fi
+  echo "${ts},${counts},${treatment},${ws_boot},${note}" >> "$LOG_FILE"
+  echo "[B1-MEASURE] ${treatment}@${ws_boot} ${ts}: ${counts}  → ${LOG_FILE}"
 }
 
 report() {
@@ -127,13 +144,16 @@ from collections import defaultdict
 
 log = sys.argv[1]
 buckets = defaultdict(list)
+ws_counter = defaultdict(int)
 with open(log) as f:
     rdr = csv.DictReader(f)
     for row in rdr:
         try:
             tools_pct = (int(row["tools_used"]) * 100) // int(row["tools_total"])
             intents_pct = (int(row["intents_used"]) * 100) // int(row["intents_total"])
-            buckets[row["treatment"]].append((row["timestamp"], int(row["tools_used"]), int(row["intents_used"]), tools_pct, intents_pct, row["notes"]))
+            wsb = (row.get("workspace_boot") or "unknown").strip() or "unknown"
+            buckets[row["treatment"]].append((row["timestamp"], int(row["tools_used"]), int(row["intents_used"]), tools_pct, intents_pct, wsb, row.get("notes", "")))
+            ws_counter[wsb] += 1
         except Exception:
             continue
 
@@ -151,10 +171,17 @@ for arm in ("baseline", "treatment"):
     avg_intents = sum(r[2] for r in rows) / len(rows)
     print(f"### {arm}: {len(rows)} snapshots · avg tools {avg_tools:.1f}/15 · avg intents {avg_intents:.1f}/23")
     print("")
-    print("| timestamp | tools | intents | t% | i% | notes |")
-    print("|---|---|---|---|---|---|")
-    for ts, t, i, tp, ip, n in rows[-10:]:  # last 10
-        print(f"| {ts} | {t} | {i} | {tp}% | {ip}% | {n} |")
+    print("| timestamp | tools | intents | t% | i% | ws_boot | notes |")
+    print("|---|---|---|---|---|---|---|")
+    for ts, t, i, tp, ip, wsb, n in rows[-10:]:  # last 10
+        print(f"| {ts} | {t} | {i} | {tp}% | {ip}% | {wsb} | {n} |")
+    print("")
+
+if ws_counter:
+    print("### Workspace boot coverage")
+    print("")
+    for wsb, n in sorted(ws_counter.items(), key=lambda kv: -kv[1]):
+        print(f"- `{wsb}`: {n} snapshots")
     print("")
 
 # Cross-arm comparison

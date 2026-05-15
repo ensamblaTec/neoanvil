@@ -109,6 +109,19 @@ the mirror active. They're independent.
 | Full protocol | `docs/general/b1-measurement-protocol.md` |
 | Charter (why this exists) | `docs/general/adaptive-runtime-charter.md` |
 
+### Cross-workspace coverage (2026-05-15)
+
+| Workspace | Mirror display | Snapshot writer | CSV destination |
+|---|---|---|---|
+| neoanvil | ✓ local hooks | ✓ local hooks | `neoanvil/.neo/b1-measurements.csv` |
+| strategos | ✓ local hooks (port) | ✓ delegates to neoanvil's script | same shared CSV (tagged `workspace_boot=strategos`) |
+| strategosia_frontend | ✗ not ported | ✗ not ported | n/a |
+
+The CSV gained a `workspace_boot` column to disambiguate which workspace
+fired a snapshot. The underlying `neo_tool_stats` counter is
+Nexus-global, so the per-workspace mirror is a *display* push, not an
+independent measurement source.
+
 ---
 
 ## Manual snapshot (still supported)

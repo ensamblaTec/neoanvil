@@ -220,7 +220,24 @@ branch is **not** time-boxed — it ships features when they earn it.
    priorities" instead.)
 3. **Cross-workspace adaptive state:** does the diff include only the
    active workspace or aggregate across all federated workspaces?
-   (Start with active-only, expand if useful.)
+   ~~(Start with active-only, expand if useful.)~~
+   **Answered 2026-05-15 during port to siblings:** `neo_tool_stats` is
+   **Nexus-global** — a single counter ring buffer in the orchestrator,
+   not per-workspace. Verified by calling `neo_tool_stats` targeting
+   `strategos` vs `strategosia_frontend` and getting byte-identical
+   responses (e.g. `neo_sre_certify_mutation: 237 calls` in both). The
+   `target_workspace` header routes the call but doesn't scope the
+   counter. Implications:
+   - The **mirror display** is worth replicating across workspaces, so
+     the agent sees the nudge wherever it boots. Done for `strategos`;
+     skipped for `strategosia_frontend` (no pre-existing hook system
+     — bootstrap > B1 scope).
+   - The **CSV measurement** stays centralised in
+     `neoanvil/.neo/b1-measurements.csv` with a new `workspace_boot`
+     column tagging which workspace fired the snapshot. Per-workspace
+     duplicate CSVs would be redundant.
+   - A per-workspace `neo_tool_stats` (with scope=workspace actually
+     honored) would be a separate cleanup ticket, not part of B1.
 4. **Operator opt-out:** environment variable to disable adaptive
    layer for a session? (`NEO_ADAPTIVE_DISABLE=1`.)
 
