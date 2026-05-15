@@ -956,9 +956,23 @@ BRIEFING reporta CPG: 14610/512MB. cpg.max_heap_mb default is 512 pero el heap u
 
 ---
 
-## ~~[2026-05-15 11:29] strategosia-frontend RAG 0% + HNSW cold~~ — RESOLVED 2026-05-15 (commit pending in current session)
+## ~~[2026-05-15 11:29] strategosia-frontend RAG 0% + HNSW cold~~ — RESOLVED 2026-05-15 (multi-layer fix)
 
-**Resolución:** Root cause = `IndexCoverage` en pkg/rag/graph.go hardcodea filtro `.go` non-test non-vendor. Strategosia es Next.js con 0 archivos .go pero 897 .ts/.tsx + 4GB hnsw.bin poblado → métrica reportaba 0% engañosamente. Fix: nuevo helper `IndexCoverageWithLang(g, workspace, dominantLang)` que mapea lang → extensions (go|js|ts|py|rs). Briefing usa `t.cfg.Workspace.DominantLang` para llamar la versión lang-aware. Legacy `IndexCoverage` mantenida sin cambios para back-compat con 8+ callers. Bonus fix: path filter mejorado para excluir top-level `vendor/`, `node_modules/`, `.next/` (antes solo nested). 5 tests añadidos en pkg/rag/coverage_lang_test.go. HNSW:cold sigue siendo cuestión separada — re-ingest decision para el operador.
+**Diagnóstico iterativo (3 capas):**
+1. **Bug capa 1 — `IndexCoverage` hardcoded .go filter**: pkg/rag/graph.go contaba solo .go files non-test. Strategosia (Next.js, 0 .go) → total=0 → 0% degenerado. Fix: nuevo `IndexCoverageWithLang(g, workspace, dominantLang)` mapea lang → extensions (go|js|ts|py|rs). Bonus: path filter mejorado (top-level vendor/node_modules/.next).
+2. **Bug capa 2 — project.DominantLang OVERRIDE workspace**: `pkg/config/merge.go::applyProjectOverrides` línea 78 sobrescribía `dst.Workspace.DominantLang = project.DominantLang`. Strategosia yaml dice `typescript` pero project parent `/Users/manufactura/develop/other/.neo-project/neo.yaml` dice `dominant_lang: go` → merge fuerza "go" → fix capa 1 sigue contando 0 .go → métrica engañosamente 0%. **Fix capa 2 (semantic inversion 2026-05-15)**: workspace explicit DominantLang wins; project sirve solo de default para workspaces sin field propio. Test `TestProjectConfigMerge` actualizado, nuevo test `TestProjectConfigMerge_EmptyWorkspaceLangGetsProjectDefault` cubre el caso por default.
+3. **Investigación capa 3 — HNSW DID load**: el log boot 2026-05-15 12:28 muestra `[BOOT] vector load: 1254515 nodes 768-dim in 1.6s` + `hybrid companion populated`. HNSW SÍ carga, 1.25M nodos (probablemente embeddings de un re-ingest anterior con corpus .go); el `HNSW:cold` BRIEFING marker se refiere al boot PATH (snapshot stale por WAL>256MB compact threshold dropea el snapshot cada boot), no a "vacío".
+
+**Estado tras merge fix + lang-aware fix:**
+- `cfg.Workspace.DominantLang` ahora preserva "typescript" para strategosia (no más override a "go")
+- `IndexCoverageWithLang(g, workspace, "typescript")` cuenta 897 .ts/.tsx, indexed=min(1254515, 897)=897 → ratio=1.0 → RAG 100%
+- BRIEFING strategosia tras próximo `make rebuild-restart` debe mostrar RAG ~100% sin warning
+
+**Latent separately:**
+- HNSW snapshot stale loop (WAL >256MB triggers boot-time compact que dropea snapshot → cada boot es cold rebuild). Quick fix posible: subir `wal_compact_threshold_mb` para strategosia, O migrar a snapshot-vs-compacted-WAL coherent stale check.
+- Strategosia HNSW contiene 1.25M nodos probably de un re-ingest .go-corpus stale; idealmente re-ingest con .ts/.tsx para que el contenido semántico sea útil.
+
+8 tests adicionales: 5 en pkg/rag/coverage_lang_test.go + 3 en cmd/neo-mcp/test_impact_e2e_test.go + 1 nuevo en pkg/config/project_test.go (companion).
 
 ---
 

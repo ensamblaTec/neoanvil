@@ -70,11 +70,17 @@ func applyGlobalDefaults(dst, global NeoConfig) NeoConfig {
 }
 
 // applyProjectOverrides applies project-scoped settings to dst.
-// DominantLang from project beats workspace. IgnoreDirsAdd is appended.
-// LLMOverrides force a model set across the whole federation (reverse
-// precedence vs the rest of the config — see [350.A]).
+// DominantLang from project is a DEFAULT for workspaces that don't set
+// their own — workspace explicit wins. (Inverted 2026-05-15 from "project
+// beats workspace" which broke strategosia-frontend: project="go" forced
+// IndexCoverage to count .go files in a TypeScript workspace, producing a
+// permanent RAG 0% false alarm. The polyglot case — strategos backend in
+// Go + strategosia frontend in TS under one project — needs each workspace
+// to keep its own lang.) IgnoreDirsAdd is appended additively. LLMOverrides
+// still force a model set across the whole federation (reverse precedence
+// vs the rest of the config — see [350.A]).
 func applyProjectOverrides(dst NeoConfig, project *ProjectConfig) NeoConfig {
-	if project.DominantLang != "" {
+	if project.DominantLang != "" && dst.Workspace.DominantLang == "" {
 		dst.Workspace.DominantLang = project.DominantLang
 	}
 	if len(project.IgnoreDirsAdd) > 0 {

@@ -8,6 +8,13 @@ import (
 )
 
 // TestProjectConfigMerge verifies MergeConfigs applies project overrides correctly. [Épica 258.D]
+// Semantic update 2026-05-15: workspace.DominantLang explicit wins over
+// project.DominantLang. Previously project beat workspace, which broke
+// polyglot projects (e.g. strategos backend in Go + strategosia-frontend
+// in TypeScript under one project): the project's "go" forced IndexCoverage
+// to count .go files in a TypeScript workspace → permanent RAG 0% false
+// alarm. Now project.DominantLang is a DEFAULT for workspaces that don't
+// set their own.
 func TestProjectConfigMerge(t *testing.T) {
 	workspace := NeoConfig{}
 	workspace.Workspace.IgnoreDirs = []string{".git", "vendor"}
@@ -21,9 +28,9 @@ func TestProjectConfigMerge(t *testing.T) {
 
 	result := MergeConfigs(workspace, project, nil)
 
-	// Project dominant_lang must override workspace.
-	if result.Workspace.DominantLang != "python" {
-		t.Errorf("DominantLang = %q, want python", result.Workspace.DominantLang)
+	// New semantic: workspace explicit DominantLang ("go") wins over project's "python".
+	if result.Workspace.DominantLang != "go" {
+		t.Errorf("explicit workspace DominantLang must win over project default: got %q, want go", result.Workspace.DominantLang)
 	}
 
 	// IgnoreDirs must contain both workspace and project additions, deduplicated.
@@ -40,6 +47,25 @@ func TestProjectConfigMerge(t *testing.T) {
 	// Project pointer must be set.
 	if result.Project == nil {
 		t.Error("Project field not set after MergeConfigs")
+	}
+}
+
+// TestProjectConfigMerge_EmptyWorkspaceLangGetsProjectDefault is the
+// companion to the polyglot semantic fix: when a workspace doesn't set
+// its own DominantLang, the project's value fills in (default-provider
+// behavior, the legitimate use-case for project-tier DominantLang).
+func TestProjectConfigMerge_EmptyWorkspaceLangGetsProjectDefault(t *testing.T) {
+	workspace := NeoConfig{} // .Workspace.DominantLang = "" (unset)
+
+	project := &ProjectConfig{
+		ProjectName:  "polyglot-project",
+		DominantLang: "rust",
+	}
+
+	result := MergeConfigs(workspace, project, nil)
+
+	if result.Workspace.DominantLang != "rust" {
+		t.Errorf("empty workspace DominantLang must inherit from project: got %q, want rust", result.Workspace.DominantLang)
 	}
 }
 
