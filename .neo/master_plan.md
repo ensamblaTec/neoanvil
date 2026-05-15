@@ -104,6 +104,20 @@ The original plan had three premise errors discovered during code audit:
 
 ---
 
+### Phase 1 — Pilar III: File-scoped cache invalidation (DEFERRED — audit 2026-05-15)
+
+**Status:** deferred to a dedicated session. Audit-2 finding during Phase 0.A:
+the cache invalidation surface is bigger than Phase 1's "add per-target mtime"
+framing. Each `Put` callsite (radar_blast, radar_semantic, radar_graph,
+radar_digest, plus the cross-workspace scatter in neo-nexus) would need to
+provide the target mtime + dep mtimes — that's 6+ call sites touching shared
+hot-path code. The right discipline is a separate session where each call
+site lands as its own atomic commit, not a multi-file mega-change here.
+Original design preserved below as the canonical implementation plan when
+the session opens.
+
+---
+
 ### Phase 1 — Pilar III: File-scoped cache invalidation (redesigned per audit)
 
 #### Problem (revised)
@@ -155,6 +169,28 @@ Post-restart Tcache hit_ratio jumps from 0% to ≥ 60% on the first replay of
 recent BLAST_RADIUS targets. A typical edit→certify cycle no longer evicts
 cache entries for unrelated files. `bypass_cache:true` calls in the codebase
 become no-ops; new code stops adding them.
+
+---
+
+### Phase 2 — Pilar II: Dep-graph-aware Test Impact selection in certify (DEFERRED — audit 2026-05-15)
+
+**Status:** deferred to a dedicated session. Audit-2 finding while preparing
+implementation: the GRAPH_EDGES dep-graph is **file→file via imports**, but
+Go same-package files **don't import each other** — `tool_memory_test.go` and
+`tool_memory.go` share a package without a graph edge. Today's certify already
+runs only the changed package's tests (`go test ./<pkg>/...`), so the
+remaining narrowing must be **intra-package** — i.e. symbol→test-function
+mapping, not file→file. That's a multi-day epic (parse every test file, track
+which test functions reference which symbols, persist the index, integrate
+into certify's `-run` regex) — not the hours-scale estimate in the original
+plan. Marked as a separate epic when scoped.
+
+Cross-package optimisation (transitively impacted tests in OTHER packages)
+remains valuable but is already covered by the current "only this package's
+tests run" behaviour for single-package mutations. Multi-package commit
+batches are the residual case — useful but rare.
+
+Original design preserved below as the canonical implementation plan.
 
 ---
 
@@ -212,11 +248,16 @@ For strategos with multi-minute suites the win is 10× larger in absolute terms.
 
 ### Phase 4 — Deferred debt (sweep, post-pillars)
 
-- [ ] **4.A — `cmd/neo-mcp/main.go::main` CC=18.** 1496-line beast, currently
-      grandfathered in `.neo/audit-baseline.txt`. With Phase 1 caches sane
-      and Phase 2 selective tests, the long-deferred refactor (extract
-      `newDaemonHooks`, `newMcpHandler`, `installHTTPMux`) lands safely in
-      2-3 PRs.
+- [x] **4.A — `cmd/neo-mcp/main.go::main` CC=18** — closed as
+      **no-action-needed** 2026-05-15. Audit found `main()` line 393 already
+      carries `//nolint:complexity // entrypoint — high CC is inherent to
+      wiring all subsystems`. The CC is explicitly waived by intent — `main`
+      IS a wiring entrypoint and refactoring it for a CC number that's
+      already ack'd would make the code worse to satisfy a metric, not
+      better. AST_AUDIT keeps flagging it (the tool doesn't honor nolint
+      directives) but that's a tool reporting gap, not a real debt. If the
+      tool gains nolint awareness, this finding evaporates; otherwise the
+      pragma stays as the canonical decision record.
 - [x] **4.B — `batchMap` restart-persistence gap** — done 2026-05-15. Added
       `batchBucket = "plugin_async_batches"` to `AsyncTaskStore`; new methods
       `SaveBatchMapping` / `GetBatchMapping` keep batch_id → []taskID on
