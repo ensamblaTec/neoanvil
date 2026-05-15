@@ -357,3 +357,80 @@ For strategos with multi-minute suites the win is 10× larger in absolute terms.
 - Phase 4 items resolved or formally archived.
 - Live measurement across **3 workspaces** (neoanvil + strategos +
   strategosia) shows the speedup propagated end-to-end.
+
+---
+
+## Phase: Adaptive Runtime — push-tier behavior nudges
+
+**Branch:** `feature/adaptive-runtime` (parent) · `feature/adaptive-briefing-diff` (B1 sub-branch)
+**Charter:** `docs/general/adaptive-runtime-charter.md`
+**Quickstart:** `docs/general/adaptive-runtime-quickstart.md`
+
+Experimental layer that pushes tool-usage hints into the agent's view
+at the moment they matter, instead of relying on the agent to pull
+synced directives or memex lessons. Pipeline B1 → B2 → B3, each
+gated by primary-metric move on its own trial.
+
+### B1 — Tool Discipline Mirror (`feature/adaptive-briefing-diff`)
+
+Push-tier display of agent's lifetime tool-usage gap, attached to
+SessionStart briefing. Conjecture: seeing the gap moves the agent
+toward underused canonical tools. Ship criterion: ≥+2 intents on
+treatment vs baseline, sustained over ≥5 sessions per arm.
+
+#### Infrastructure (CLOSED)
+
+- [x] **B1.1 — Mirror helper + behavior diff** — `briefing-behavior-diff.sh` reads `neo_tool_stats`, prints ≤200-token "Tools used X/14 · Intents used Y/23 + top-5 underused". — `0b837dc`
+- [x] **B1.2 — Measurement scaffolding** — `scripts/b1-measurement.sh` snapshot/report CLI; A/B protocol doc. — `e774c48`
+- [x] **B1.3 — Branch charter + quickstart** — `docs/general/adaptive-runtime-charter.md`, quickstart in `docs/general/`. — `feb33a7` + `9a0a220`
+- [x] **B1.4 — Auto-snapshot via SessionStart/Stop hooks** — operator no longer fires snapshots manually; `.claude/hooks/b1-snapshot.sh` + `settings.json` wiring. — `0ec95d0`
+- [x] **B1.5 — Cross-workspace port to strategos** — local hooks in strategos `.claude/hooks/`; shared CSV in neoanvil with `workspace_boot` column; finding: `neo_tool_stats` is Nexus-global. — `037553c`
+- [x] **B1.6 — Polish: deprecated forge_tool + dead `$PWD` case** — canonical ceiling now 14, helpers symmetric. — `67c2870`
+- [x] **B1.7 — Zero-touch auto-arm rotation** — arm derived from CSV history (`decide_arm`); operator no longer manages `NEO_BRIEFING_DIFF_DISABLE` env var per session. — `00d30a1`
+- [x] **B1.8 — Audit fixes** — gitignore glob for CSV backups, dynamic ceiling in report. — `25650b4`
+
+#### Trial (IN PROGRESS — operator-passive)
+
+- [ ] **B1.9 — Collect ≥5 baseline + ≥5 treatment sessions.** Auto-alternating; no operator action. Each session adds 2 CSV rows (auto-pre + auto-post). After ~10 sessions ≥5+5 reached. CSV at `.neo/b1-measurements.csv` (gitignored).
+- [ ] **B1.10 — Render verdict via `./scripts/b1-measurement.sh report`.** Ship if treatment-baseline avg intents delta ≥+2 sustained. Discard if ≤0 after 5+5.
+- [ ] **B1.11 — Trial outcome commit + memex.** Topic `b1-trial-outcome` per charter section "What to do when the trial finishes".
+
+#### Pending operator actions (debt-tracked)
+
+- [ ] **B1.D1 — Paste `b1-snapshot.sh post` snippet into strategos `settings.json` Stop array.** Auto-mode blocked the cross-repo edit. Without it strategos sessions only generate `auto-pre` rows; trial counter advances only via neoanvil sessions. Debt recorded.
+- [ ] **B1.D2 — Decide strategosia_frontend bootstrap.** Skipped this session (no pre-existing hook system). Re-evaluate IF B1 ships AND universal coverage matters. Debt recorded.
+
+### B2 — Intent classifier hints (`feature/intent-classifier-hints`)
+
+**Blocked on B1 graduation.** Per charter: UserPromptSubmit hook with 6-8 task-intent regex matchers → task-relevant tool hint injection. Primary metric: ratio bash:neo from ~12:1 to ≤5:1.
+
+- [ ] **B2.1 — Pending B1 verdict.** Do not start until B1.10/B1.11 close.
+
+### B3 — Lessons replay (`feature/lessons-replay`)
+
+**Blocked on B1 + B2 graduation.** Per charter: SessionStart query of memex/HNSW for lessons matching current workspace state. Inject top-3 (≤300 tokens). Primary metric: anti-pattern recurrence halved.
+
+- [ ] **B3.1 — Pending B1 + B2 verdicts.**
+
+### Graduation rule
+
+`feature/adaptive-runtime` merges to `develop` after all three of
+B1-B3 ship within their sub-branches. If any B fails its trial, that
+B rolls back; the umbrella branch keeps the wins from B's that did
+ship and waits for the next iteration on the failed one.
+
+### Done when
+
+- B1: 5+5 sessions captured, verdict rendered, outcome committed.
+- B2: ratio bash:neo ≤8:1 over 5 sessions AND ≥70% hint-followed rate.
+- B3: anti-pattern recurrence halved across 5 sessions, no SessionStart
+  timing regression > 2s.
+- Operator subjective accept on all three.
+- Umbrella merge from `feature/adaptive-runtime` to `develop`.
+
+## 🧠 Distilled Wisdom (Auto-generated)
+_Last distillation: 2026-05-15 22:41 UTC_
+
+- **b1-hook-timeout-bug-macos** (`adaptive-runtime`): macOS lacks the `timeout` binary by default (no coreutils preinstalled). Hooks that wrapped helpers with `timeout 3 "$HE…
+- **b1-shipped-auto-snapshot** (`adaptive-runtime`): B1 (`feature/adaptive-briefing-diff`) closed for measurement: SessionStart + Stop hooks now auto-snapshot to `.neo/b1-me…
+- **b1-cross-workspace-nexus-global-finding** (`adaptive-runtime`): During B1 port to siblings (2026-05-15), discovered that neo_tool_stats returns byte-identical responses across stratego…
