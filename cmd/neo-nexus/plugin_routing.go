@@ -322,15 +322,22 @@ func handleAsyncDispatch(reqID json.RawMessage, args map[string]any, conn *plugi
 		}
 		return handleSingleAsyncSubmit(reqID, args, conn, localName, rt)
 	}
-	// [376.I] Batch poll: batch_id present without action.
+	// [376.I] Batch poll. A batch_id carrying batchIDPrefix is unambiguously a
+	// poll — the deepseek_call schema makes `action` required, so the old
+	// `!hasAction` guard was unreachable and every poll fell through to a fresh
+	// dispatch. An id without the prefix is not ours; fall through.
 	if batchID, ok := args["batch_id"].(string); ok {
-		if _, hasAction := args["action"]; !hasAction && rt != nil && rt.asyncStore != nil {
+		if strings.HasPrefix(batchID, batchIDPrefix) && rt != nil && rt.asyncStore != nil {
 			return handleBatchPoll(reqID, batchID, rt)
 		}
 	}
-	// [376.D] Single task poll.
+	// [376.D] Single task poll. Same reasoning: an asyncIDPrefix task_id is a
+	// Nexus async task — poll it (handleTaskPoll errors cleanly on a genuine
+	// miss). A task_id without the prefix (e.g. generate_boilerplate's
+	// bgtask_* ids, stored plugin-side) belongs to a plugin-side mechanism;
+	// fall through untouched so the plugin handles its own id.
 	if taskID, ok := args["task_id"].(string); ok {
-		if _, hasAction := args["action"]; !hasAction && rt != nil && rt.asyncStore != nil {
+		if strings.HasPrefix(taskID, asyncIDPrefix) && rt != nil && rt.asyncStore != nil {
 			return handleTaskPoll(reqID, taskID, rt)
 		}
 	}

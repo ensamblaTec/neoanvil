@@ -190,7 +190,7 @@ func handleToolsList(id any) map[string]any {
 						},
 						"task_id": map[string]any{
 							"type":        "string",
-							"description": "[generate_boilerplate] Optional task ID to query status of a previously launched background task.",
+							"description": "Optional task ID to query the status/result of a previously launched background task. generate_boilerplate returns a bgtask_* id (plugin-side store); red_team_audit and map_reduce_refactor launched with background:true return an async_* id (Nexus-side store). Poll by passing the id back with the same action — the persisted result is returned once status is done.",
 						},
 						// [Phase 4 audit fix · 2026-05-01] Per-call routing of model + thinking effort.
 						// Lesson from PAIR-AUDIT-EMIT-SCHEMA-GAP: handlers read these via args[…], so

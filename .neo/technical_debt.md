@@ -835,9 +835,36 @@ the same session, post-refactor `AST_AUDIT` clean.
 
 ---
 
-## [2026-05-14] [ds-background-unretrievable] DS `background:true` task_id is not pollable
+## ~~[2026-05-14] [ds-background-unretrievable] DS `background:true` task_id is not pollable~~ — RESOLVED 2026-05-15 (code complete + certified)
 
-**Prioridad:** P2 — real defect, has a workaround (use the foreground path).
+**RESOLUCIÓN 2026-05-15.** Root cause was NOT a missing store — the Nexus
+`AsyncTaskStore` is complete. `handleAsyncDispatch` (`cmd/neo-nexus/plugin_routing.go`)
+gated the single-task poll on `task_id present && action NOT present`, but the
+`deepseek_call` schema makes `action` required (`cmd/plugin-deepseek/main.go:218`),
+so `!hasAction` was never true → every poll fell through to a fresh dispatch.
+
+Fix: the poll now routes on the `async_` ID prefix (`asyncIDPrefix` const), not
+on `!hasAction`. An `async_*` id polls the Nexus store; a non-prefixed id (e.g.
+`generate_boilerplate`'s plugin-side `bgtask_*`) falls through untouched. Same
+shape applied to the `batch_id` branch (`batchIDPrefix`). `handleTaskPoll` /
+`handleBatchPoll` unchanged. Covered by `TestHandleAsyncDispatch_PollGuard`
+(5 subtests). DS premortem attempted 3 ways — all failed on DeepSeek upstream
+instability (pro+max sync rejected, pro+high sync timeout, background → `EOF`
+in 4.7s); self-premortem applied per `[SELF-AUDIT-V2]`, surfaced the prefix-gate
+refinement (avoids an expired `async_` id silently starting a fresh audit).
+
+**Takes effect after `make rebuild-restart`** (Nexus routing change). Mirror in
+the `neo_debt` registry to be marked resolved.
+
+### Follow-up detected (deferred, pre-existing — not introduced here)
+`handleBatchPoll` resolves `batch_id` via the package-level in-memory `batchMap`,
+populated only in `handleBatchDispatch`. On a Nexus restart `batchMap` is lost
+while the BoltDB `AsyncTask` rows survive → batch polls return "batch not found"
+for still-valid tasks. `batch_id`/`batch_files` aren't even in the `deepseek_call`
+schema today, so impact is latent. Fix when batch is exposed: persist the
+batch→taskIDs mapping (BoltDB bucket) or derive it from a task-id naming scheme.
+
+### Original síntoma (preserved for reference)
 
 SÍNTOMA: `deepseek_call` with `background:true` for `red_team_audit` /
 `map_reduce_refactor` returns `{task_id, status:pending}` — but that `task_id`

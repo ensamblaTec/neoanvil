@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ensamblatec/neoanvil/pkg/plugin"
 )
@@ -492,4 +493,82 @@ func TestWorkspaceIDFromBody(t *testing.T) {
 	if got := workspaceIDFromBody([]byte(`{}`)); got != "" {
 		t.Errorf("want empty, got %q", got)
 	}
+}
+
+// TestHandleAsyncDispatch_PollGuard covers the [ds-background-unretrievable]
+// fix: the single-task poll must route on the async_ ID prefix, NOT on the
+// absence of `action`. The deepseek_call schema makes `action` required, so
+// the old `!hasAction` guard made handleTaskPoll unreachable — every poll fell
+// through to a fresh dispatch. A task_id without the prefix (plugin-side
+// bgtask_* ids) must still fall through so the plugin handles its own id.
+func TestHandleAsyncDispatch_PollGuard(t *testing.T) {
+	store := newTestAsyncStore(t)
+	rt := &pluginRuntime{asyncStore: store, errors: map[string]error{}}
+	conn := &plugin.Connected{Name: "deepseek", NamespacePrefix: "deepseek"}
+	reqID := json.RawMessage("1")
+
+	// A real Nexus task, completed with a persisted result.
+	doneID, err := store.Submit("deepseek", "red_team_audit")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if err := store.Complete(doneID, json.RawMessage(`{"findings":2}`), 3*time.Second); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	t.Run("async_ id with action present polls (the bug fix)", func(t *testing.T) {
+		// `action` IS present — that used to block the poll. It must not now.
+		args := map[string]any{"action": "red_team_audit", "task_id": doneID}
+		resp := handleAsyncDispatch(reqID, args, conn, "deepseek_call", rt)
+		if resp == nil {
+			t.Fatal("expected a poll response, got nil (fell through to fresh dispatch)")
+		}
+		// The task JSON is wrapped as a string inside result.content[].text,
+		// so its inner quotes arrive escaped (\"status\":\"done\").
+		s := string(resp)
+		if !strings.Contains(s, doneID) {
+			t.Errorf("response should carry the polled task_id %s: %s", doneID, s)
+		}
+		if !strings.Contains(s, `status\":\"done\"`) {
+			t.Errorf("response should report the persisted status 'done': %s", s)
+		}
+		if !strings.Contains(s, "findings") {
+			t.Errorf("response should carry the persisted result: %s", s)
+		}
+	})
+
+	t.Run("bgtask_ id falls through (plugin-side id, not ours)", func(t *testing.T) {
+		args := map[string]any{"action": "generate_boilerplate", "task_id": "bgtask_abc123"}
+		resp := handleAsyncDispatch(reqID, args, conn, "deepseek_call", rt)
+		if resp != nil {
+			t.Errorf("plugin-side bgtask_ id must fall through (nil), got: %s", resp)
+		}
+	})
+
+	t.Run("unknown async_ id is a clean error, not a fresh dispatch", func(t *testing.T) {
+		args := map[string]any{"action": "red_team_audit", "task_id": "async_deadbeefdeadbeef"}
+		resp := handleAsyncDispatch(reqID, args, conn, "deepseek_call", rt)
+		if resp == nil {
+			t.Fatal("a genuine async_ miss must error, not fall through to a fresh audit")
+		}
+		if !strings.Contains(string(resp), `"error"`) {
+			t.Errorf("expected a JSON-RPC error envelope: %s", resp)
+		}
+	})
+
+	t.Run("no task_id no background is normal synchronous dispatch", func(t *testing.T) {
+		args := map[string]any{"action": "red_team_audit", "target_prompt": "audit this"}
+		resp := handleAsyncDispatch(reqID, args, conn, "deepseek_call", rt)
+		if resp != nil {
+			t.Errorf("a normal new-work call must fall through (nil), got: %s", resp)
+		}
+	})
+
+	t.Run("non-batch_ batch_id falls through", func(t *testing.T) {
+		args := map[string]any{"action": "map_reduce_refactor", "batch_id": "notours_xyz"}
+		resp := handleAsyncDispatch(reqID, args, conn, "deepseek_call", rt)
+		if resp != nil {
+			t.Errorf("batch_id without batchIDPrefix must fall through (nil), got: %s", resp)
+		}
+	})
 }

@@ -25,6 +25,15 @@ const (
 	asyncBucket     = "plugin_async_tasks"
 	asyncMaxPending = 100
 	asyncCallTTL    = 300 * time.Second
+
+	// asyncIDPrefix / batchIDPrefix tag IDs minted by this store. They are the
+	// routing discriminator in handleAsyncDispatch: a task_id carrying
+	// asyncIDPrefix is unambiguously a Nexus async task (poll it); one without
+	// belongs to a plugin-side mechanism (e.g. generate_boilerplate's bgtask_*)
+	// and must fall through to the plugin untouched. Package-owned protocol
+	// constants — newAsyncID / SubmitBatch are their sole minters.
+	asyncIDPrefix = "async_"
+	batchIDPrefix = "batch_"
 )
 
 type AsyncTaskStatus string
@@ -265,7 +274,7 @@ func RunAsync(store *AsyncTaskStore, conn *plugin.Connected, toolName string, ar
 // Each task shares the same plugin/action but gets its own files entry from
 // batchFiles. Semaphore limits concurrent goroutines to sem. [376.H]
 func (s *AsyncTaskStore) SubmitBatch(pluginName, action string, count int) (string, []string, error) {
-	batchID := "batch_" + hex.EncodeToString(func() []byte { b := make([]byte, 6); rand.Read(b); return b }())
+	batchID := batchIDPrefix + hex.EncodeToString(func() []byte { b := make([]byte, 6); rand.Read(b); return b }())
 	taskIDs := make([]string, 0, count)
 	for i := range count {
 		id, err := s.Submit(pluginName, action)
@@ -309,7 +318,7 @@ func (s *AsyncTaskStore) BatchStatus(taskIDs []string) map[string]any {
 func newAsyncID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
-	return "async_" + hex.EncodeToString(b)
+	return asyncIDPrefix + hex.EncodeToString(b)
 }
 
 // StartReaper launches a background goroutine that purges completed/errored
