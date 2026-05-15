@@ -892,9 +892,35 @@ list` surfaces it; this block is the human-readable detail._
 
 ---
 
-## [2026-05-14 17:59] neo_memory(rem_sleep) schema drift — required params not exposed
+## ~~[2026-05-14 17:59] neo_memory(rem_sleep) schema drift — required params not exposed~~ — RESOLVED 2026-05-15
 
-**Prioridad:** P3
+**RESOLUCIÓN 2026-05-15.** Root cause: `MemoryTool.Execute` `case "rem_sleep":`
+forwarded raw args straight to `RemSleepTool.Execute` (`cmd/neo-mcp/tools.go:66`),
+which requires `learning_rate` + `session_success_ratio` as float64. The
+`neo_memory` schema did not expose them, so manual rem_sleep was unreachable.
+
+Approach C (defaults server-side + optionally expose):
+
+- `cmd/neo-mcp/tools.go`: extracted package-level consts `defaultRemLearningRate
+  = 0.01` / `defaultRemSuccessRatio = 0.7` next to `RemSleepTool`. `main.go`
+  RemFn updated to reference them — the canonical values now live in one place.
+- `cmd/neo-mcp/tool_memory.go`: `Execute` `case "rem_sleep":` wraps args in a
+  new `withRemSleepDefaults` shim that injects the consts when missing (and
+  when the caller passed a non-float64 by mistake); returns a fresh map so
+  the caller's args aren't mutated.
+- `cmd/neo-mcp/tool_memory.go` `InputSchema`: added `learning_rate` and
+  `session_success_ratio` as **optional** properties (NOT in `Required`) with
+  `[rem_sleep]` description, so advanced operators can override the defaults.
+- Regression test `TestWithRemSleepDefaults` (5 subtests in
+  `tool_memory_test.go`): empty args → defaults; explicit values win;
+  partial → only missing filled; caller args not mutated; non-float64 type
+  treated as missing.
+
+`go build ./...` clean, full `cmd/neo-mcp` suite green, AST_AUDIT clean,
+certified BUG_FIX. Live effect: `neo_memory(action:"rem_sleep")` with no args
+now succeeds with default hyperparameters.
+
+### Original entry (preserved for reference)
 
 neo_memory action:rem_sleep fails with "learning_rate and session_success_ratio must be numbers" — the handler requires those two params but the neo_memory tool schema does not expose them (no learning_rate / session_success_ratio fields). Manual REM trigger is unusable through the MCP tool interface. Low impact: REM consolidation still runs automatically on 5-min idle ([SRE-MEMEX]), so the memex→HNSW path works; only the manual trigger is broken. Surfaced 2026-05-14 at session close. Fix: either add the two fields to the neo_memory input schema (cmd/neo-mcp tool registration) or default them server-side when absent. Same defect class as the schema-vs-error-drift Distilled Wisdom note. Files: cmd/neo-mcp tool_memory.go + the neo_memory schema.
 

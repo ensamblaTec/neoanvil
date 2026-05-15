@@ -149,6 +149,15 @@ func (t *MemoryTool) InputSchema() MCPToolSchema {
 				"description": "[learn] Optional IDs to auto-deprecate when adding.",
 				"items":       map[string]any{"type": "integer"},
 			},
+			// rem_sleep — both optional; defaults match the automatic idle cycle.
+			"learning_rate": map[string]any{
+				"type":        "number",
+				"description": "[rem_sleep] Optional backprop learning rate. Default: the value the auto 5-min idle REM cycle uses (see defaultRemLearningRate).",
+			},
+			"session_success_ratio": map[string]any{
+				"type":        "number",
+				"description": "[rem_sleep] Optional session success ratio (0.0–1.0; >0.5 = success). Default: the value the auto idle REM cycle uses (see defaultRemSuccessRatio).",
+			},
 			// load_snapshot
 			"snapshot_path": map[string]any{
 				"type":        "string",
@@ -230,7 +239,7 @@ func (t *MemoryTool) Execute(ctx context.Context, args map[string]any) (any, err
 	case "commit":
 		return t.commit.Execute(ctx, args)
 	case "rem_sleep":
-		return t.remSleep.Execute(ctx, args)
+		return t.remSleep.Execute(ctx, withRemSleepDefaults(args))
 	case "load_snapshot":
 		return t.loadSnapshot.Execute(ctx, args)
 	case "store":
@@ -254,6 +263,27 @@ func (t *MemoryTool) Execute(ctx context.Context, args map[string]any) (any, err
 	default:
 		return nil, fmt.Errorf("neo_memory: unknown action %q", action)
 	}
+}
+
+// withRemSleepDefaults fills in the canonical rem_sleep hyperparameters
+// (defaultRemLearningRate / defaultRemSuccessRatio, defined alongside
+// RemSleepTool in tools.go) when the caller omitted them. RemSleepTool.Execute
+// requires both as float64; without this shim a bare neo_memory(action:
+// "rem_sleep") would error out instead of consolidating the buffer. The
+// neo_memory schema exposes both as OPTIONAL so an operator can override.
+// Returns a fresh map so the caller's args aren't mutated. [P3 fix · 2026-05-15]
+func withRemSleepDefaults(args map[string]any) map[string]any {
+	out := make(map[string]any, len(args)+2)
+	for k, v := range args {
+		out[k] = v
+	}
+	if _, ok := out["learning_rate"].(float64); !ok {
+		out["learning_rate"] = defaultRemLearningRate
+	}
+	if _, ok := out["session_success_ratio"].(float64); !ok {
+		out["session_success_ratio"] = defaultRemSuccessRatio
+	}
+	return out
 }
 
 // dispatchLearn re-maps the top-level "action" to the legacy sub-tool's

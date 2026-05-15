@@ -32,6 +32,15 @@ import (
 // multi-GB GGUF files can land.
 var modelDownloadClient = sre.SafeHTTPClient()
 
+// defaultRemLearningRate / defaultRemSuccessRatio are the canonical
+// hyperparameters used by the automatic 5-min idle REM cycle (main.go RemFn)
+// and by manual neo_memory(action:"rem_sleep") invocations when the caller
+// omits them. Kept in one place so both call sites stay in sync.
+const (
+	defaultRemLearningRate = 0.01
+	defaultRemSuccessRatio = 0.7
+)
+
 type RemSleepTool struct {
 	wal *rag.WAL
 }

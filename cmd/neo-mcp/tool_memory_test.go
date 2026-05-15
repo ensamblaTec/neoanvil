@@ -137,3 +137,68 @@ func indexOf(hay, needle string) int {
 	}
 	return -1
 }
+
+// TestWithRemSleepDefaults covers the [neo_memory(rem_sleep) schema drift] P3
+// fix. The case "rem_sleep" handler used to pass raw args straight to
+// RemSleepTool.Execute, which requires learning_rate + session_success_ratio
+// as float64 — but neo_memory's schema did not expose them, making manual
+// rem_sleep unreachable. withRemSleepDefaults injects the canonical defaults
+// when omitted; explicit caller values still win.
+func TestWithRemSleepDefaults(t *testing.T) {
+	t.Run("empty args fills both defaults", func(t *testing.T) {
+		out := withRemSleepDefaults(map[string]any{})
+		if got := out["learning_rate"]; got != defaultRemLearningRate {
+			t.Errorf("learning_rate=%v want %v", got, defaultRemLearningRate)
+		}
+		if got := out["session_success_ratio"]; got != defaultRemSuccessRatio {
+			t.Errorf("session_success_ratio=%v want %v", got, defaultRemSuccessRatio)
+		}
+	})
+
+	t.Run("explicit values win", func(t *testing.T) {
+		out := withRemSleepDefaults(map[string]any{
+			"learning_rate":         0.5,
+			"session_success_ratio": 0.9,
+		})
+		if got := out["learning_rate"]; got != 0.5 {
+			t.Errorf("learning_rate=%v want 0.5", got)
+		}
+		if got := out["session_success_ratio"]; got != 0.9 {
+			t.Errorf("session_success_ratio=%v want 0.9", got)
+		}
+	})
+
+	t.Run("partial — only missing field is defaulted", func(t *testing.T) {
+		out := withRemSleepDefaults(map[string]any{"learning_rate": 0.25})
+		if got := out["learning_rate"]; got != 0.25 {
+			t.Errorf("learning_rate=%v want 0.25", got)
+		}
+		if got := out["session_success_ratio"]; got != defaultRemSuccessRatio {
+			t.Errorf("session_success_ratio=%v want default %v", got, defaultRemSuccessRatio)
+		}
+	})
+
+	t.Run("does not mutate caller args", func(t *testing.T) {
+		in := map[string]any{}
+		_ = withRemSleepDefaults(in)
+		if _, has := in["learning_rate"]; has {
+			t.Error("caller args were mutated — withRemSleepDefaults must return a fresh map")
+		}
+	})
+
+	t.Run("non-float64 type is treated as missing", func(t *testing.T) {
+		// JSON unmarshal always yields float64 for numbers, so this guards
+		// direct programmatic calls that pass an int by mistake — the default
+		// must kick in rather than letting RemSleepTool reject the bad type.
+		out := withRemSleepDefaults(map[string]any{
+			"learning_rate":         42,    // int, not float64
+			"session_success_ratio": "0.7", // string
+		})
+		if got := out["learning_rate"]; got != defaultRemLearningRate {
+			t.Errorf("learning_rate=%v want default (int should be ignored)", got)
+		}
+		if got := out["session_success_ratio"]; got != defaultRemSuccessRatio {
+			t.Errorf("session_success_ratio=%v want default (string should be ignored)", got)
+		}
+	})
+}

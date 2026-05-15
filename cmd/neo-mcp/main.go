@@ -828,8 +828,8 @@ func main() { //nolint:complexity // entrypoint — high CC is inherent to wirin
 		RemFn: func(remCtx context.Context) error {
 			remTool := NewRemSleepTool(wal)
 			_, err := remTool.Execute(remCtx, map[string]any{
-				"learning_rate":          0.01,
-				"session_success_ratio":  0.7,
+				"learning_rate":         defaultRemLearningRate,
+				"session_success_ratio": defaultRemSuccessRatio,
 			})
 			return err
 		},
