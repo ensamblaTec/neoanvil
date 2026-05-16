@@ -960,7 +960,7 @@ BRIEFING reporta CPG: 14610/512MB. cpg.max_heap_mb default is 512 pero el heap u
 
 **Diagnóstico iterativo (3 capas):**
 1. **Bug capa 1 — `IndexCoverage` hardcoded .go filter**: pkg/rag/graph.go contaba solo .go files non-test. Strategosia (Next.js, 0 .go) → total=0 → 0% degenerado. Fix: nuevo `IndexCoverageWithLang(g, workspace, dominantLang)` mapea lang → extensions (go|js|ts|py|rs). Bonus: path filter mejorado (top-level vendor/node_modules/.next).
-2. **Bug capa 2 — project.DominantLang OVERRIDE workspace**: `pkg/config/merge.go::applyProjectOverrides` línea 78 sobrescribía `dst.Workspace.DominantLang = project.DominantLang`. Strategosia yaml dice `typescript` pero project parent `/Users/manufactura/develop/other/.neo-project/neo.yaml` dice `dominant_lang: go` → merge fuerza "go" → fix capa 1 sigue contando 0 .go → métrica engañosamente 0%. **Fix capa 2 (semantic inversion 2026-05-15)**: workspace explicit DominantLang wins; project sirve solo de default para workspaces sin field propio. Test `TestProjectConfigMerge` actualizado, nuevo test `TestProjectConfigMerge_EmptyWorkspaceLangGetsProjectDefault` cubre el caso por default.
+2. **Bug capa 2 — project.DominantLang OVERRIDE workspace**: `pkg/config/merge.go::applyProjectOverrides` línea 78 sobrescribía `dst.Workspace.DominantLang = project.DominantLang`. Strategosia yaml dice `typescript` pero project parent `<umbrella>/.neo-project/neo.yaml` dice `dominant_lang: go` → merge fuerza "go" → fix capa 1 sigue contando 0 .go → métrica engañosamente 0%. **Fix capa 2 (semantic inversion 2026-05-15)**: workspace explicit DominantLang wins; project sirve solo de default para workspaces sin field propio. Test `TestProjectConfigMerge` actualizado, nuevo test `TestProjectConfigMerge_EmptyWorkspaceLangGetsProjectDefault` cubre el caso por default.
 3. **Investigación capa 3 — HNSW DID load**: el log boot 2026-05-15 12:28 muestra `[BOOT] vector load: 1254515 nodes 768-dim in 1.6s` + `hybrid companion populated`. HNSW SÍ carga, 1.25M nodos (probablemente embeddings de un re-ingest anterior con corpus .go); el `HNSW:cold` BRIEFING marker se refiere al boot PATH (snapshot stale por WAL>256MB compact threshold dropea el snapshot cada boot), no a "vacío".
 
 **Estado tras merge fix + lang-aware fix:**
@@ -988,7 +988,7 @@ BRIEFING: hooks: post-commit:✗ — el hook no está instalado en este workspac
 
 **Prioridad:** P2
 
-.claude/skills es symlink relativo ../../.claude/skills → ~/develop/other/.claude/skills (solo 3 skills genéricas). Strategos ya fixeado en sesión 2026-05-15 — apunta a neoanvil canonical (17 skills). Strategosia pendiente de aplicar mismo fix: rm + ln -s absoluto a /Users/manufactura/go/src/github.com/ensamblatec/neoanvil/.claude/skills.
+.claude/skills es symlink relativo ../../.claude/skills → ~/develop/other/.claude/skills (solo 3 skills genéricas). Strategos ya fixeado en sesión 2026-05-15 — apunta a neoanvil canonical (17 skills). Strategosia pendiente de aplicar mismo fix: rm + ln -s absoluto a <neoanvil-repo>/.claude/skills.
 
 ---
 
@@ -997,6 +997,60 @@ BRIEFING: hooks: post-commit:✗ — el hook no está instalado en este workspac
 **Prioridad:** P2
 
 pkg/cpg/manager.go:174 CurrentHeapMB returns runtime.MemStats.HeapAlloc / 1MB — that's TOTAL Go process heap, NOT the CPG subsystem's allocation. Lines 135 + 152 use the same MS.HeapAlloc. BRIEFING reports this as "CPG: X/512MB" comparing against cpg.max_heap_mb limit. Result: strategosia_frontend shows CPG 14610/512MB (2853%) — the workspace process is using 14.6GB total heap (HNSW + memex + SharedMem 11K entries + dep graph + index), NOT 14.6GB of CPG specifically. The OOM guard at manager.go:154 trips on process-wide pressure, not CPG-specific bloat. Fix paths: (a) rename to ProcessHeapMB / process_heap_mb to remove confusion; (b) implement CPG-only tracking via sync.Pool counters or per-package memory accounting; (c) document current behavior. Side effect: cpg.max_heap_mb config tag misleading — operators raise it expecting more CPG headroom but it controls process-wide OOM threshold. Same bug latent in strategos (CPG 202/16384 = 1.2%, doesn't trip the alarm). Detected via strategosia BRIEFING audit 2026-05-15.
+
+---
+
+## [2026-05-15 17:10] B1 trial: strategos Stop hook not wired — missing post-snapshot rows
+
+**Prioridad:** P2
+
+**File:** `<strategos>/.claude/settings.json` (Stop block)
+
+**Symptom:** strategos sessions fire `auto-pre` snapshots (via briefing.sh) but no `auto-post` snapshots — because the Stop hook there only invokes `stop-cert-gate.sh`. The `b1-snapshot.sh post` entry was blocked by auto-mode classifier during the 2026-05-15 port (cross-repo settings.json edit deemed self-modification of agent boot config).
+
+**Impact:** `decide_arm` in `scripts/b1-measurement.sh` only counts `auto-post` rows when alternating. strategos sessions don't contribute to the trial's session counter — they only DISPLAY the mirror locally. The 5+5 trial will be filled exclusively by neoanvil sessions; strategos sessions are mirror-visible but trial-invisible.
+
+**Recommended fix:** operator pastes the snippet manually into the Stop hooks array:
+```json
+{
+  "type": "command",
+  "command": ".claude/hooks/b1-snapshot.sh post",
+  "timeout": 8
+}
+```
+
+Alternative: add a Bash permission rule in user-settings allowing the agent to edit sibling-workspace `.claude/settings.json` — riskier (general blast-radius opens), only do if multiple ports are planned.
+
+**Defer trigger:** ignore unless B1 trial verdict suggests cross-workspace coverage matters for the result. If B1 graduates, also port to strategosia_frontend (separate debt entry).
+
+**Branch:** `feature/adaptive-briefing-diff`
+**Source:** 2026-05-15 cross-workspace port session, [b1-cross-workspace-nexus-global-finding] memex entry.
+
+---
+
+## [2026-05-15 17:10] B1 coverage gap: strategosia_frontend lacks adaptive-runtime hooks
+
+**Prioridad:** P2
+
+**Workspace:** `<strategosia_frontend>/`
+
+**Symptom:** During the 2026-05-15 B1 cross-workspace port, strategosia_frontend was skipped (operator choice). The workspace has NO `.claude/hooks/` directory and NO `.claude/settings.json` — only `settings.local.json` (per-user) and a `skills/` symlink to neoanvil. So bootstrapping B1 there means creating an entire hook system from scratch.
+
+**Impact:** sessions opened in strategosia_frontend get no BRIEFING auto-load, no mirror, no snapshot, no certify reminders. Operator must invoke `BRIEFING` manually. Trial-wise, strategosia is invisible — counts neither for arm rotation nor for mirror exposure.
+
+**Recommended fix path (deferred):**
+1. If B1 trial graduates (treatment ≥ +2 intents over baseline), decide whether the adaptive layer is workspace-universal or workspace-specific.
+2. If universal: bootstrap `.claude/hooks/` in strategosia_frontend with at minimum:
+   - `briefing.sh` (basic BRIEFING + B1 mirror + b1-snapshot pre)
+   - `briefing-behavior-diff.sh` (adapted with NEO_WORKSPACE_ID=strategosia-frontend-82899)
+   - `b1-snapshot.sh` (delegates to neoanvil's central script, tagged workspace_boot=strategosia_frontend)
+   - `.claude/settings.json` wiring SessionStart + Stop
+3. Auto-mode classifier will likely block direct writes — anticipate operator-paste workflow.
+
+**Why skipped:** in-session call was that bootstrapping a whole hook system in a workspace that never had one exceeds B1 scope. The operator agreed.
+
+**Branch:** `feature/adaptive-briefing-diff`
+**Defer trigger:** ignore unless B1 ships AND a measurable benefit for strategosia is anticipated (frontend tool surface is much smaller — local LLM mostly).
 
 ---
 

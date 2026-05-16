@@ -2,7 +2,7 @@
 
 Adopt the Ouroboros V10.6 doctrine + lifecycle hooks + directives durability flow in a new repo/workspace. This is the same structure that neoanvil ships natively and that has been mirrored to `/develop/other/` (strategos + strategosia_frontend umbrella).
 
-**Source of truth:** `/Users/manufactura/go/src/github.com/ensamblatec/neoanvil/.claude/` and `/Users/manufactura/go/src/github.com/ensamblatec/neoanvil/CLAUDE.md`. This guide describes how to replicate the relevant subset in a target project.
+**Source of truth:** `<neoanvil-repo>/.claude/` and `<neoanvil-repo>/CLAUDE.md`. This guide describes how to replicate the relevant subset in a target project.
 
 ---
 
@@ -42,7 +42,7 @@ Adopt the Ouroboros V10.6 doctrine + lifecycle hooks + directives durability flo
 
 ```bash
 TARGET=<path-to-target-repo>
-SRC=/Users/manufactura/go/src/github.com/ensamblatec/neoanvil
+SRC=<neoanvil-repo>
 
 mkdir -p "$TARGET/.claude/hooks"
 cp "$SRC/.claude/hooks/"*.sh "$TARGET/.claude/hooks/"
@@ -217,4 +217,4 @@ Hooks fail-open by default — if any hook errors or times out, the underlying t
 - [`docs/general/directives-durability.md`](../general/directives-durability.md) — recovery flow operator guide
 - [`docs/adr/ADR-016-ouroboros-lifecycle-hooks.md`](../adr/ADR-016-ouroboros-lifecycle-hooks.md) — hook framework design rationale
 - [`docs/adr/ADR-017-directives-durability.md`](../adr/ADR-017-directives-durability.md) — durability hardening rationale
-- `/Users/manufactura/develop/other/.claude/` — canonical migrated example (strategos umbrella)
+- `<workspace-parent>/.claude/` — canonical migrated example (strategos umbrella)

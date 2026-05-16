@@ -406,6 +406,72 @@ follow-up epic in `.neo/master_plan.md` (1.1–1.7). End-to-end
 wall-clock benchmark for Phase 2.6 deferred (env-dependent
 measurement, instrumented via `[CERTIFY-TEST-IMPACT-RUN]` log).
 
+### Adaptive Runtime — experimental branch (2026-05-15)
+
+Branch [`feature/adaptive-runtime`](https://github.com/ensamblaTec/neoanvil/tree/feature/adaptive-runtime).
+Not on `develop` yet. Charter at
+[`docs/general/adaptive-runtime-charter.md`](./docs/general/adaptive-runtime-charter.md).
+
+The Speed-First close-out surfaced a self-audit: the agent (Claude
+Opus 4.7) used ~40 % of the 15 MCP tools / 23 `neo_radar` intents
+available, defaulting to `bash` and native `Read` for many operations
+the neo-tools cover better. Auto-fired hooks (BLAST_RADIUS pre-edit,
+certify reminder post-edit, SessionStart BRIEFING) gave a *feeling* of
+following the Ouroboros cycle while ~60 % of the arsenal stayed in
+the box. The adaptive-runtime branch tests whether **pushing** the
+right tool context into the agent at the right moment (vs requiring
+the agent to **pull** it) shifts behavior.
+
+Three layered interventions, sequenced, each measured before the
+next ships:
+
+| # | Feature branch | Scope | Primary metric |
+|---|----------------|-------|----------------|
+| **B1** | [`feature/adaptive-briefing-diff`](https://github.com/ensamblaTec/neoanvil/tree/feature/adaptive-briefing-diff) — **shipped, in measurement** | Extend `briefing.sh` (SessionStart) with a "Tool Discipline Mirror" showing lifetime tool / intent coverage vs canonical inventory + top 5 high-leverage tools never invoked | distinct intents per session: baseline ~8, target ≥10 sustained over 5 sessions |
+| **B2** | `feature/intent-classifier-hints` — *blocked on B1 result* | Add UserPromptSubmit hook that regex-classifies the prompt and injects task-relevant tool hints (HTTP edit → chaos_drill, config field add → backfill rule, etc.) | ratio bash:neo per session: baseline ~12:1, target ≤5:1 |
+| **B3** | `feature/lessons-replay` — *blocked on B1+B2* | At SessionStart, query memex for lessons matching workspace state (open debt, master_plan phase) and inject the top-3 relevant ones | anti-pattern recurrence rate: −50 % |
+| **B4** | *deferred* | Online feedback loop (no online weight update — strictly cache + replay) | TBD |
+
+Each B branches off `feature/adaptive-runtime`, measures with the
+A/B helper at `scripts/b1-measurement.sh`, and only graduates if the
+primary metric moves. If a B fails, that B is discarded; the umbrella
+branch holds the B's that earned their merge.
+
+**Operator workflow is zero-touch.** Snapshotting is automatic via two
+hooks (`SessionStart` runs `b1-snapshot.sh pre` in background;
+`Stop` runs `b1-snapshot.sh post`), so the only knob the operator turns
+between A/B rounds is `export NEO_BRIEFING_DIFF_DISABLE=1` (baseline)
+vs `unset` (treatment). Trajectory is rendered with
+`./scripts/b1-measurement.sh report`. Three-step quickstart:
+[`docs/general/adaptive-runtime-quickstart.md`](./docs/general/adaptive-runtime-quickstart.md);
+full spec: [`docs/general/b1-measurement-protocol.md`](./docs/general/b1-measurement-protocol.md).
+
+*Note for macOS:* the hook chain was silently no-op'd until 2026-05-15
+because the `timeout` binary doesn't exist on macOS by default. The
+hooks now use bounded internal `curl --max-time` plus a portable
+background+kill watchdog instead, which means the mirror and snapshot
+actually fire on Darwin.
+
+In parallel — and shipped to `develop` (not the experimental branch)
+— two warning-only operator-discipline interventions landed:
+
+- `.claude/hooks/pre-read-large-file.sh` (PreToolUse:Read) — warns
+  when the agent invokes `Read` on a file ≥500 lines and suggests
+  `FILE_EXTRACT` / `COMPILE_AUDIT` alternatives with concrete syntax.
+  Operator opt-out: `NEO_READ_HOOK_DISABLE=1`.
+- Directive 58 [TOOL-DISCIPLINE-CHECKLIST] (`.claude/rules/neo-synced-directives.md`) —
+  procedural rule loaded at SessionStart: "BRIEFING + BLAST_RADIUS +
+  certify auto-hooks NO son disciplina completa; ≥3 edit tasks
+  require explicit `READ_SLICE`/`FILE_EXTRACT` for files ≥100L, bash
+  `grep -rn` as last resort, `neo_compress_context` every 3-5 edits,
+  `chaos_drill` after HTTP-surface edits, `COMPILE_AUDIT` before
+  touching unknown packages."
+
+The hook and the directive are **pull** interventions (the agent has
+to read / be warned at trigger time). The adaptive-runtime branch
+moves them toward **push** (always present in context, derived from
+workspace + agent history).
+
 ### Local LLM tool — `neo_local_llm` (ADR-013)
 
 15th MCP tool ships a $0/call complement to the DeepSeek plugin. Routes
