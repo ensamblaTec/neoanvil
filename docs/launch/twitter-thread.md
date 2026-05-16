@@ -78,4 +78,4 @@ Try it: `make docker-up` or `make build && neo setup my-workspace`.
 
 → github.com/ensamblaTec/neoanvil
 
-(About to publish to the official MCP Registry under `io.github.ensamblaTec/neoanvil` — keep an eye on registry.modelcontextprotocol.io)
+(About to publish to the official MCP Registry under `io.github.ensamblatec/neoanvil` — keep an eye on registry.modelcontextprotocol.io)

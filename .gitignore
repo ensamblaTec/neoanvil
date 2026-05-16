@@ -113,3 +113,6 @@ docs/session/SESSION-*.md
 cmd/plugin-jira/plugin-jira
 cmd/plugin-github/plugin-github
 .neo/b1-measurements*.csv
+
+# Launch-flow private notes (account, PAT instructions, etc.)
+docs/launch/.local-notes*

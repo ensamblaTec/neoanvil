@@ -1,8 +1,7 @@
 # Hacker News — Show HN
 
 **URL:** [news.ycombinator.com/submit](https://news.ycombinator.com/submit)
-**Best time:** Mon–Thu 6:30–8:30am Pacific (avoid Friday/weekend)
-**Strategy:** post once, no resubmit. Reply to every top-level comment in first 4h.
+**Strategy:** post once, no resubmit. Reply to every top-level comment in first 4h. (Check HN's recent front page for current timing patterns before submitting.)
 
 ---
 
@@ -64,4 +63,4 @@ Happy to answer questions. The piece I'd most welcome critique on is the OpenAPI
 >
 > 1. The cert seal TTL (15min pair / 5min fast) is configurable in `neo.yaml` under `sre.certify_ttl_minutes` — picked those defaults empirically from how long a typical AI edit-test-fix cycle takes.
 > 2. The `__health__` action on plugin subprocesses uses lock-free atomics so it can't be blocked by an in-flight API call. Pattern is in `cmd/plugin-deepseek/main.go::handleHealth` if anyone wants to crib it.
-> 3. There's a separate MCP Registry submission in flight under `io.github.ensamblaTec/neoanvil`. The registry is in preview (launched Sep 2025), so don't be surprised if direct namespace lookups don't resolve until the publisher CLI run completes.
+> 3. There's a separate MCP Registry submission in flight under `io.github.ensamblatec/neoanvil`. The registry is in preview (launched Sep 2025), so don't be surprised if direct namespace lookups don't resolve until the publisher CLI run completes.

@@ -2,7 +2,7 @@
 
 **Subreddit:** [r/golang/submit](https://www.reddit.com/r/golang/submit)
 **Flair:** show & tell
-**Best time:** Tue/Wed 9–11am ET
+**Best time:** check the subreddit's posting guidelines + recent top-post timestamps before submitting
 
 > ⚠️ r/golang is *not* a marketing sub. Mods enforce the "show & tell" framing strictly. Lead with engineering content, not pitch. If you've not contributed there before, comment on others' threads first for a week.
 

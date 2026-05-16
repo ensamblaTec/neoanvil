@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.ensamblaTec/neoanvil",
+  "name": "io.github.ensamblatec/neoanvil",
   "title": "NeoAnvil",
   "description": "MCP server & SRE orchestrator for AI-assisted coding. Pure-Go multi-workspace dispatcher with Code Property Graph, HNSW vector search, lifecycle hooks (BRIEFING → BLAST_RADIUS → Edit → certify), and a transactional code-mutation pipeline that AST-validates and shadow-compiles every change before a time-limited certification seal.",
-  "version": "0.10.6",
+  "version": "0.1.0",
   "repository": {
     "url": "https://github.com/ensamblaTec/neoanvil",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "oci",
       "registryBaseUrl": "https://ghcr.io",
       "identifier": "ensamblatec/neoanvil",
-      "version": "0.10.6",
+      "version": "0.1.0",
       "transport": {
         "type": "sse",
         "url": "http://127.0.0.1:9000/mcp/sse"
@@ -22,7 +22,7 @@
     }
   ],
   "_meta": {
-    "io.github.ensamblaTec/neoanvil": {
+    "io.github.ensamblatec/neoanvil": {
       "tools_count": 14,
       "operations_count": 60,
       "language": "go",

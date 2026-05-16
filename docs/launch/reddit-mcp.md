@@ -2,7 +2,7 @@
 
 **Subreddit:** [r/mcp/submit](https://www.reddit.com/r/mcp/submit)
 **Flair:** Project | Server
-**Best time:** Tue/Wed 9–11am ET
+**Best time:** check the subreddit's posting guidelines + recent top-post timestamps before submitting
 
 ---
 
@@ -69,7 +69,7 @@ Plus 3 plugin servers (Jira/DeepSeek/GitHub), each in its own subprocess with a 
 
 - 100% staticcheck clean
 - audit-baseline tracked in repo (`.neo/audit-baseline.txt`)
-- About to publish to the official MCP Registry under `io.github.ensamblaTec/neoanvil`
+- About to publish to the official MCP Registry under `io.github.ensamblatec/neoanvil`
 
 Repo: <https://github.com/ensamblaTec/neoanvil>
 

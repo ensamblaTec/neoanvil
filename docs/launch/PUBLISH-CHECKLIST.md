@@ -25,7 +25,7 @@ Local state: on branch `develop`, working tree clean, **nothing on remote yet fo
 ```bash
 ! gh auth login
 # Choose: GitHub.com → SSH → existing key → browser auth
-# Account: ensamblaTec  (email net.git.ketza@gmail.com)
+# (See docs/launch/.local-notes.md for the GitHub account/email this repo uses — gitignored.)
 ```
 
 ### 1.2 Push develop (brings the 12 merged commits to origin)
@@ -73,7 +73,32 @@ brew install mcp-publisher
 mcp-publisher --help
 ```
 
-### 2.2 Place `server.json` at repo root
+### 2.2 Tag the release
+
+The manifest declares `version: "0.1.0"` — that needs a real git tag:
+
+```bash
+git checkout main
+git tag -a v0.1.0 -m "Initial public release — MCP Registry submission"
+git push origin v0.1.0
+```
+
+### 2.3 Build + push the OCI image (server.json declares an OCI package)
+
+```bash
+docker login ghcr.io -u ensamblaTec
+# (or use a PAT with packages:write scope)
+
+# Build the multi-arch image (amd64 + arm64) and push
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/ensamblatec/neoanvil:0.1.0 \
+  -t ghcr.io/ensamblatec/neoanvil:latest \
+  --push .
+```
+
+Verify: `curl -s -o /dev/null -w "%{http_code}\n" https://ghcr.io/v2/ensamblatec/neoanvil/manifests/0.1.0` should return 401 (registry exists, auth required for private). After making the package public via the GitHub UI (Settings → Packages → ensamblatec/neoanvil → Change visibility → Public), it returns 200.
+
+### 2.4 Place `server.json` at repo root
 
 The manifest is drafted at [`server.json`](./server.json). Copy it to repo root:
 
@@ -83,7 +108,7 @@ git add server.json && git commit -m "feat(launch): MCP Registry manifest (serve
 git push origin main
 ```
 
-### 2.3 Login + publish
+### 2.5 Login + publish
 
 ```bash
 mcp-publisher login github
@@ -92,12 +117,12 @@ mcp-publisher login github
 
 mcp-publisher publish
 # Reads ./server.json, validates schema, publishes under
-# namespace io.github.ensamblaTec/neoanvil
+# namespace io.github.ensamblatec/neoanvil
 ```
 
-### 2.4 Verify
+### 2.6 Verify
 
-[https://registry.modelcontextprotocol.io/v0/servers/io.github.ensamblaTec/neoanvil](https://registry.modelcontextprotocol.io/v0/servers/io.github.ensamblaTec/neoanvil)
+[https://registry.modelcontextprotocol.io/v0/servers/io.github.ensamblatec/neoanvil](https://registry.modelcontextprotocol.io/v0/servers/io.github.ensamblatec/neoanvil)
 
 ---
 
@@ -171,13 +196,13 @@ Smithery + Glama typically pick up automatically once you're listed in awesome-m
 1. `gh auth login` (one-time)
 2. Push develop → origin
 3. Open + merge PR develop→main
-4. Add `server.json` to main, push
-5. `mcp-publisher publish` → registers under `io.github.ensamblaTec/neoanvil`
-6. Fork awesome-mcp-servers → PR (waits for review, can take days)
-7. **Wait 24h** before community posts — gives Smithery/Glama time to auto-index from registry, so posts include working "list me on…" badges
-8. Reddit posts on a Tuesday/Wednesday 9am-11am ET (best engagement window per r/LocalLLaMA mods)
-9. HN Show on a weekday morning (Pacific) — single post, no resubmit
-10. Discord + Twitter same day as Reddit
+4. Tag `v0.1.0` on main, push tag
+5. Build + push OCI image to `ghcr.io/ensamblatec/neoanvil:0.1.0` (make package public)
+6. Add `server.json` to main, push
+7. `mcp-publisher publish` → registers under `io.github.ensamblatec/neoanvil`
+8. Fork awesome-mcp-servers → PR (waits for review, can take days)
+9. **Wait 24h** before community posts — gives Smithery/Glama time to auto-index from registry
+10. Reddit + HN + Discord + Twitter (check each platform's recent post timing patterns before submitting)
 
 ---
 
@@ -185,7 +210,7 @@ Smithery + Glama typically pick up automatically once you're listed in awesome-m
 
 - Don't crosspost the same wording across all subs in 1 hour — Reddit's anti-spam flags it
 - Each draft is **subtly customized** for its audience (LocalLLaMA → local-first emphasis; ClaudeAI → Claude integration; mcp → protocol mechanics)
-- Reply to comments in first 4h — top engagement window
+- Reply to comments while attention is high
 - Don't link-drop in unrelated subs (r/programming, etc.) — it backfires
 
 ---

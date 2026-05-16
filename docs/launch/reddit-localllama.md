@@ -2,7 +2,7 @@
 
 **Subreddit:** [r/LocalLLaMA/submit](https://www.reddit.com/r/LocalLLaMA/submit)
 **Flair:** Resources (or Tutorial | Tools)
-**Best time:** Tue/Wed 9–11am ET
+**Best time:** check the subreddit's posting guidelines + recent top-post timestamps before submitting
 
 ---
 

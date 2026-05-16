@@ -9,7 +9,7 @@ Short copy-paste blocks for chat-based channels. Long-form should link to the re
 **Channel suggestion:** `#showcase` or `#servers`
 
 ```
-🛠️ Just shipped NeoAnvil v0.10.6 — pure-Go MCP server with 14 tools (BRIEFING, BLAST_RADIUS, SEMANTIC_CODE, AST_AUDIT, GRAPH_WALK, …), multi-workspace SSE dispatcher, Code Property Graph + HNSW RAG, and a certify-on-edit pipeline that gates every AI mutation through AST + shadow-compile + test-impact before it can touch a commit.
+🛠️ Just shipped NeoAnvil v0.1.0 — pure-Go MCP server with 14 tools (BRIEFING, BLAST_RADIUS, SEMANTIC_CODE, AST_AUDIT, GRAPH_WALK, …), multi-workspace SSE dispatcher, Code Property Graph + HNSW RAG, and a certify-on-edit pipeline that gates every AI mutation through AST + shadow-compile + test-impact before it can touch a commit.
 
 Plugins for Jira / DeepSeek / GitHub. OpenAPI surface at /openapi.json. OTel traceparent propagation across the Nexus → worker boundary.
 

@@ -2,7 +2,7 @@
 
 **Subreddit:** [r/ClaudeAI/submit](https://www.reddit.com/r/ClaudeAI/submit)
 **Flair:** Coding (or Tools | Showcase)
-**Best time:** Tue/Wed 9–11am ET
+**Best time:** check the subreddit's posting guidelines + recent top-post timestamps before submitting
 
 ---
 
