@@ -1,0 +1,45 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ensamblaTec/neoanvil",
+  "title": "NeoAnvil",
+  "description": "MCP server & SRE orchestrator for AI-assisted coding. Pure-Go multi-workspace dispatcher with Code Property Graph, HNSW vector search, lifecycle hooks (BRIEFING → BLAST_RADIUS → Edit → certify), and a transactional code-mutation pipeline that AST-validates and shadow-compiles every change before a time-limited certification seal.",
+  "version": "0.10.6",
+  "repository": {
+    "url": "https://github.com/ensamblaTec/neoanvil",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/ensamblaTec/neoanvil",
+  "packages": [
+    {
+      "registryType": "oci",
+      "registryBaseUrl": "https://ghcr.io",
+      "identifier": "ensamblatec/neoanvil",
+      "version": "0.10.6",
+      "transport": {
+        "type": "sse",
+        "url": "http://127.0.0.1:9000/mcp/sse"
+      }
+    }
+  ],
+  "_meta": {
+    "io.github.ensamblaTec/neoanvil": {
+      "tools_count": 14,
+      "operations_count": 60,
+      "language": "go",
+      "build": "pure-go-native + cgo-docker-stage-3",
+      "license": "MIT",
+      "highlights": [
+        "23 radar intents (BRIEFING, BLAST_RADIUS, SEMANTIC_CODE, AST_AUDIT, GRAPH_WALK, etc.)",
+        "Multi-workspace dispatcher (Neo-Nexus)",
+        "Code Property Graph with SSA-based call graph + PageRank",
+        "HNSW vector index with binary quantization",
+        "3-layer cache (Query 54ns, Text 33ns, Embedding)",
+        "Plugin subsystem: Jira Cloud, DeepSeek, GitHub",
+        "OpenAPI 3.0 surface + Swagger UI",
+        "OpenTelemetry W3C traceparent propagation",
+        "Slack + Discord webhook notifications",
+        "Local-first (Ollama integration)"
+      ]
+    }
+  }
+}
