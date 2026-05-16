@@ -30,6 +30,19 @@ NeoAnvil is a **Model Context Protocol (MCP) server** written in pure Go that pr
 - **Pure Go native build** — cross-compiles to linux/darwin × amd64/arm64 with SIMD auto-vectorization via GOAMD64/GOARM64. Docker stage 3 enables CGO for tree-sitter parsers (gcc + musl-dev)
 - **Operator HUD** — real-time dashboard with SSE event bus (21 event types)
 
+## Requirements
+
+| Component | Required | Notes |
+|---|---|---|
+| **Go** | 1.26+ | Only for the native build path. Docker path doesn't need Go on the host. |
+| **OS** | macOS · Linux · Windows | Native build runs on macOS + Linux. Windows is supported through Docker or WSL2. |
+| **CPU** | x86-64 (v3+) or ARM64 | Pure-Go native build cross-compiles. Docker images ship for both `linux/amd64` and `linux/arm64`. |
+| **RAM** | 4 GB minimum / 8 GB recommended | HNSW vector index + Code Property Graph live in memory. RAPL thermal guard throttles above 60W on supported hardware. |
+| **Disk** | ~500 MB for binaries + workspace state | Per-workspace `.neo/db/` typically 50–300 MB after first ingest. |
+| **Ollama** | optional | Required only if you want local embeddings (`nomic-embed-text`) and/or local LLM routing (`qwen2.5-coder:7b`). |
+| **Docker** | optional | Required only for Path A. Compose v2 syntax. |
+| **MCP client** | required | Claude Desktop, Claude Code CLI, Cursor, Continue, Cline, Windsurf, or any other MCP-compatible client. See [Connect from your AI client](#connect-from-your-ai-client). |
+
 ## Quick Start
 
 NeoAnvil supports two parallel deployment paths. Pick one:
@@ -86,6 +99,89 @@ curl http://127.0.0.1:9000/status
 `neo setup` (Area 1.2) generates `neo.yaml` + `.mcp.json` with sensible
 defaults; flags include `--bare`, `--with-ollama`, `--docker`, `--yes`
 (non-interactive CI).
+
+## Connect from your AI client
+
+NeoAnvil exposes MCP over **SSE** at `http://127.0.0.1:9000/mcp/sse` (the Neo-Nexus dispatcher). Most modern MCP clients accept an SSE URL directly. The server runs entirely on localhost — no authentication, no outbound calls.
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "neoanvil": {
+      "url": "http://127.0.0.1:9000/mcp/sse"
+    }
+  }
+}
+```
+
+Restart Claude Desktop. NeoAnvil tools appear in the tool picker.
+
+### Claude Code (CLI)
+
+```bash
+claude mcp add --transport sse neoanvil http://127.0.0.1:9000/mcp/sse
+```
+
+Verify with `claude mcp list`. The 14 NeoAnvil tools (prefixed `mcp__neoanvil__*`) become available in every new Claude Code session.
+
+For the full lifecycle-hooks experience (auto-BRIEFING, pre-edit BLAST_RADIUS, post-edit certify gating), also copy `.claude/hooks/*.sh` and `.claude/settings.json` from this repo — see [`docs/guide/neo-doctrine-migration-guide.md`](./docs/guide/neo-doctrine-migration-guide.md).
+
+### Cursor
+
+Edit `.cursor/mcp.json` (workspace) or `~/.cursor/mcp.json` (user-global):
+
+```json
+{
+  "mcpServers": {
+    "neoanvil": {
+      "url": "http://127.0.0.1:9000/mcp/sse"
+    }
+  }
+}
+```
+
+Reload the Cursor window. Settings → MCP shows NeoAnvil as connected.
+
+### Continue / Cline / Windsurf
+
+These accept the same `mcpServers` shape. Drop the snippet above into the client's MCP config file (consult each client's docs for the path):
+
+| Client | Config path |
+|---|---|
+| Continue | `~/.continue/config.json` → `experimental.modelContextProtocolServers` |
+| Cline | VS Code settings → `cline.mcpServers` |
+| Windsurf | Cascade → MCP servers panel |
+
+### Environment variables (optional)
+
+NeoAnvil reads no env vars from the AI client. Server-side configuration lives in `neo.yaml` and `.neo/.env` (gitignored). The most common overrides:
+
+| Variable | Purpose |
+|---|---|
+| `NEO_SERVER_MODE` | `pair` (default, full cert pipeline) · `fast` (AST + index only, 80ms edits) · `daemon` (autonomous, RAPL-guarded) |
+| `NEO_CERTIFY_BYPASS=1` | One-off escape hatch when upstream tooling rejects a valid file (tree-sitter parser glitch, etc.). Use sparingly. |
+| `NEO_RAPL_OVERRIDE_WATTS` | Override the thermal throttle ceiling on hardware where the default 60W is too aggressive. |
+| `OLLAMA_EMBED_HOST` | Embedding endpoint (default `http://127.0.0.1:11435`). |
+| `SERVER_PROD_DSN` | Postgres DSN for the `DB_SCHEMA` radar intent. Optional — only needed if you query your own databases through NeoAnvil. |
+
+Plugin credentials (Jira, GitHub, DeepSeek) live in `~/.neo/credentials.json` and are injected per-subprocess at spawn — never visible to the AI client.
+
+### Verify it's working
+
+```bash
+# Server is up
+curl http://127.0.0.1:9000/status
+
+# Tool registry
+curl http://127.0.0.1:9000/openapi.json | jq '.["x-mcp-tools"] | length'
+
+# Operator HUD
+open http://127.0.0.1:8087
+```
 
 ## Architecture
 
