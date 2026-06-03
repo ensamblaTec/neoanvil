@@ -95,7 +95,11 @@ func initPlannerAndSubsystems(workspace string, cfg *config.NeoConfig) {
 	// lifetime of the process — neo-mcp is long-running so the leak
 	// is intentional. Failures are logged + skipped.
 	go runPairAuditReaper()
-	listnr := integrations.NewSREListener(fmt.Sprintf(":%d", cfg.Server.SREListenerPort), func(payload string) {
+	// [LEY-SEGURIDAD] Bind loopback-only: the SRE incident listener accepts raw
+	// TCP payloads that enqueue tasks into BoltDB, so it must never be reachable
+	// from the LAN. Hardcoded 127.0.0.1 (like the diagnostics server below) — it
+	// stays loopback even if an operator opens Server.Host for federation.
+	listnr := integrations.NewSREListener(fmt.Sprintf("127.0.0.1:%d", cfg.Server.SREListenerPort), func(payload string) {
 		taskDesc := "[SRE INCIDENT] Responder a alarma externa: " + payload
 		state.EnqueueTasks([]state.SRETask{
 			{Description: taskDesc, TargetFile: "GLOBAL SRE CONTEXT"},

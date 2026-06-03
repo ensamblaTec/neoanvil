@@ -641,7 +641,10 @@ func defaultNeoConfig() *NeoConfig {
 // applyServerDefaults backfills Server, Integrations, SRE.AutoVacuumInterval and Storage.Engine fields.
 func applyServerDefaults(cfg *NeoConfig, ns *bool) {
 	if cfg.Server.Host == "" {
-		cfg.Server.Host = "0.0.0.0"
+		// [LEY-SEGURIDAD] Default to loopback, never the wildcard. An empty host
+		// must not silently bind every interface. Operators that genuinely need
+		// LAN federation set server.host explicitly in neo.yaml.
+		cfg.Server.Host = "127.0.0.1"
 		*ns = true
 	}
 	if cfg.Server.SandboxPort == 0 {
