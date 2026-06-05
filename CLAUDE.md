@@ -43,7 +43,7 @@ Motor SRE de orquestación MCP. **Ouroboros V10.6** · 15 tools MCP · 3 plugins
 - **Workspace registry:** `~/.neo/workspaces.json`. Migración: `workspaces.json` + `.neo/db/{brain,hnsw,cpg}.{db,bin}` + `~/.neo/credentials.json`.
 - **Tier ownership** (workspace → project → org → nexus): [`docs/general/tier-ownership.md`](./docs/general/tier-ownership.md). bbolt no soporta mixed RW+RO — cada tier tiene leader único.
 - **Nexus dispatcher** (multi-workspace MCP proxy): config `~/.neo/nexus.yaml`. Routing por `target_workspace > URL path > X-Neo-Workspace header > active workspace`. HUD: `http://127.0.0.1:8087/`.
-- **Seguridad de red + acceso remoto** (loopback-only, túnel SSH, alcance del `auth_token`, runbook de testeo): [`docs/guide/network-security-remote-access.md`](./docs/guide/network-security-remote-access.md).
+- **Seguridad de red + acceso remoto** (loopback-only, túnel SSH, alcance del `auth_token`, runbook de testeo): [`docs/guide/network-security-remote-access.md`](./docs/guide/network-security-remote-access.md). Conectar Claude Code remoto por SSH (modelos terminal-over-SSH vs túnel, autorizar PC, arrancar NeoAnvil): [`docs/guide/connect-remote-claude.md`](./docs/guide/connect-remote-claude.md).
 
 ## Convenciones
 
